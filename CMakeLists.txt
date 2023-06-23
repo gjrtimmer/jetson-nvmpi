@@ -18,9 +18,6 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Wno-unused-value -fPIC")
 set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-rpath-link=/usr/lib/aarch64-linux-gnu/tegra")
 set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-rpath-link=/usr/local/cuda/lib64")
 
-find_library(LIB_NVBUF nvbuf_utils PATHS /usr/lib/aarch64-linux-gnu/tegra)
-find_library(LIB_V4L2 nvv4l2 PATHS /usr/lib/aarch64-linux-gnu/tegra)
-find_library(LIB_NVJPEG nvjpeg PATHS /usr/lib/aarch64-linux-gnu/tegra)
 find_package (Threads)
 
 set(NVMPI_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -46,17 +43,16 @@ set(NVMPI_SRC
     ${JETSON_MULTIMEDIA_API_SRC_DIR}/NvV4l2ElementPlane.cpp
     ${JETSON_MULTIMEDIA_API_SRC_DIR}/NvVideoDecoder.cpp
     ${JETSON_MULTIMEDIA_API_SRC_DIR}/NvVideoEncoder.cpp)
-    
-set(NVMPI_DEP_LIBS ${CMAKE_THREAD_LIBS_INIT} ${LIB_NVBUF} ${LIB_V4L2} ${LIB_NVJPEG})
+
+# Use plain library names to allow stubbing
+set(NVMPI_DEP_LIBS ${CMAKE_THREAD_LIBS_INIT} nvv4l2 nvbuf_utils)
 
 #if NvUtils API is present prefer it to nvbuf_utils 
 if(EXISTS "/usr/src/jetson_multimedia_api/include/nvbufsurface.h")
 	add_definitions(-DWITH_NVUTILS)
-	find_library(LIB_NVBUFSURFACE nvbufsurface PATHS /usr/lib/aarch64-linux-gnu/tegra)
-	find_library(LIB_NVBUFSURFTRANSFORM nvbufsurftransform PATHS /usr/lib/aarch64-linux-gnu/tegra)
 	set(NVMPI_SRC ${NVMPI_SRC}
 		/usr/src/jetson_multimedia_api/samples/common/classes/NvBufSurface.cpp)
-	set(NVMPI_DEP_LIBS ${NVMPI_DEP_LIBS} ${LIB_NVBUFSURFACE} ${LIB_NVBUFSURFTRANSFORM})
+	set(NVMPI_DEP_LIBS ${NVMPI_DEP_LIBS} nvbufsurface nvbufsurftransform)
 endif()
 
 add_library(nvmpi SHARED ${NVMPI_SRC})
@@ -67,6 +63,7 @@ set_target_properties(nvmpi PROPERTIES VERSION ${PROJECT_VERSION})
 set_target_properties(nvmpi PROPERTIES SOVERSION 1)
 set_target_properties(nvmpi nvmpi_static PROPERTIES PUBLIC_HEADER ${NVMPI_PUBLIC_HEADER})
 set_target_properties(nvmpi PROPERTIES LINK_FLAGS "-Wl,--no-as-needed")
+target_link_directories(nvmpi PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/stubs)
 target_link_libraries(nvmpi PRIVATE ${NVMPI_DEP_LIBS})
 target_include_directories(nvmpi PRIVATE ${NVMPI_INCLUDE_DIRS})
 target_include_directories(nvmpi_static PRIVATE ${NVMPI_INCLUDE_DIRS})
