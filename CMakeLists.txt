@@ -45,7 +45,7 @@ set(NVMPI_SRC
     ${JETSON_MULTIMEDIA_API_SRC_DIR}/NvVideoEncoder.cpp)
 
 # Use plain library names to allow stubbing
-set(NVMPI_DEP_LIBS ${CMAKE_THREAD_LIBS_INIT} nvv4l2 nvbuf_utils)
+set(NVMPI_DEP_LIBS ${CMAKE_THREAD_LIBS_INIT} nvv4l2 nvbuf_utils nvjpeg)
 
 #if NvUtils API is present prefer it to nvbuf_utils 
 if(EXISTS "/usr/src/jetson_multimedia_api/include/nvbufsurface.h")
