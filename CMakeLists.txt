@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.9)
 project(nvmpi VERSION 1.0.0 DESCRIPTION "nvidia multimedia api")
 
+set(JETSON_MULTIMEDIA_LIB_DIR_DEFAULT "/usr/lib/aarch64-linux-gnu/tegra")
+
 option(WITH_STUBS "Build nvmpi library and link stubs instead of original libs" OFF)
 option(JETSON_MULTIMEDIA_API_DIR "Path to Jetson Multimedia API headers and common sources directory")
 option(JETSON_MULTIMEDIA_LIB_DIR "Path to Jetson Multimedia libs directory")
@@ -23,7 +25,7 @@ if(WITH_STUBS AND NOT JETSON_MULTIMEDIA_LIB_DIR)
 endif()
 
 if(NOT JETSON_MULTIMEDIA_LIB_DIR)
-	set(JETSON_MULTIMEDIA_LIB_DIR "/usr/lib/aarch64-linux-gnu/tegra")
+	set(JETSON_MULTIMEDIA_LIB_DIR "${JETSON_MULTIMEDIA_LIB_DIR_DEFAULT}")
 endif()
 
 if(NOT CUDA_INCLUDE_DIR)
@@ -37,10 +39,15 @@ endif()
 set(OPT_FLAGS "-Ofast -march=native")
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OPT_FLAGS}")
 #set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OPT_FLAGS}")
+#set(NVMPI_LIB_RUNPATH "${CUDA_LIB_DIR}:${JETSON_MULTIMEDIA_LIB_DIR_DEFAULT}")
+#if(NOT "${JETSON_MULTIMEDIA_LIB_DIR}" STREQUAL "${JETSON_MULTIMEDIA_LIB_DIR_DEFAULT}")
+#	set(NVMPI_LIB_RUNPATH "${NVMPI_LIB_RUNPATH}:${JETSON_MULTIMEDIA_LIB_DIR}")
+#endif()
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wno-unused-value -fPIC")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Wno-unused-value -fPIC")
 
+set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-rpath=${JETSON_MULTIMEDIA_LIB_DIR_DEFAULT}")
 set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-rpath-link=${JETSON_MULTIMEDIA_LIB_DIR}")
 set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-rpath-link=${CUDA_LIB_DIR}")
 
@@ -74,7 +81,7 @@ set(NVMPI_SRC
 set(NVMPI_DEP_LIBS ${CMAKE_THREAD_LIBS_INIT} ${LIB_V4L2} ${LIB_NVJPEG})
 
 #if NvUtils API is present prefer it to nvbuf_utils 
-if(EXISTS "${JETSON_MULTIMEDIA_API_DIR}/nvbufsurface.h")
+if(EXISTS "${JETSON_MULTIMEDIA_API_INCLUDE_DIR}/nvbufsurface.h")
 	add_definitions(-DWITH_NVUTILS)
 	find_library(LIB_NVBUFSURFACE nvbufsurface PATHS "${JETSON_MULTIMEDIA_LIB_DIR}")
 	find_library(LIB_NVBUFSURFTRANSFORM nvbufsurftransform PATHS "${JETSON_MULTIMEDIA_LIB_DIR}")
