@@ -1,12 +1,43 @@
 cmake_minimum_required(VERSION 3.9)
 project(nvmpi VERSION 1.0.0 DESCRIPTION "nvidia multimedia api")
 
+set(JETSON_MULTIMEDIA_API_DIR_DEFAULT "/usr/src/jetson_multimedia_api")
+set(JETSON_MULTIMEDIA_LIB_DIR_DEFAULT "/usr/lib/aarch64-linux-gnu/tegra")
+set(CUDA_INCLUDE_DIR_DEFAULT "/usr/local/cuda/include")
+set(CUDA_LIB_DIR_DEFAULT "/usr/local/cuda/lib64")
+
+option(WITH_STUBS "Build nvmpi library and link stubs instead of original libraries. Default: OFF." OFF)
+option(JETSON_MULTIMEDIA_API_DIR "Path to Jetson Multimedia API headers and common sources directory. Default: ${JETSON_MULTIMEDIA_API_DIR_DEFAULT}.")
+option(JETSON_MULTIMEDIA_LIB_DIR "Path to Jetson Multimedia libraries directory. Default: ${JETSON_MULTIMEDIA_LIB_DIR_DEFAULT}.")
+option(CUDA_INCLUDE_DIR "Path to CUDA headers directory. Default: ${CUDA_INCLUDE_DIR_DEFAULT}.")
+option(CUDA_LIB_DIR "Path to CUDA libraries directory. Default: ${CUDA_LIB_DIR_DEFAULT}.")
+
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED on)
+
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-set(CMAKE_CXX_STANDARD 11)
-set(CMAKE_CXX_STANDARD_REQUIRED on)
+if(NOT JETSON_MULTIMEDIA_API_DIR)
+	set(JETSON_MULTIMEDIA_API_DIR "${JETSON_MULTIMEDIA_API_DIR_DEFAULT}")
+endif()
+
+if(WITH_STUBS AND NOT JETSON_MULTIMEDIA_LIB_DIR)
+	set(JETSON_MULTIMEDIA_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/stubs")
+endif()
+
+if(NOT JETSON_MULTIMEDIA_LIB_DIR)
+	set(JETSON_MULTIMEDIA_LIB_DIR "${JETSON_MULTIMEDIA_LIB_DIR_DEFAULT}")
+endif()
+
+if(NOT CUDA_INCLUDE_DIR)
+	set(CUDA_INCLUDE_DIR "${CUDA_INCLUDE_DIR_DEFAULT}")
+endif()
+
+if(NOT CUDA_LIB_DIR)
+	set(CUDA_LIB_DIR "${CUDA_LIB_DIR_DEFAULT}")
+endif()
 
 set(OPT_FLAGS "-Ofast -march=native")
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OPT_FLAGS}")
@@ -15,17 +46,15 @@ set(OPT_FLAGS "-Ofast -march=native")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wno-unused-value -fPIC")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Wno-unused-value -fPIC")
 
-set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-rpath-link=/usr/lib/aarch64-linux-gnu/tegra")
-set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-rpath-link=/usr/local/cuda/lib64")
+set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-rpath-link=${JETSON_MULTIMEDIA_LIB_DIR}")
+set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-rpath-link=${CUDA_LIB_DIR}")
 
-find_library(LIB_V4L2 nvv4l2 PATHS /usr/lib/aarch64-linux-gnu/tegra)
-find_library(LIB_NVJPEG nvjpeg PATHS /usr/lib/aarch64-linux-gnu/tegra)
+find_library(LIB_V4L2 nvv4l2 PATHS "${JETSON_MULTIMEDIA_LIB_DIR}")
+find_library(LIB_NVJPEG nvjpeg PATHS "${JETSON_MULTIMEDIA_LIB_DIR}")
 find_package (Threads)
 
 set(NVMPI_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set(NVMPI_PUBLIC_HEADER "${NVMPI_INCLUDE_DIR}/nvmpi.h")
-set(CUDA_INCLUDE_DIR "/usr/local/cuda/include")
-set(JETSON_MULTIMEDIA_API_DIR "/usr/src/jetson_multimedia_api")
 set(JETSON_MULTIMEDIA_API_INCLUDE_DIR "${JETSON_MULTIMEDIA_API_DIR}/include")
 set(JETSON_MULTIMEDIA_API_SRC_DIR "${JETSON_MULTIMEDIA_API_DIR}/samples/common/classes")
 
@@ -50,16 +79,16 @@ set(NVMPI_SRC
 set(NVMPI_DEP_LIBS ${CMAKE_THREAD_LIBS_INIT} ${LIB_V4L2} ${LIB_NVJPEG})
 
 #if NvUtils API is present prefer it to nvbuf_utils 
-if(EXISTS "${JETSON_MULTIMEDIA_API_DIR}/nvbufsurface.h")
+if(EXISTS "${JETSON_MULTIMEDIA_API_INCLUDE_DIR}/nvbufsurface.h")
 	add_definitions(-DWITH_NVUTILS)
-	find_library(LIB_NVBUFSURFACE nvbufsurface PATHS /usr/lib/aarch64-linux-gnu/tegra)
-	find_library(LIB_NVBUFSURFTRANSFORM nvbufsurftransform PATHS /usr/lib/aarch64-linux-gnu/tegra)
+	find_library(LIB_NVBUFSURFACE nvbufsurface PATHS "${JETSON_MULTIMEDIA_LIB_DIR}")
+	find_library(LIB_NVBUFSURFTRANSFORM nvbufsurftransform PATHS "${JETSON_MULTIMEDIA_LIB_DIR}")
 	set(NVMPI_SRC ${NVMPI_SRC}
 		${JETSON_MULTIMEDIA_API_SRC_DIR}/NvBufSurface.cpp)
 	set(NVMPI_DEP_LIBS ${NVMPI_DEP_LIBS} ${LIB_NVBUFSURFACE} ${LIB_NVBUFSURFTRANSFORM})
 	message(STATUS "Using NvUtils API.")
 else ()
-	find_library(LIB_NVBUF nvbuf_utils PATHS /usr/lib/aarch64-linux-gnu/tegra)
+	find_library(LIB_NVBUF nvbuf_utils PATHS "${JETSON_MULTIMEDIA_LIB_DIR}")
 	set(NVMPI_DEP_LIBS ${NVMPI_DEP_LIBS} ${LIB_NVBUF})
 	message(STATUS "Using NvBufUtils API.")
 endif()
