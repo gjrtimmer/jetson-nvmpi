@@ -13,6 +13,21 @@ typedef enum {
 	NV_PIX_YUV420
 }nvPixFormat;
 
+typedef enum {
+	NV_VIDEO_CodingUnused,
+	NV_VIDEO_CodingH264,             /**< H.264 */
+	NV_VIDEO_CodingMPEG4,              /**< MPEG-4 */
+	NV_VIDEO_CodingMPEG2,              /**< MPEG-2 */
+	NV_VIDEO_CodingVP8,                /**< VP8 */
+	NV_VIDEO_CodingVP9,                /**< VP9 */
+	NV_VIDEO_CodingHEVC,               /**< H.265/HEVC */
+} nvCodingType;
+
+typedef struct _NVSIZE{
+	unsigned int width;
+	unsigned int height;
+}nvSize;
+
 typedef struct _NVENCPARAM{
 	unsigned int width;
 	unsigned int height;
@@ -34,8 +49,15 @@ typedef struct _NVENCPARAM{
 	unsigned int qmin;
 	unsigned int hw_preset_type;
 	unsigned int vbv_buffer_size; //virtual buffer size of the encoder
-	
+	nvCodingType codingType;
 } nvEncParam;
+
+typedef struct _NVDECPARAM{
+	int frame_pool_size;
+	nvCodingType codingType;
+	nvPixFormat pixFormat;
+	nvSize resized;
+} nvDecParam;
 
 typedef struct _NVPACKET{
 	unsigned long flags;
@@ -57,43 +79,27 @@ typedef struct _NVFRAME{
 	time_t timestamp;
 }nvFrame;
 
-typedef struct _NVSIZE{
-	unsigned int width;
-	unsigned int height;
-}nvSize;
-
-
-typedef enum {
-	NV_VIDEO_CodingUnused,
-	NV_VIDEO_CodingH264,             /**< H.264 */
-	NV_VIDEO_CodingMPEG4,              /**< MPEG-4 */
-	NV_VIDEO_CodingMPEG2,              /**< MPEG-2 */
-	NV_VIDEO_CodingVP8,                /**< VP8 */
-	NV_VIDEO_CodingVP9,                /**< VP9 */
-	NV_VIDEO_CodingHEVC,               /**< H.265/HEVC */
-} nvCodingType;
-
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-	nvmpictx* nvmpi_create_decoder(nvCodingType codingType,nvPixFormat pixFormat, nvSize resized);
+	nvmpictx* nvmpi_create_decoder(nvDecParam* param);
 
-	int nvmpi_decoder_put_packet(nvmpictx* ctx,nvPacket* packet);
+	int nvmpi_decoder_put_packet(nvmpictx* ctx, nvPacket* packet);
 
-	int nvmpi_decoder_get_frame(nvmpictx* ctx,nvFrame* frame,bool wait);
+	int nvmpi_decoder_get_frame(nvmpictx* ctx, nvFrame* frame,bool wait);
 
 	int nvmpi_decoder_close(nvmpictx* ctx);
 
-	nvmpictx* nvmpi_create_encoder(nvCodingType codingType,nvEncParam * param);
+	nvmpictx* nvmpi_create_encoder(nvEncParam* param);
 	//add frame to encoder
-	int nvmpi_encoder_put_frame(nvmpictx* ctx,nvFrame* frame);
+	int nvmpi_encoder_put_frame(nvmpictx* ctx, nvFrame* frame);
 	//get filled packet from encoder
-	int nvmpi_encoder_get_packet(nvmpictx* ctx,nvPacket** packet);
+	int nvmpi_encoder_get_packet(nvmpictx* ctx, nvPacket** packet);
 	//get empty packet with allocated buffer from encoder packet pool
-	int nvmpi_encoder_dqEmptyPacket(nvmpictx* ctx,nvPacket** packet);
+	int nvmpi_encoder_dqEmptyPacket(nvmpictx* ctx, nvPacket** packet);
 	//add empty packet with allocated buffer  to  encoder packet pool
-	void nvmpi_encoder_qEmptyPacket(nvmpictx* ctx,nvPacket* packet);
+	void nvmpi_encoder_qEmptyPacket(nvmpictx* ctx, nvPacket* packet);
 	//close encoder
 	int nvmpi_encoder_close(nvmpictx* ctx);
 
