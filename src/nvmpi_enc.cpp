@@ -70,7 +70,7 @@ static bool encoder_capture_plane_dq_callback(struct v4l2_buffer *v4l2_buf, NvBu
 	if (buffer->planes[0].bytesused == 0)
 	{
 		ctx->capPlaneGotEOS = true;
-		cout << "Got 0 size buffer in capture \n";
+		//cout << "Got 0 size buffer in capture \n"; //TODO  log it
 		return false;
 	}
 	
@@ -187,7 +187,7 @@ static int setup_output_dmabuf(nvmpictx *ctx, uint32_t num_buffers )
 */
 
 
-nvmpictx* nvmpi_create_encoder(nvCodingType codingType,nvEncParam * param)
+nvmpictx* nvmpi_create_encoder(nvEncParam* param)
 {
 	int ret;
 	log_level = LOG_LEVEL_INFO;
@@ -286,7 +286,8 @@ nvmpictx* nvmpi_create_encoder(nvCodingType codingType,nvEncParam * param)
 			break;	
 	}
 
-	switch(param->hw_preset_type){
+	switch(param->hw_preset_type)
+	{
 		case 1:
 			ctx->hw_preset_type = V4L2_ENC_HW_PRESET_ULTRAFAST;
 			break;
@@ -310,9 +311,11 @@ nvmpictx* nvmpi_create_encoder(nvCodingType codingType,nvEncParam * param)
 	if(param->mode_vbr)
 		ctx->ratecontrol=V4L2_MPEG_VIDEO_BITRATE_MODE_VBR;
 
-	if(codingType==NV_VIDEO_CodingH264){
+	if(param->codingType==NV_VIDEO_CodingH264)
+	{
 		ctx->encoder_pixfmt=V4L2_PIX_FMT_H264;
-	}else if(codingType==NV_VIDEO_CodingHEVC){
+	}else if(param->codingType==NV_VIDEO_CodingHEVC)
+	{
 		ctx->encoder_pixfmt=V4L2_PIX_FMT_H265;
 	}
 	if(ctx->blocking_mode)
@@ -339,12 +342,13 @@ nvmpictx* nvmpi_create_encoder(nvCodingType codingType,nvEncParam * param)
 			ctx->raw_pixfmt = V4L2_PIX_FMT_YUV420M;
 	}
 
-	if (ctx->enableLossless && codingType == NV_VIDEO_CodingH264)
+	if (ctx->enableLossless && param->codingType == NV_VIDEO_CodingH264)
 	{
 		ctx->profile = V4L2_MPEG_VIDEO_H264_PROFILE_HIGH_444_PREDICTIVE;
 		ret = ctx->enc->setOutputPlaneFormat(V4L2_PIX_FMT_YUV444M, ctx->width,ctx->height);
 	}
-	else{
+	else
+	{
 		ret = ctx->enc->setOutputPlaneFormat(ctx->raw_pixfmt, ctx->width,ctx->height);
 	}
 
@@ -363,35 +367,40 @@ nvmpictx* nvmpi_create_encoder(nvCodingType codingType,nvEncParam * param)
 	ret=ctx->enc->setHWPresetType(ctx->hw_preset_type);
 	TEST_ERROR(ret < 0, "Could not set encoder HW Preset Type", ret);
 
-	if(ctx->num_reference_frames){
+	if(ctx->num_reference_frames)
+	{
 		ret = ctx->enc->setNumReferenceFrames(ctx->num_reference_frames);
 		TEST_ERROR(ret < 0, "Could not set num reference frames", ret);
 	}
 
-	if(ctx->num_b_frames != (uint32_t) -1 && codingType == NV_VIDEO_CodingH264 ){
+	if(ctx->num_b_frames != (uint32_t) -1 && param->codingType == NV_VIDEO_CodingH264)
+	{
 		ret = ctx->enc->setNumBFrames(ctx->num_b_frames);
 		TEST_ERROR(ret < 0, "Could not set number of B Frames", ret);
 	}
 
 
-	if (codingType == NV_VIDEO_CodingH264 || codingType == NV_VIDEO_CodingHEVC)
+	if(param->codingType == NV_VIDEO_CodingH264 || param->codingType == NV_VIDEO_CodingHEVC)
 	{
 		ret = ctx->enc->setProfile(ctx->profile);
 		TEST_ERROR(ret < 0, "Could not set encoder profile", ret);
 	}
 
-	if( codingType== NV_VIDEO_CodingH264){
+	if(param->codingType== NV_VIDEO_CodingH264)
+	{
 		ret = ctx->enc->setLevel(ctx->level);
 		TEST_ERROR(ret < 0, "Could not set encoder level", ret);
 	}
 
 
-	if (ctx->enableLossless){
+	if (ctx->enableLossless)
+	{
 		ret = ctx->enc->setConstantQp(0);
 		TEST_ERROR(ret < 0, "Could not set encoder constant qp=0", ret);
 
-	}else{
-
+	}
+	else
+	{
 		ret = ctx->enc->setRateControlMode(ctx->ratecontrol);
 		TEST_ERROR(ret < 0, "Could not set encoder rate control mode", ret);
 

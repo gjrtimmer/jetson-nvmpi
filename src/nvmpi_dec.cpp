@@ -50,6 +50,7 @@ struct nvmpictx
 	unsigned int decoder_pixfmt{0};
 	std::thread dec_capture_loop;
 	
+	int frame_pool_size{12};
 	NVMPI_bufPool<NVMPI_frameBuf*>* framePool;
 	
 	//output frame size params
@@ -320,7 +321,7 @@ void nvmpictx::initFramePool()
 	input_params.nvbuf_tag = NvBufferTag_VIDEO_DEC;
 #endif
 	
-	for(int i=0;i<MAX_BUFFERS;i++)
+	for(int i=0;i<frame_pool_size;i++)
 	{
 		NVMPI_frameBuf* fb = new NVMPI_frameBuf();
 		if(!fb->alloc(input_params)) break;
@@ -503,7 +504,25 @@ void dec_capture_loop_fcn(void *arg)
 			}
 			else
 			{
-				printf("No empty buffers available to transform, Frame skipped!\n");
+				//no buffers available in the pool. wait for EOS or for user to read.
+				while(!ctx->eos)
+				{
+					std::this_thread::sleep_for(std::chrono::microseconds(500));
+					fb = ctx->framePool->dqEmptyBuf();
+					if(fb)
+					{
+#ifdef WITH_NVUTILS
+						ret = NvBufSurfTransform(ctx->dmaBufferSurface[v4l2_buf.index], fb->dst_dma_surface, &(ctx->transform_params));
+#else
+						ret = NvBufferTransform(dec_buffer->planes[0].fd, fb->dst_dma_fd, &(ctx->transform_params));
+#endif
+						TEST_ERROR(ret==-1, "Transform failed",ret);
+						fb->timestamp = (v4l2_buf.timestamp.tv_usec % 1000000) + (v4l2_buf.timestamp.tv_sec * 1000000UL);
+						
+						ctx->framePool->qFilledBuf(fb);
+						break;
+					}
+				}
 			}
 
 			v4l2_buf.m.planes[0].m.fd = ctx->dmaBufferFileDescriptor[v4l2_buf.index];
@@ -522,8 +541,8 @@ void dec_capture_loop_fcn(void *arg)
 }
 
 //TODO: accept in nvmpi_create_decoder input stream params (width and height, etc...) from ffmpeg.
-nvmpictx* nvmpi_create_decoder(nvCodingType codingType, nvPixFormat pixFormat, nvSize resized){
-	
+nvmpictx* nvmpi_create_decoder(nvDecParam* param)
+{
 	int ret;
 	log_level = LOG_LEVEL_INFO;
 
@@ -534,8 +553,11 @@ nvmpictx* nvmpi_create_decoder(nvCodingType codingType, nvPixFormat pixFormat, n
 
 	ret=ctx->dec->subscribeEvent(V4L2_EVENT_RESOLUTION_CHANGE, 0, 0);
 	TEST_ERROR(ret < 0, "Could not subscribe to V4L2_EVENT_RESOLUTION_CHANGE", ret);
-
-	switch(codingType){
+	
+	ctx->frame_pool_size = param->frame_pool_size;
+	
+	switch(param->codingType)
+	{
 		case NV_VIDEO_CodingH264:
 			ctx->decoder_pixfmt=V4L2_PIX_FMT_H264;
 			break;
@@ -576,8 +598,8 @@ nvmpictx* nvmpi_create_decoder(nvCodingType codingType, nvPixFormat pixFormat, n
 	ctx->dec->output_plane.setStreamStatus(true);
 	TEST_ERROR(ret < 0, "Error in output plane stream on", ret);
 
-	ctx->out_pixfmt=pixFormat;
-	ctx->resized = resized;
+	ctx->out_pixfmt=param->pixFormat;
+	ctx->resized = param->resized;
 	ctx->framePool = new NVMPI_bufPool<NVMPI_frameBuf*>();
 	ctx->eos=false;
 	ctx->index=0;
@@ -613,7 +635,7 @@ int nvmpi_decoder_put_packet(nvmpictx* ctx,nvPacket* packet)
 		if (ret < 0)
 		{
 			cout << "Error DQing buffer at output plane" << std::endl;
-			return false;
+			return -1;
 		}
 	}
 
@@ -630,13 +652,13 @@ int nvmpi_decoder_put_packet(nvmpictx* ctx,nvPacket* packet)
 	{
 		std::cout << "Error Qing buffer at output plane" << std::endl;
 		ctx->index--;
-		return false;
+		return -2;
 	}
 
 	if (v4l2_buf.m.planes[0].bytesused == 0)
 	{
 		ctx->eos=true;
-		std::cout << "Input file read complete" << std::endl;
+		//std::cout << "Input file read complete" << std::endl; //TODO log it
 	}
 
 	return 0;
