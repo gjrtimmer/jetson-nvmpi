@@ -21,7 +21,8 @@
 #     dist    - build REAL libnvmpi against NVIDIA's apt repo libs, package it
 #               (needs test:api:jp6; dist:jp5 also build:jp5)
 #     publish - upload:s3 -> S3 releases/<ver>/ + changelog (git-cliff)
-#     release - generic package registry + GitLab Release
+#     release - release:gitlab (generic package registry + GitLab Release) and
+#               release:github (GitHub Release + assets), independent jobs
 #
 #   Downstream (manual until split Step 2):
 #     trigger:jetson-ffmpeg - starts the jetson-ffmpeg pipeline (NVMPI_REF)
@@ -331,9 +332,10 @@ upload:s3:
 
 # ---------------------------------------------------------------------------
 # Stage: release — generic package registry + GitLab Release. Tag pipelines
-# only, after the S3 upload.
+# only, after the S3 upload. Independent of release:github (neither needs the
+# other, so one failing does not block the other).
 # ---------------------------------------------------------------------------
-release:
+release:gitlab:
   stage: release
   <<: *only-tag
   image:
@@ -342,6 +344,22 @@ release:
   needs: ["dist:jp6", "dist:jp5", "upload:s3"]
   script:
     - bash ./scripts/release.sh
+
+# ---------------------------------------------------------------------------
+# release:github — GitHub Release + assets (tarballs, debs, CHANGELOG.md).
+# Tag pipelines only. Waits for the push mirror to deliver the tag, then talks
+# to the GitHub API with GITHUB_RELEASE_TOKEN (masked CI/CD variable). Needs
+# dist artifacts + NOTES.md (upload:s3); independent of release:gitlab.
+# ---------------------------------------------------------------------------
+release:github:
+  stage: release
+  <<: *only-tag
+  image:
+    name: "${RELEASE_IMAGE}"
+    pull_policy: always
+  needs: ["dist:jp6", "dist:jp5", "upload:s3"]
+  script:
+    - bash ./scripts/release-github.sh
 
 # ---------------------------------------------------------------------------
 # Stage: downstream — start the jetson-ffmpeg pipeline with this commit as

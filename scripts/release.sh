@@ -2,7 +2,7 @@
 # Create the release: GitLab generic package registry -> GitLab Release.
 # S3 upload and changelog are separate jobs (upload-s3.sh, changelog.sh).
 # Intended to run inside the release-tools image on a tag pipeline
-# (see .gitlab-ci.yml "release" job). Not meant for local use, but every
+# (see .gitlab-ci.yml "release:gitlab" job). Not meant for local use, but every
 # external dependency is an env var so it can be dry-run.
 #
 # Required (provided by GitLab CI on a tag pipeline):
@@ -10,7 +10,8 @@
 # Inputs:
 #   dist/*.tar.gz - archives produced by scripts/package.sh
 #   dist/*.deb    - packages produced by scripts/package-deb.sh
-#   NOTES.md      - changelog produced by scripts/changelog.sh
+#   NOTES.md      - this version's notes (scripts/changelog.sh); release description
+#   CHANGELOG.md  - full changelog (repo root); attached as an asset, NOTES.md if absent
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -43,6 +44,18 @@ for f in "${ARCHIVES[@]}"; do
          --upload-file "$f" "$url"
     ASSET_ARGS+=( --assets-link "{\"name\":\"${name}\",\"url\":\"${url}\",\"link_type\":\"package\"}" )
 done
+
+# --- 2b. changelog asset ---------------------------------------------------
+# Attach the full CHANGELOG.md (maintained by the release commit; present in
+# the tag checkout). Fall back to this version's NOTES.md when it is missing.
+CHANGELOG_SRC="CHANGELOG.md"
+[ -f "${CHANGELOG_SRC}" ] || CHANGELOG_SRC="NOTES.md"
+CL_URL="${PKG_BASE}/CHANGELOG.md"
+echo "[i] uploading ${CHANGELOG_SRC} as CHANGELOG.md -> generic package registry"
+curl --fail --silent --show-error \
+     --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+     --upload-file "${CHANGELOG_SRC}" "${CL_URL}"
+ASSET_ARGS+=( --assets-link "{\"name\":\"CHANGELOG.md\",\"url\":\"${CL_URL}\",\"link_type\":\"other\"}" )
 
 # --- 3. GitLab release ---------------------------------------------------
 # Idempotent: delete any existing release for this tag before creating.
