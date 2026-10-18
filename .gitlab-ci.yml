@@ -136,9 +136,40 @@ test:api:jp6:
   variables:
     NVIDIA_VISIBLE_DEVICES: "all"
     NVIDIA_DRIVER_CAPABILITIES: "all"
+    # Crashes must fail the job on real hardware, and the child's abort
+    # message must be visible (see test/api/test_api.c).
+    NVMPI_TEST_STRICT: "1"
+    NVMPI_TEST_VERBOSE: "1"
   before_script: []
   script:
-    - export LD_LIBRARY_PATH="${CI_PROJECT_DIR}/build:/usr/lib/aarch64-linux-gnu/tegra:${LD_LIBRARY_PATH:-}"
+    # Read-only diagnostics: which libs the runtime injected, which device
+    # nodes exist, and where the stub-linked binary resolves libnv* from.
+    - ls /usr/lib/aarch64-linux-gnu/nvidia /usr/lib/aarch64-linux-gnu/tegra 2>&1 | head -40 || true
+    - ls -l /dev/nv* /dev/v4l2-* 2>&1 | head -30 || true
+    - |
+      if command -v readelf >/dev/null; then
+        readelf -d build/test_api build/libnvmpi.so* | grep -Ei 'rpath|runpath|needed' || true
+      else
+        echo "readelf not available"
+      fi
+    # The runtime injects the REAL libs under .../nvidia (JP6); the build tree
+    # carries stubs/ in its RUNPATH. LD_LIBRARY_PATH beats DT_RUNPATH, so put
+    # the real dirs first. DT_RPATH would beat LD_LIBRARY_PATH: in that case
+    # preload the real libs (a loaded soname satisfies NEEDED regardless).
+    - export LD_LIBRARY_PATH="/usr/lib/aarch64-linux-gnu/nvidia:/usr/lib/aarch64-linux-gnu/tegra:${CI_PROJECT_DIR}/build:${LD_LIBRARY_PATH:-}"
+    - |
+      if command -v readelf >/dev/null && readelf -d build/test_api build/libnvmpi.so* | grep -q '(RPATH)'; then
+        echo "DT_RPATH found: preloading real tegra libs"
+        pre=""
+        for d in /usr/lib/aarch64-linux-gnu/nvidia /usr/lib/aarch64-linux-gnu/tegra; do
+          for l in libnvv4l2.so libnvbufsurface.so.1.0.0 libnvbufsurftransform.so.1.0.0; do
+            [ -e "$d/$l" ] && pre="$pre:$d/$l"
+          done
+        done
+        export LD_PRELOAD="${pre#:}"
+        echo "LD_PRELOAD=$LD_PRELOAD"
+      fi
+    - ldd build/test_api || true
     - ./build/test_api
 
 # ---------------------------------------------------------------------------
