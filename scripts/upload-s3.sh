@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Upload the dist/*.tar.gz archives (and optionally a changelog) to S3 (MinIO).
 # Intended for the CI "upload:s3" job; every external dependency is an env var
-# so it can be dry-run. Requires the `mc` (MinIO client) binary.
+# so it can be dry-run. Uses plain curl SigV4 (needs curl >= 7.75), no mc.
 #
 # Usage:
 #   scripts/upload-s3.sh <dest-prefix-under-bucket> [changelog-file]
@@ -11,6 +11,7 @@
 #
 # Required (project CI/CD variables; missing = hard failure):
 #   S3_HOST, S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET
+# Optional: S3_REGION (default us-east-1)
 set -euo pipefail
 
 # One folder per JetPack, derived from the L4T major in the archive name
@@ -43,39 +44,49 @@ main() {
     : "${S3_SECRET_KEY:?S3_SECRET_KEY is required}"
     : "${S3_BUCKET:?S3_BUCKET is required}"
 
-    # Determine secure/insecure based on endpoint scheme
-    local mc_secure="true"
-    if [[ "${S3_HOST}" == http://* ]]; then
-        mc_secure="false"
-        echo "[i] S3 endpoint uses http — insecure mode (in-cluster)"
-    fi
+    check_curl
 
-    # Configure mc alias for this pipeline run
-    local alias_flags=(--api S3v4 --path auto)
-    [ "${mc_secure}" = "false" ] && alias_flags+=(--insecure)
-    mc alias set s3 "${S3_HOST}" "${S3_ACCESS_KEY}" "${S3_SECRET_KEY}" \
-        "${alias_flags[@]}" 2>/dev/null
-
-    local s3_prefix="s3/${S3_BUCKET}/${dest}"
-    local mc_flags=()
-    [ "${mc_secure}" = "false" ] && mc_flags+=(--insecure)
-
-    echo "[i] uploading ${#archives[@]} archives to ${s3_prefix}/jp*/"
+    local base="${S3_HOST%/}/${S3_BUCKET}"
+    echo "[i] uploading ${#archives[@]} archives to ${S3_BUCKET}/${dest}/jp*/"
     local f name jp
     for f in "${archives[@]}"; do
         name="$(basename "$f")"
         jp="$(jetpack_dir "$name")"
-        echo "  -> ${jp}/${name}"
-        mc cp "${mc_flags[@]}" "$f" "${s3_prefix}/${jp}/${name}"
+        s3_put "$f" "${base}" "${dest}/${jp}/${name}"
     done
 
     if [ -n "${changelog}" ]; then
-        echo "[i] uploading CHANGELOG.md to ${s3_prefix}/"
-        mc cp "${mc_flags[@]}" "${changelog}" "${s3_prefix}/CHANGELOG.md"
+        s3_put "${changelog}" "${base}" "${dest}/CHANGELOG.md"
     fi
+}
 
-    echo "[i] verifying S3 upload"
-    mc ls --recursive "${mc_flags[@]}" "${s3_prefix}/" | head -20
+# Fail fast when curl cannot sign requests (--aws-sigv4 arrived in 7.75).
+check_curl() {
+    command -v curl >/dev/null 2>&1 || { echo "[E] curl not found" >&2; return 1; }
+    if ! curl --help all 2>/dev/null | grep -q aws-sigv4; then
+        echo "[E] curl lacks --aws-sigv4 (need curl >= 7.75): $(curl --version | head -1)" >&2
+        return 1
+    fi
+}
+
+# Signed curl call against the S3 endpoint. Credentials only go to curl.
+s3_curl() {
+    curl --fail --silent --show-error \
+        --aws-sigv4 "aws:amz:${S3_REGION:-us-east-1}:s3" \
+        --user "${S3_ACCESS_KEY}:${S3_SECRET_KEY}" "$@"
+}
+
+# s3_put <file> <base-url-with-bucket> <key>: PUT then verify with signed HEAD.
+s3_put() {
+    local file="$1" base="$2" key="$3" size
+    # Keys go into the URL unencoded, so only allow a safe charset.
+    if [[ ! "${key}" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+        echo "[E] unsafe object key: ${key}" >&2; return 1
+    fi
+    echo "  -> ${key}"
+    s3_curl --upload-file "${file}" "${base}/${key}"
+    size="$(s3_curl -I "${base}/${key}" | tr -d '\r' | awk 'tolower($1)=="content-length:" {print $2}')"
+    echo "[i] verified ${key} (${size:-unknown} bytes)"
 }
 
 # Allow sourcing (dry-check of jetpack_dir) without running.
