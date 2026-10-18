@@ -36,7 +36,20 @@ set(CUDA_LIB_DIR_DEFAULT "${SYSROOT}/usr/local/cuda/lib64")
 # Options
 # ---------------------------------------------------------------------------
 option(WITH_STUBS "Build against stubs instead of real Jetson libraries." OFF)
+option(NVMPI_MOCK "Build the behavioural Jetson mock libs (mock/) into <build>/mock and run test_api against them. Implies WITH_STUBS (link-time only; the mock replaces the stubs at run time)." OFF)
 option(WITH_VENDORED_NVV4L2 "Use vendored NvV4l2ElementPlane.cpp with pthread_join guard." ON)
+
+if(NVMPI_MOCK)
+	# The mock only replaces the libs at run time; linking still needs the
+	# stub sonames, and no real Jetson libs exist on the mock runner.
+	set(WITH_STUBS ON CACHE BOOL "Build against stubs instead of real Jetson libraries." FORCE)
+	# Mock mode: no build-tree RPATH/RUNPATH at all. Libraries are found only
+	# through LD_LIBRARY_PATH (set by the ctest entries), so a stale RPATH to
+	# stubs/ can never shadow build/mock (DT_RPATH would beat LD_LIBRARY_PATH,
+	# DT_RUNPATH would not; neither is present this way).
+	set(CMAKE_SKIP_BUILD_RPATH ON)
+	message(STATUS "NVMPI_MOCK=ON: mock libs in ${CMAKE_BINARY_DIR}/mock, stubs link-only")
+endif()
 
 # Path options — CACHE PATH, not option() (option() is boolean-only)
 set(JETSON_MULTIMEDIA_API_DIR "" CACHE PATH
@@ -98,6 +111,11 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Wno-unused-value -fPIC")
 
 set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-rpath-link=${JETSON_MULTIMEDIA_LIB_DIR}")
 set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-rpath-link=${CUDA_LIB_DIR}")
+if(NVMPI_MOCK)
+	# Without a build RPATH, ld can no longer find libnvmpi.so's NEEDED stub
+	# sonames when linking test_api; point it there (link time only).
+	set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-rpath-link=${JETSON_MULTIMEDIA_LIB_DIR}")
+endif()
 
 find_library(LIB_V4L2 nvv4l2 PATHS "${JETSON_MULTIMEDIA_LIB_DIR}")
 find_library(LIB_NVJPEG nvjpeg PATHS "${JETSON_MULTIMEDIA_LIB_DIR}")
@@ -234,6 +252,11 @@ install(FILES packaging/deb/copyright
 
 find_package(Threads REQUIRED)
 include(CTest)
+if(NVMPI_MOCK)
+  # After CTest so mock/CMakeLists.txt sees BUILD_TESTING; the libs build even
+  # with testing off.
+  add_subdirectory(mock)
+endif()
 if(BUILD_TESTING)
   add_executable(test_bufpool test/unit/test_bufpool.cpp)
   target_include_directories(test_bufpool PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -243,7 +266,19 @@ if(BUILD_TESTING)
   add_executable(test_api test/api/test_api.c)
   target_include_directories(test_api PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_link_libraries(test_api PRIVATE nvmpi Threads::Threads)
-  add_test(NAME api COMMAND test_api)
+  if(NVMPI_MOCK)
+    # LD_LIBRARY_PATH order: mock libs first (real sonames), then the build
+    # dir (libnvmpi.so), then stubs/ only for libs the mock does not provide
+    # (libnvjpeg.so). Never register the stub-run "api" test in mock mode.
+    set(NVMPI_MOCK_LD "${CMAKE_BINARY_DIR}/mock:${CMAKE_BINARY_DIR}:${CMAKE_CURRENT_SOURCE_DIR}/stubs")
+    add_test(NAME mock_selftest COMMAND test_mock)
+    add_test(NAME api_mock COMMAND test_api)
+    set_tests_properties(mock_selftest api_mock PROPERTIES
+      ENVIRONMENT "LD_LIBRARY_PATH=${NVMPI_MOCK_LD}"
+      TIMEOUT 300)
+  else()
+    add_test(NAME api COMMAND test_api)
+  endif()
 endif()
 
 # ---------------------------------------------------------------------------
