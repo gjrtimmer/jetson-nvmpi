@@ -13,7 +13,7 @@
 #     test    - test_api (built by build:jp6) on the Jetson runner
 #
 #   Default-branch (main) pipelines: build + test, then dist (version
-#     <ver>+g<sha>, no tag gate) and publish (upload:s3 -> snapshots/<sha>/).
+#     <ver>-g<sha>, no tag gate) and publish (upload:s3 -> snapshots/<sha>/).
 #
 #   Tag pipelines (v<X.Y.Z>): build + test run too, so a release only
 #   happens after the Jetson test passed on that exact commit.
@@ -181,7 +181,7 @@ test:api:jp6:
 
 # ---------------------------------------------------------------------------
 # Stage: dist — build REAL libnvmpi and package it (tags: gated release
-# version; default branch: <ver>+g<short-sha> snapshot). The
+# version; default branch: <ver>-g<short-sha> snapshot). The
 # stub builds above are NOT runnable. Plain container build on any arm64
 # runner; no Jetson hardware needed. --no-stubs hard-fails if the real libs
 # are missing, so a release can never ship a stub-linked tarball.
@@ -201,7 +201,7 @@ test:api:jp6:
         test "${CMAKE_VERSION}" = "${VERSION}" || { echo "tag ${CI_COMMIT_TAG} != CMakeLists.txt VERSION ${CMAKE_VERSION}"; exit 1; }
       else
         # Main snapshot: no gate; build metadata marks it as a snapshot.
-        VERSION="${CMAKE_VERSION}+g${CI_COMMIT_SHORT_SHA}"
+        VERSION="${CMAKE_VERSION}-g${CI_COMMIT_SHORT_SHA}"
       fi
     - echo "[i] package version ${VERSION}"
     - bash ./scripts/build.sh --no-stubs --clean --install --prefix "${PFX}" -j"$(nproc)"
@@ -285,13 +285,17 @@ release:
 # Stage: downstream — start the jetson-ffmpeg pipeline with this commit as
 # NVMPI_REF. Manual everywhere for now: jetson-ffmpeg does not consume
 # NVMPI_REF yet, so an automatic trigger would burn a full Jetson hw run for
-# nothing. Step 2 of the split plan switches main + tags to automatic.
+# nothing. Keep manual until the user decides otherwise.
+# NVMPI_REF = ref name (branch/tag): jetson-ffmpeg's job token can fetch
+# dist:* artifacts by ref (jobs/artifacts/<ref>/download), not by SHA.
+# NVMPI_SHA identifies the exact commit (snapshots/<short-sha>/ on S3).
 # ---------------------------------------------------------------------------
 trigger:jetson-ffmpeg:
   stage: downstream
   allow_failure: true
   variables:
-    NVMPI_REF: "${CI_COMMIT_SHA}"
+    NVMPI_REF: "${CI_COMMIT_REF_NAME}"
+    NVMPI_SHA: "${CI_COMMIT_SHA}"
   trigger:
     project: timmertech/jetson-ffmpeg
     branch: main
