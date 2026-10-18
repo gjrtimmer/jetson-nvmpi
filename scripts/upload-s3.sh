@@ -63,7 +63,8 @@ main() {
 # Fail fast when curl cannot sign requests (--aws-sigv4 arrived in 7.75).
 check_curl() {
     command -v curl >/dev/null 2>&1 || { echo "[E] curl not found" >&2; return 1; }
-    if ! curl --help all 2>/dev/null | grep -q aws-sigv4; then
+    # Capture before grepping: grep -q exits early, curl gets SIGPIPE, pipefail fails.
+    if ! grep -q aws-sigv4 <<<"$(curl --help all 2>/dev/null)"; then
         echo "[E] curl lacks --aws-sigv4 (need curl >= 7.75): $(curl --version | head -1)" >&2
         return 1
     fi
