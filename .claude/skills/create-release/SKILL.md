@@ -3,7 +3,7 @@ name: create-release
 description: >-
   Release workflow for jetson-nvmpi (libnvmpi) — waits for open MRs and the
   main pipeline to land green, bumps the CMake version, regenerates
-  CHANGELOG.md, tags, pushes and verifies the GitLab release. Invoke with
+  CHANGELOG.md, tags, pushes and verifies the GitLab and GitHub releases. Invoke with
   "/create-release [vX.Y.Z | patch | minor | major]" — version auto-detected
   if omitted.
 argument-hint: "[vX.Y.Z | patch | minor | major]"
@@ -16,8 +16,9 @@ Create a libnvmpi release end-to-end. Invoke: **`/create-release [vX.Y.Z]`**.
 Ported from the jetson-ffmpeg skill. Differences that matter here:
 
 - GitLab project: `timmertech/jetson-nvmpi` (API path `timmertech%2Fjetson-nvmpi`).
-- Releases live on **GitLab only**. GitHub `gjrtimmer/jetson-nvmpi` is a
-  push-mirror (issues only): never create a GitHub release, never push to GitHub.
+- Releases: the tag pipeline creates the GitLab release (`release:gitlab`) and
+  the GitHub release (`release:github`, via API once the push-mirror delivers
+  the tag). Never create a GitHub release by hand, never push to GitHub.
 - The tag pipeline **fails** unless `project(nvmpi VERSION X.Y.Z ...)` in
   `CMakeLists.txt` equals the tag (`dist` job gate). Version bump is mandatory.
 - Tags `v2.0.0`..`v3.10.0` are jetson-ffmpeg releases from before the split.
@@ -178,7 +179,8 @@ glab api "projects/timmertech%2Fjetson-nvmpi/pipelines?ref=${VERSION_TAG}&per_pa
 ```
 
 Stages: build → test (`test:api:jp6` on Jetson) → dist (real build + `.tar.gz`
-+ `.deb`, tag/CMake gate) → publish (`upload:s3`, changelog) → release.
++ `.deb`, tag/CMake gate) → publish (`upload:s3`, changelog) → release
+(`release:gitlab` and `release:github`, independent).
 Poll every **600s**.
 
 - `success` → Phase 7.
@@ -190,12 +192,13 @@ Poll every **600s**.
 
 ```bash
 glab api "projects/timmertech%2Fjetson-nvmpi/releases/${VERSION_TAG}" | jq '{name, tag_name, assets: (.assets.links | length)}'
-gh api "repos/gjrtimmer/jetson-nvmpi/git/refs/tags/${VERSION_TAG}" --jq .ref   # mirror synced
+gh release view "${VERSION_TAG}" -R gjrtimmer/jetson-nvmpi --json name,assets --jq '{name, assets: (.assets | length)}'
 ```
 
-- [ ] GitLab release `vX.Y.Z` exists, asset links for tarballs + debs (jp5, jp6)
+- [ ] GitLab release `vX.Y.Z` exists, asset links for tarballs + debs (jp5, jp6) + `CHANGELOG.md`
+- [ ] GitHub release `vX.Y.Z` exists (created by CI, never by hand) with 6 package
+      assets (2 tarballs + 4 debs) + `CHANGELOG.md` = 7 total
 - [ ] Release notes match the top section of `CHANGELOG.md`
-- [ ] GitHub mirror has the tag (mirror lag is normal, re-check once)
 - [ ] `trigger:jetson-ffmpeg` is manual: mention it, do not run it unless asked
 
 Report final status: commit SHA, tag, pipeline id, release URL.
@@ -226,5 +229,5 @@ stays; fix the cause, re-run the skill (the CHANGELOG regenerate is idempotent).
 7. Commit, push main `-o ci.skip`
 8. Tag, push tag
 9. Monitor tag pipeline
-10. Verify GitLab release + GitHub tag mirror
+10. Verify GitLab release + GitHub release
 11. Report

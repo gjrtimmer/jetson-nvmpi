@@ -26,7 +26,7 @@ Contents:
 | --- | --- | --- | --- |
 | Branch / merge request | push to a branch, MR event | `build:jp6`, `build:jp5`, `test:api:jp6` | nothing |
 | Main snapshot | push to the default branch (also scheduled runs on it) | the above, then `dist:jp6`, `dist:jp5`, `upload:s3` | tarballs to S3 `snapshots/<short-sha>/` |
-| Release | tag `vX.Y.Z` | the above, then `dist:*`, `upload:s3`, `release` | S3 `releases/<ver>/`, package registry, GitLab Release |
+| Release | tag `vX.Y.Z` | the above, then `dist:*`, `upload:s3`, `release:gitlab`, `release:github` | S3 `releases/<ver>/`, package registry, GitLab Release, GitHub Release |
 | Downstream | manual | `trigger:jetson-ffmpeg` | starts a jetson-ffmpeg pipeline |
 
 Pipeline de-duplication (`workflow:rules`): tag pipelines always run; a merge
@@ -46,7 +46,7 @@ Stages, in order: `build`, `test`, `dist`, `publish`, `release`, `downstream`.
 | dist | `dist:jp6` | Build the **real** (non-stub) library against NVIDIA's apt-repository libraries and package it. Needs `test:api:jp6`. | any arm64 runner |
 | dist | `dist:jp5` | Same for JetPack 5. Needs `build:jp5` and `test:api:jp6`. | any arm64 runner |
 | publish | `upload:s3` | Upload the tarballs (and, on tags, the changelog) to the S3 bucket. | release-tools image |
-| release | `release` | Upload to the GitLab generic package registry and create the GitLab Release. Tags only. | release-tools image |
+| release | `release:gitlab` | Upload to the GitLab generic package registry and create the GitLab Release. Tags only. | release-tools image |
 | downstream | `trigger:jetson-ffmpeg` | Manual: start a jetson-ffmpeg pipeline for this commit. | trigger |
 
 Details per job:
@@ -65,7 +65,7 @@ Details per job:
   never ship a stub-linked tarball. Artifacts: `dist/`, kept 1 week.
 - **`upload:s3`** runs with full git history (`GIT_DEPTH: 0`) and passes
   `NOTES.md` on as an artifact so the changelog is generated only once.
-- **`release`** runs `scripts/release.sh`.
+- **`release:gitlab`** runs `scripts/release.sh`.
 
 ### Hardware test
 
@@ -106,7 +106,7 @@ Design constraints:
 
 | Tag | Used by | Purpose |
 | --- | --- | --- |
-| _(none)_ | `build:*`, `dist:*`, `upload:s3`, `release`, `trigger:*` | Run on any available runner; the project's runners are Kubernetes (k3s) based. No GPU needed. |
+| _(none)_ | `build:*`, `dist:*`, `upload:s3`, `release:*`, `trigger:*` | Run on any available runner; the project's runners are Kubernetes (k3s) based. No GPU needed. |
 | `jetson` and `orin-nx` | `test:api:jp6` only | Selects the runner with real Orin NX hardware. Both tags are required. |
 
 Adding a new hardware variant means registering a project runner tagged
@@ -151,15 +151,19 @@ build and test too, so a release is gated on the Jetson test of that commit.
    package. A mismatch fails the job.
 2. `upload:s3` runs `scripts/changelog.sh` (git-cliff, writes `NOTES.md`) and
    `scripts/upload-s3.sh "releases/<ver>" NOTES.md`.
-3. `release` runs `scripts/release.sh`: uploads each tarball to the GitLab
+3. `release:gitlab` runs `scripts/release.sh`: uploads each tarball to the GitLab
    generic package registry as package `jetson-nvmpi`, version `<ver>`, then
    creates the GitLab Release `v<ver>` with `NOTES.md` as description and the
    tarballs as `package` asset links. It is idempotent: an existing release for
    the tag is deleted first (retried pipelines would otherwise hit "release
    already exists"); the registry upload is unaffected.
 
-The pipeline does not create GitHub releases (there is no such step); the push
-mirror carries branches and tags to GitHub.
+4. `release:github` runs `scripts/release-github.sh` (independent of
+   `release:gitlab`): waits for the push mirror to deliver the tag to GitHub,
+   checks the tag SHA, then creates (or updates) the GitHub Release `v<ver>`
+   with `NOTES.md` as body and uploads the tarballs, debs and `CHANGELOG.md`
+   as assets. Needs the masked CI/CD variable `GITHUB_RELEASE_TOKEN`
+   (contents: write on the GitHub repo). Re-runs replace same-named assets.
 
 ## Cutting a release
 
