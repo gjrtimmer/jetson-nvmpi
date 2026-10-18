@@ -3,7 +3,7 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
-## Unreleased
+## 4.0.0 - 2026-10-18
 
 ### Bug Fixes
 
@@ -12,6 +12,8 @@ including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
 
 - Upload to S3 with curl sigv4, drop mc
+- Avoid SIGPIPE false fail in deb checks
+- Avoid SIGPIPE false fail in curl sigv4 check
 
 
 **nvmpi**
@@ -30,6 +32,15 @@ including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 - Split deb into libnvmpi1 and libnvmpi-dev, bump to 4.0.0
 
 
+### Features
+
+
+**mock**
+
+
+- Add behavioural V4L2 and NvBufSurface mock libs
+
+
 ### Testing
 
 
@@ -37,4 +48,10 @@ including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
 
 - Add strict and verbose modes
+
+
+**mock**
+
+
+- Add mock self-test and wire ctest entries
 
