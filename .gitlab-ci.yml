@@ -1,0 +1,214 @@
+# yaml-language-server: $schema=https://gitlab.com/gitlab-org/gitlab/-/raw/master/app/assets/javascripts/editor/schema/ci.json
+#
+# CI pipeline for jetson-nvmpi (libnvmpi, the Jetson V4L2/NvBuffer wrapper).
+#
+# Builder/runtime images are built and published by jetson-ffmpeg (decision
+# D5); this project only consumes them. Same runners, rules and conventions as
+# jetson-ffmpeg.
+#
+# Two kinds of pipeline:
+#
+#   Branch / MR pipelines (NOT a tag, deduplicated — see workflow:rules):
+#     build   - compile libnvmpi (stubs) + unit tests, JP6 and JP5
+#     test    - test_api against the real libs on the Jetson runner
+#
+#   Tag pipelines (v<X.Y.Z>):
+#     dist    - build REAL libnvmpi against NVIDIA's apt repo libs, package it
+#     release - changelog (git-cliff) -> generic package registry + GitLab Release
+#
+#   Downstream (manual until split Step 2):
+#     trigger:jetson-ffmpeg - starts the jetson-ffmpeg pipeline (NVMPI_REF)
+#
+# Runner tag convention: only test:api needs real hardware (jetson + orin-nx);
+# everything else has NO tags (any runner, K3s). release runs in the release-tools image.
+
+stages:
+  - build
+  - test
+  - dist
+  - release
+  - downstream
+
+# Pipeline deduplication: when a branch has an open MR, only the MR
+# pipeline runs — the branch pipeline is suppressed. Tag pipelines always run.
+workflow:
+  rules:
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
+      when: never
+    - if: '$CI_COMMIT_BRANCH'
+
+variables:
+  L4T_TAG: "r36.4.0"
+  L4T_SOC: "t234"
+  L4T_TAG_JP5: "r35.4.1"
+  NVMPI_PREFIX: "${CI_PROJECT_DIR}/_nvmpi"
+  # Images live in jetson-ffmpeg's pipeline (D5); paths copied from its .gitlab-ci.yml.
+  BUILDER_IMAGE: "harbor.local/jetson/jetson-ffmpeg-builder:${L4T_TAG}"
+  BUILDER_IMAGE_JP5: "harbor.local/jetson/jetson-ffmpeg-builder-jp5:${L4T_TAG_JP5}"
+  RELEASE_IMAGE: "harbor.local/docker.io/${DOCKERHUB_USERNAME}/jetson-ffmpeg-release-tools:latest"
+
+# Reusable pipeline rules:
+#   .not-on-tag — branch/MR work; skipped on tag pipelines
+#   .only-tag   — release work; runs only on v<X.Y.Z> tags
+.not-on-tag: &not-on-tag
+  rules:
+    - if: '$CI_COMMIT_TAG'
+      when: never
+    - when: on_success
+.only-tag: &only-tag
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/'
+
+default:
+  image:
+    name: "${BUILDER_IMAGE}"
+    pull_policy: always
+
+# ---------------------------------------------------------------------------
+# Stage: build — libnvmpi against stubs (compile check, NOT runnable) + the
+# unit tests (test/unit). The API test needs real libs and runs in test:api.
+# JP5 (kernel 5.10) catches V4L2 header constants/symbols that exist on JP6
+# (kernel 5.15+) but not JP5; it covers all JP5 releases (5.0.2-5.1.6).
+# ---------------------------------------------------------------------------
+.build: &build
+  stage: build
+  <<: *not-on-tag
+  script:
+    - bash ./scripts/build.sh --stubs --clean --prefix "${NVMPI_PREFIX}" -j"$(nproc)"
+    - (cd build && ctest -R bufpool --output-on-failure)
+    - cmake --install build
+  artifacts:
+    paths:
+      - _nvmpi/
+      - build/
+    expire_in: 1 hour
+
+build:jp6:
+  <<: *build
+
+build:jp5:
+  <<: *build
+  image:
+    name: "${BUILDER_IMAGE_JP5}"
+    pull_policy: if-not-present
+
+# ---------------------------------------------------------------------------
+# Shared apt setup: install the REAL tegra userspace libs (libnvv4l2,
+# libnvjpeg, libnvbufsurface, libnvbufsurftransform) from NVIDIA's jetson apt
+# repo inside a plain container; the touch file skips nvidia-l4t-core's
+# "must run on an NVIDIA Tegra platform" preinstall check.
+# ---------------------------------------------------------------------------
+.real-libs: &real-libs
+  - mkdir -p /opt/nvidia/l4t-packages && touch /opt/nvidia/l4t-packages/.nv-l4t-disable-boot-fw-update-in-preinstall
+  - |
+    if ! grep -rqs "repo.download.nvidia.com/jetson/${L4T_SOC}" /etc/apt/sources.list /etc/apt/sources.list.d/; then
+      wget -qO /etc/apt/trusted.gpg.d/jetson-ota-public.asc https://repo.download.nvidia.com/jetson/jetson-ota-public.asc
+      echo "deb https://repo.download.nvidia.com/jetson/${L4T_SOC} ${L4T_TAG%.*} main" > /etc/apt/sources.list.d/nvidia-l4t-${L4T_SOC}.list
+    fi
+  - apt-get update -qq
+  - >-
+    apt-get install -y -qq --no-install-recommends
+    nvidia-l4t-multimedia nvidia-l4t-multimedia-utils
+  - ldconfig
+
+# ---------------------------------------------------------------------------
+# Stage: test — libnvmpi public API smoke test (test/api) on real Jetson
+# hardware. Builds libnvmpi against the real libs on the runner (--no-stubs
+# hard-fails instead of silently testing stubs). Serialized via resource_group.
+# ---------------------------------------------------------------------------
+test:api:jp6:
+  stage: test
+  <<: *not-on-tag
+  needs: ["build:jp6"]
+  tags: [jetson, orin-nx]
+  resource_group: jetson
+  variables:
+    NVIDIA_VISIBLE_DEVICES: "all"
+    NVIDIA_DRIVER_CAPABILITIES: "all"
+  before_script: *real-libs
+  script:
+    - export LD_LIBRARY_PATH="/usr/lib/aarch64-linux-gnu/tegra:${LD_LIBRARY_PATH:-}"
+    - bash ./scripts/build.sh --no-stubs --clean --build-dir "${CI_PROJECT_DIR}/build-real" -j"$(nproc)"
+    - (cd build-real && ctest -R api --output-on-failure)
+
+# ---------------------------------------------------------------------------
+# Stage: dist — build REAL libnvmpi and package it (tag pipelines only). The
+# stub builds above are NOT runnable. Plain container build on any arm64
+# runner; no Jetson hardware needed. --no-stubs hard-fails if the real libs
+# are missing, so a release can never ship a stub-linked tarball.
+# Produces dist/jetson-nvmpi_<ver>_l4t<tag>_aarch64.tar.gz.
+# ---------------------------------------------------------------------------
+.dist:
+  stage: dist
+  <<: *only-tag
+  before_script: *real-libs
+  script:
+    - export VERSION="${CI_COMMIT_TAG#v}"
+    - PFX="${CI_PROJECT_DIR}/_pkg"
+    # Release gate: the tag must match the project VERSION in CMakeLists.txt.
+    - CMAKE_VERSION="$(sed -n 's/^project(nvmpi VERSION \([0-9][0-9.]*\).*/\1/p' CMakeLists.txt)"
+    - test "${CMAKE_VERSION}" = "${VERSION}" || { echo "tag ${CI_COMMIT_TAG} != CMakeLists.txt VERSION ${CMAKE_VERSION}"; exit 1; }
+    - bash ./scripts/build.sh --no-stubs --clean --install --prefix "${PFX}" -j"$(nproc)"
+    - test -f "${PFX}/lib/libnvmpi.so"
+    - >-
+      bash ./scripts/package.sh --prefix "${PFX}" --version "${VERSION}"
+      --l4t "${L4T_TAG}" --outdir "${CI_PROJECT_DIR}/dist"
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 1 week
+
+dist:jp6:
+  extends: .dist
+
+dist:jp5:
+  extends: .dist
+  image:
+    name: "${BUILDER_IMAGE_JP5}"
+    pull_policy: always
+  variables:
+    L4T_TAG: "${L4T_TAG_JP5}"
+    L4T_SOC: "t194"
+
+# ---------------------------------------------------------------------------
+# Stage: release — changelog + generic package registry + GitLab Release.
+# Runs in the release-tools image (built by jetson-ffmpeg). Tag pipelines only.
+# ---------------------------------------------------------------------------
+release:
+  stage: release
+  <<: *only-tag
+  image:
+    name: "${RELEASE_IMAGE}"
+    pull_policy: always
+  needs:
+    - job: "dist:jp6"
+    - job: "dist:jp5"
+  variables:
+    GIT_DEPTH: "0"   # full history + tags for git-cliff
+  script:
+    - git fetch --tags --force || true
+    - bash ./scripts/release.sh
+
+# ---------------------------------------------------------------------------
+# Stage: downstream — start the jetson-ffmpeg pipeline with this commit as
+# NVMPI_REF. Manual everywhere for now: jetson-ffmpeg does not consume
+# NVMPI_REF yet, so an automatic trigger would burn a full Jetson hw run for
+# nothing. Step 2 of the split plan switches main + tags to automatic.
+# ---------------------------------------------------------------------------
+trigger:jetson-ffmpeg:
+  stage: downstream
+  allow_failure: true
+  variables:
+    NVMPI_REF: "${CI_COMMIT_SHA}"
+  trigger:
+    project: timmertech/jetson-ffmpeg
+    branch: main
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/'
+      when: manual
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: manual
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      when: manual
