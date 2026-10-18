@@ -37,3 +37,10 @@ _ffmpeg/
 # Local working dir for specs/plans/design docs (not tracked)
 .work/
 .DS_Store
+
+# CI/package outputs
+_nvmpi/
+_pkg/
+build-real/
+dist/
+NOTES.md
