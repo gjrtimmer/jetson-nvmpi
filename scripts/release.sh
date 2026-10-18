@@ -6,8 +6,8 @@
 #
 # Required (provided by GitLab CI on a tag pipeline):
 #   CI_COMMIT_TAG, CI_API_V4_URL, CI_PROJECT_ID, CI_JOB_TOKEN
-# Required (project CI/CD variables, Protected; missing = hard failure):
-#   S3_HOST, S3_CLIENT_ID, S3_CLIENT_SECRET, S3_BUCKET
+# Required (project CI/CD variables; missing = hard failure):
+#   S3_HOST, S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET
 # Requires the `mc` (MinIO client) binary (installed by the CI job).
 # Inputs:
 #   dist/*.tar.gz - archives produced by scripts/package.sh
@@ -41,8 +41,8 @@ ARCHIVES=( "${DIST}"/*.tar.gz )
 if [ ${#ARCHIVES[@]} -eq 0 ]; then echo "[E] no archives in ${DIST}" >&2; exit 1; fi
 
 : "${S3_HOST:?S3_HOST is required}"
-: "${S3_CLIENT_ID:?S3_CLIENT_ID is required}"
-: "${S3_CLIENT_SECRET:?S3_CLIENT_SECRET is required}"
+: "${S3_ACCESS_KEY:?S3_ACCESS_KEY is required}"
+: "${S3_SECRET_KEY:?S3_SECRET_KEY is required}"
 : "${S3_BUCKET:?S3_BUCKET is required}"
 
 # Determine secure/insecure based on endpoint scheme
@@ -55,25 +55,36 @@ fi
 # Configure mc alias for this pipeline run
 ALIAS_FLAGS=(--api S3v4 --path auto)
 [ "${MC_SECURE}" = "false" ] && ALIAS_FLAGS+=(--insecure)
-mc alias set s3 "${S3_HOST}" "${S3_CLIENT_ID}" "${S3_CLIENT_SECRET}" \
+mc alias set s3 "${S3_HOST}" "${S3_ACCESS_KEY}" "${S3_SECRET_KEY}" \
     "${ALIAS_FLAGS[@]}" 2>/dev/null
 
 S3_PREFIX="s3/${S3_BUCKET}/releases/${VERSION}"
 MC_FLAGS=()
 [ "${MC_SECURE}" = "false" ] && MC_FLAGS+=(--insecure)
 
-echo "[i] uploading ${#ARCHIVES[@]} archives to ${S3_PREFIX}/"
+# One folder per JetPack: releases/<ver>/jp<N>/<archive>, derived from the
+# L4T major in the archive name (package.sh: ..._l4tr<major>.<x>.<y>_...).
+jetpack_dir() {
+    case "$1" in
+        *_l4tr36.*) echo jp6 ;;
+        *_l4tr35.*) echo jp5 ;;
+        *) echo "[E] no JetPack mapping for $1" >&2; return 1 ;;
+    esac
+}
+
+echo "[i] uploading ${#ARCHIVES[@]} archives to ${S3_PREFIX}/jp*/"
 for f in "${ARCHIVES[@]}"; do
     name="$(basename "$f")"
-    echo "  -> ${name}"
-    mc cp "${MC_FLAGS[@]}" "$f" "${S3_PREFIX}/${name}"
+    jp="$(jetpack_dir "$name")"
+    echo "  -> ${jp}/${name}"
+    mc cp "${MC_FLAGS[@]}" "$f" "${S3_PREFIX}/${jp}/${name}"
 done
 
 echo "[i] uploading CHANGELOG.md to ${S3_PREFIX}/"
 mc cp "${MC_FLAGS[@]}" NOTES.md "${S3_PREFIX}/CHANGELOG.md"
 
 echo "[i] verifying S3 upload"
-mc ls "${MC_FLAGS[@]}" "${S3_PREFIX}/" | head -20
+mc ls --recursive "${MC_FLAGS[@]}" "${S3_PREFIX}/" | head -20
 
 # --- 3. upload archives to GitLab generic package registry ---------------
 

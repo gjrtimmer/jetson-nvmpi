@@ -222,29 +222,85 @@ int nvmpi_encoder_flush(nvmpictx* ctx)
 	return 0;
 }
 
+//Stops and joins the capture-plane DQ thread (no-op if never started).
+//Why EOS first: stopDQThread() only sets a flag, and on Tegra neither it nor
+//STREAMOFF unblocks a dqBuffer()/poll() that is waiting for encoded data
+//(CI evidence: job 192719 still timed out the join). With no frame ever
+//queued the thread blocks forever. The only reliable wake-up is what NVIDIA's
+//01_video_encode sample does: queue an OUTPUT buffer with bytesused == 0; the
+//encoder then returns a zero-size CAPTURE buffer, the DQ callback sets
+//capPlaneGotEOS and returns false, and the thread exits by itself.
+//Returns 0 when the thread is gone, -1 if the join timed out (thread may
+//still touch ctx->enc: caller must NOT free it).
+int nvmpi_enc_stop_dq_thread(nvmpictx* ctx)
+{
+	if (!ctx->enc || !ctx->dq_thread_started)
+		return 0;
+
+	/* 1. Send EOS unless the caller already did (flushing set by
+	 *    put_frame(NULL)/put_frame_fd(-1)) or the thread already saw it.
+	 *    Only when an OUTPUT slot is still unused (ctx->index < numBuffers):
+	 *    the put_frame path then takes the slot directly and cannot block in
+	 *    dqBuffer(-1) on a stuck encoder. If every slot was used, frames are
+	 *    in flight and the thread is not idle-blocked. */
+	if (!ctx->flushing.load(std::memory_order_acquire) &&
+	    !ctx->capPlaneGotEOS.load(std::memory_order_acquire) &&
+	    ctx->index < ctx->enc->output_plane.getNumBuffers()) {
+		int eos_ret = ctx->dmabuf_external ?
+			nvmpi_encoder_put_frame_fd(ctx, -1, 0, 0, 0, 0) :
+			nvmpi_encoder_put_frame(ctx, NULL);
+		if (eos_ret < 0)
+			NVMPI_LOG(NVMPI_LOG_WARN, "could not queue EOS at close (code=%d)", eos_ret);
+	}
+
+	/* 2. Bounded wait (<= 1s) for the DQ callback to see the EOS buffer.
+	 *    Timeout is not fatal: the join below is the authority. */
+	for (int i = 0; i < 100 && ctx->flushing.load(std::memory_order_acquire) &&
+	     !ctx->capPlaneGotEOS.load(std::memory_order_acquire); i++)
+		usleep(10000);
+
+	/* 3. Ask the thread to stop (flag only), 4. STREAMOFF CAPTURE as a
+	 *    best effort wake-up, 5. join: 0 = joined, non-zero = timed out. */
+	ctx->enc->capture_plane.stopDQThread();
+	ctx->enc->capture_plane.setStreamStatus(false);
+	if (ctx->enc->capture_plane.waitForDQThread(1000) != 0)
+		return -1;
+
+	ctx->dq_thread_started = false;
+	return 0;
+}
+
 //Stops/joins the capture DQ thread, releases self-allocated OUTPUT-plane
 //dmabufs (DMA mode only), then destroys the device and the (by now empty)
 //packet pool. Packets still inside the pool are NOT freed here — the
 //FFmpeg wrapper drains and frees them first (nvmpienc_deinitPktPool).
 int nvmpi_encoder_close(nvmpictx* ctx)
 {
+	if (!ctx)
+		return -1;
+
 	/* Shutdown the packet pool to unblock any thread waiting in
 	 * dqFilledBuf(timeout) — prevents hangs on early termination
 	 * (e.g. ffmpeg -t) when blocking wait is active. */
 	if (ctx->pktPool)
 		ctx->pktPool->shutdown();
 
-	/* Guard: only stop/join the DQ thread if it was actually started.
-	 * A half-initialized encoder (create failed after STREAMON but before
-	 * startDQThread) never starts the DQ thread. Calling
-	 * stopDQThread/waitForDQThread on an un-started thread invokes
-	 * pthread_join on an uninitialized handle → UB/crash.
-	 * DQ thread runs in both blocking and non-blocking modes. */
-	if (ctx->dq_thread_started)
-	{
-		ctx->enc->capture_plane.stopDQThread();
-		ctx->enc->capture_plane.waitForDQThread(1000);
+	/* Thread-before-resource rule: the capture DQ thread must be gone
+	 * before any plane, fd or the encoder is touched. If the join times
+	 * out the thread is still running against ctx->enc; destroying it
+	 * would be a use-after-free (SIGSEGV), so leak ctx and report the
+	 * failure instead. */
+	if (nvmpi_enc_stop_dq_thread(ctx) < 0) {
+		NVMPI_LOG(NVMPI_LOG_ERROR,
+			  "nvmpi_encoder_close: DQ thread did not exit; leaking encoder "
+			  "context to avoid use-after-free");
+		return -1;
 	}
+
+	/* STREAMOFF the OUTPUT plane too (CAPTURE was stopped above). Both
+	 * are idempotent no-ops when already off. */
+	if (ctx->enc)
+		ctx->enc->output_plane.setStreamStatus(false);
 
 	/* Cleanup internal DMABUF surfaces. Applies to both compile-time
 	 * DMA mode (OUTPLANE_MEMTYPE_DMA) and runtime external DMABUF mode

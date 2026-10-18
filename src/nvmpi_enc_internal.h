@@ -121,3 +121,6 @@ bool encoder_capture_plane_dq_callback(struct v4l2_buffer *v4l2_buf, NvBuffer *b
 //copyFrameToNvBuf: defined in nvmpi_enc_input.cpp; copies a caller raw frame
 //into a V4L2 OUTPUT-plane NvBuffer (used by nvmpi_encoder_put_frame()).
 int copyFrameToNvBuf(nvFrame* frame, NvBuffer& buffer);
+//nvmpi_enc_stop_dq_thread: defined in nvmpi_enc_api.cpp; stops and joins the
+//capture DQ thread safely (see definition). Returns 0 ok, -1 join timed out.
+int nvmpi_enc_stop_dq_thread(nvmpictx* ctx);

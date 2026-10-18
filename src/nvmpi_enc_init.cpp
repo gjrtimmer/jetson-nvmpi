@@ -542,9 +542,11 @@ nvmpictx* nvmpi_create_encoder(nvEncParam* param)
 	 * STREAMOFF + V4L2 buffer teardown. Freed here: enc (via reset),
 	 * pktPool (allocated at line 60), and ctx itself. */
 cleanup:
-	if (ctx->dq_thread_started) {
-		ctx->enc->capture_plane.stopDQThread();
-		ctx->enc->capture_plane.waitForDQThread(1000);
+	if (nvmpi_enc_stop_dq_thread(ctx) < 0) {
+		/* Thread still alive and touching ctx->enc: freeing would be a
+		 * use-after-free. Leak the half-built context and fail create. */
+		NVMPI_LOG(NVMPI_LOG_ERROR, "DQ thread did not exit during create cleanup; leaking context");
+		return NULL;
 	}
 	ctx->enc.reset();
 	delete ctx->pktPool;
