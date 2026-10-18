@@ -10,7 +10,8 @@
 #
 #   Branch / MR pipelines (deduplicated — see workflow:rules):
 #     build   - compile libnvmpi (stubs) + unit tests, JP6 and JP5
-#     test    - test_api (built by build:jp6) on the Jetson runner
+#     test    - test_api (built by build:jp6) on the Jetson runner, plus an
+#               additive mock-driver job (no tags, no hardware)
 #
 #   Default-branch (main) pipelines: build + test, then dist (version
 #     <ver>-<sha>, no tag gate) and publish (upload:s3 -> snapshots/<sha>/).
@@ -178,6 +179,55 @@ test:api:jp6:
       fi
     - ldd build/test_api || true
     - ./build/test_api
+
+# ---------------------------------------------------------------------------
+# Stage: test (mock) — libnvmpi against the behavioural Jetson mock (mock/,
+# issue #98). ADDITIVE ONLY: runs in a plain container (builder image, NO
+# tags, NO Tegra runtime, no Jetson hardware) and never replaces or gates
+# test:api:jp6, which keeps running on the Orin. Hardware stays the source of
+# truth for driver behaviour; this job catches logic/lifecycle bugs early.
+#
+# The mock libs carry the real sonames and are found through LD_LIBRARY_PATH
+# only (the build tree has no RPATH/RUNPATH in mock mode); the job asserts
+# that, then prints how the three Jetson sonames resolve, then runs ctest:
+#   mock_selftest  the mock libs on their own (queue state machine, blocking
+#                  wake-ups, NvBufSurface strict FromFd, transform)
+#   api_mock       test/api/test_api against the mock (create/close paths;
+#                  data-path suites arrive with the decoder/encoder models,
+#                  #99/#100, and are reported SKIP/PASS by test_api itself)
+# ---------------------------------------------------------------------------
+test:mock:jp6:
+  stage: test
+  needs: []
+  timeout: 20m
+  variables:
+    NVMPI_TEST_VERBOSE: "1"
+  before_script: []
+  script:
+    - cmake -S . -B build-mock -DNVMPI_MOCK=ON -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Release
+    - cmake --build build-mock -j"$(nproc)"
+    - ls -l build-mock/mock
+    # RPATH would beat LD_LIBRARY_PATH and could pull stubs/ in front of the
+    # mock; RUNPATH/none cannot. Fail loudly if one sneaks in.
+    - |
+      for f in build-mock/test_api build-mock/libnvmpi.so build-mock/test_mock; do
+        readelf -d "$f" | grep -Ei 'rpath|runpath|needed' || true
+        if readelf -d "$f" | grep -q '(RPATH)'; then echo "DT_RPATH in $f: would shadow the mock"; exit 1; fi
+      done
+    - export LD_LIBRARY_PATH="${CI_PROJECT_DIR}/build-mock/mock:${CI_PROJECT_DIR}/build-mock:${CI_PROJECT_DIR}/stubs"
+    # Proof the mock (not the stubs) is what test_api loads.
+    - ldd build-mock/test_api | tee /tmp/ldd.txt
+    - |
+      for l in v4l2.so libnvbufsurface.so.1.0.0 libnvbufsurftransform.so.1.0.0; do
+        grep -F "$l" /tmp/ldd.txt | grep -q "${CI_PROJECT_DIR}/build-mock/mock/" \
+          || { echo "$l does not resolve to build-mock/mock"; exit 1; }
+      done
+    - (cd build-mock && ctest --output-on-failure)
+  artifacts:
+    when: on_failure
+    paths:
+      - build-mock/Testing/Temporary/LastTest.log
+    expire_in: 1 week
 
 # ---------------------------------------------------------------------------
 # Stage: dist — build REAL libnvmpi and package it (tags: gated release
