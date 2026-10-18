@@ -62,10 +62,11 @@ void mock_queue_free_bufs(struct mock_queue *q)
     uint32_t b, p;
 
     for (b = 0; b < MOCK_MAX_BUFS; b++) {
+        if (q->bufs[b].memfd >= 0)
+            close(q->bufs[b].memfd);            /* freed here only */
+        q->bufs[b].memfd = -1;
         for (p = 0; p < MOCK_MAX_PLANES; p++) {
-            if (q->bufs[b].memfd[p] >= 0)
-                close(q->bufs[b].memfd[p]);
-            q->bufs[b].memfd[p] = -1;
+            q->bufs[b].plane_off[p] = 0;
             q->bufs[b].dmabuf_fd[p] = -1;   /* caller-owned, never closed */
             q->bufs[b].length[p] = 0;
             q->bufs[b].bytesused[p] = 0;
@@ -106,22 +107,32 @@ int mock_do_reqbufs(struct mock_ctx *ctx, struct v4l2_requestbuffers *rb)
         q->n_planes = q->fmt.fmt.pix_mp.num_planes
             ? q->fmt.fmt.pix_mp.num_planes : 1;
         for (b = 0; b < count; b++) {
+            uint64_t total = 0;
+
             q->bufs[b].n_planes = q->n_planes;
             for (p = 0; p < q->n_planes; p++) {
                 uint32_t len = q->fmt.fmt.pix_mp.plane_fmt[p].sizeimage;
 
                 q->bufs[b].length[p] = len;
-                if (rb->memory != V4L2_MEMORY_MMAP)
-                    continue;
-                /* memfd gives a real, mappable, fd-backed buffer so EXPBUF
-                 * can hand out dma-buf-like fds. Freed in free_bufs. */
-                if (len == 0) { ret = EINVAL; goto fail; }
-                q->bufs[b].memfd[p] = memfd_create("mock-v4l2", MFD_CLOEXEC);
-                if (q->bufs[b].memfd[p] < 0 ||
-                    ftruncate(q->bufs[b].memfd[p], len) < 0) {
-                    ret = errno ? errno : ENOMEM;
+                q->bufs[b].plane_off[p] = (uint32_t)total;
+                total += (len + MOCK_PAGE - 1) / MOCK_PAGE * MOCK_PAGE;
+                if (rb->memory == V4L2_MEMORY_MMAP && len == 0) {
+                    ret = EINVAL;
                     goto fail;
                 }
+            }
+            if (rb->memory != V4L2_MEMORY_MMAP)
+                continue;
+            /* One memfd per buffer, planes page-aligned inside it: a real,
+             * mappable, fd-backed buffer, and EXPBUF can hand out one fd
+             * that covers every plane (as the Tegra driver does). Closed
+             * in mock_queue_free_bufs (single deallocation point). */
+            if (total > (1u << 30)) { ret = ENOMEM; goto fail; }
+            q->bufs[b].memfd = memfd_create("mock-v4l2", MFD_CLOEXEC);
+            if (q->bufs[b].memfd < 0 ||
+                ftruncate(q->bufs[b].memfd, (off_t)total) < 0) {
+                ret = errno ? errno : ENOMEM;
+                goto fail;
             }
         }
     }

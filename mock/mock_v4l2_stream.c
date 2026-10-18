@@ -7,14 +7,25 @@
 #include "mock_v4l2.h"
 #include "mock_log.h"
 
+#include <dlfcn.h>
 #include <errno.h>
+#include <unistd.h>
 #include <fcntl.h>
 #include <string.h>
+
+/* Optional hook into the nvbufsurface mock (resolved at run time, so the
+ * V4L2 mock has no link-time dependency on it, and a real libnvbufsurface
+ * simply lacks the symbol). It registers an EXPBUF fd as an NvBufSurface so
+ * NvBufSurfaceFromFd works on it, like on the real Tegra driver, whose MMAP
+ * buffers are NvBufSurface-backed. */
+typedef int (*export_fn)(int fd, uint32_t n_planes, const uint32_t *sizes,
+                         const uint32_t *offsets);
 
 int mock_do_expbuf(struct mock_ctx *ctx, struct v4l2_exportbuffer *e)
 {
     int qi = mock_qidx(e->type), ret = 0, fd = -1;
     struct mock_queue *q;
+    uint32_t sizes[MOCK_MAX_PLANES], offs[MOCK_MAX_PLANES], n = 0, p;
 
     if (qi < 0) {
         errno = EINVAL;
@@ -26,15 +37,31 @@ int mock_do_expbuf(struct mock_ctx *ctx, struct v4l2_exportbuffer *e)
         e->plane >= q->bufs[e->index].n_planes) {
         ret = EINVAL;
     } else {
-        /* dup of the memfd: caller owns it (closes it), like a dma-buf fd.
-         * It is NOT registered with the nvbufsurface mock (strict FromFd). */
-        fd = fcntl(q->bufs[e->index].memfd[e->plane], F_DUPFD_CLOEXEC, 3);
+        const struct mock_buf *mb = &q->bufs[e->index];
+
+        n = mb->n_planes;
+        for (p = 0; p < n; p++) {
+            sizes[p] = mb->length[p];
+            offs[p] = mb->plane_off[p];
+        }
+        /* dup of the buffer memfd: the caller owns (closes) it, like a
+         * dma-buf fd. One fd covers all planes. */
+        fd = fcntl(mb->memfd, F_DUPFD_CLOEXEC, 3);
         if (fd < 0)
             ret = errno;
-        else
-            e->fd = fd;
     }
     pthread_mutex_unlock(&ctx->mu);
+    if (!ret) {
+        export_fn reg = (export_fn)dlsym(RTLD_DEFAULT,
+                                         "mock_nvbuf_register_export");
+
+        if (reg && reg(fd, n, sizes, offs) < 0) {
+            close(fd);
+            ret = ENOMEM;
+        } else {
+            e->fd = fd;
+        }
+    }
     if (ret) {
         errno = ret;
         return -1;
@@ -87,9 +114,10 @@ int mock_do_stream(struct mock_ctx *ctx, uint32_t type, bool on)
     return 0;
 }
 
-/* v4l2_mmap helper: decode the cookie back to (queue, buffer, plane). */
+/* v4l2_mmap helper: decode the cookie back to (queue, buffer, plane) and
+ * return the buffer's memfd plus the plane's offset inside it. */
 int mock_mmap_lookup(struct mock_ctx *ctx, int64_t offset, size_t length,
-                     int *memfd_out)
+                     int *memfd_out, int64_t *off_out)
 {
     int ret = 0;
     int64_t c;
@@ -111,11 +139,13 @@ int mock_mmap_lookup(struct mock_ctx *ctx, int64_t offset, size_t length,
     pthread_mutex_lock(&ctx->mu);
     q = &ctx->q[qi];
     if (q->memory != V4L2_MEMORY_MMAP || idx >= q->n_bufs ||
-        plane >= q->bufs[idx].n_planes || q->bufs[idx].memfd[plane] < 0 ||
-        length > q->bufs[idx].length[plane])
+        plane >= q->bufs[idx].n_planes || q->bufs[idx].memfd < 0 ||
+        length > q->bufs[idx].length[plane]) {
         ret = EINVAL;
-    else
-        *memfd_out = q->bufs[idx].memfd[plane];
+    } else {
+        *memfd_out = q->bufs[idx].memfd;
+        *off_out = q->bufs[idx].plane_off[plane];
+    }
     pthread_mutex_unlock(&ctx->mu);
     if (ret) {
         errno = ret;

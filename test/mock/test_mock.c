@@ -136,6 +136,15 @@ static void test_queue_basics(void)
     eb.index = 1;
     eb.plane = 0;
     CHECK(v4l2_ioctl(fd, VIDIOC_EXPBUF, &eb) == 0 && eb.fd >= 0);
+    if (eb.fd >= 0) {                    /* EXPBUF fd is a registered surface */
+        NvBufSurface *es = NULL;
+        int d = dup(eb.fd);
+
+        CHECK(NvBufSurfaceFromFd(eb.fd, (void **)&es) == 0 && es);
+        CHECK(es && es->surfaceList[0].planeParams.num_planes == 1);
+        CHECK(NvBufSurfaceFromFd(d, (void **)&es) != 0);   /* strict */
+        close(d);
+    }
     if (m != MAP_FAILED && eb.fd >= 0) {
         m[0] = 0xA5;
         m2 = mmap(NULL, 4096, PROT_READ, MAP_SHARED, eb.fd, 0);

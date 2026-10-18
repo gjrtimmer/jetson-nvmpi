@@ -115,11 +115,11 @@ MOCK_EXPORT int v4l2_open(const char *file, int oflag, ...)
             : V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
         ctx->q[i].fmt.type = ctx->q[i].type;
         ctx->q[i].n_planes = 1;
-        for (b = 0; b < MOCK_MAX_BUFS; b++)
-            for (p = 0; p < MOCK_MAX_PLANES; p++) {
-                ctx->q[i].bufs[b].memfd[p] = -1;
+        for (b = 0; b < MOCK_MAX_BUFS; b++) {
+            ctx->q[i].bufs[b].memfd = -1;
+            for (p = 0; p < MOCK_MAX_PLANES; p++)
                 ctx->q[i].bufs[b].dmabuf_fd[p] = -1;
-            }
+        }
     }
     ctx->ops = mock_model_for_node(file);
 
@@ -279,14 +279,16 @@ MOCK_EXPORT void *v4l2_mmap(void *start, size_t length, int prot, int flags,
 {
     struct mock_ctx *ctx = mock_ctx_get(fd);
     int memfd = -1;
+    int64_t off = 0;
     void *p = MAP_FAILED;
 
     if (!ctx)
         return MAP_FAILED;
-    if (mock_mmap_lookup(ctx, offset, length, &memfd) == 0)
-        /* The cookie offset only selects the buffer; the memfd is mapped
-         * from 0. The mapping outlives the memfd, so REQBUFS(0) is safe. */
-        p = mmap(start, length, prot, flags & ~MAP_ANONYMOUS, memfd, 0);
+    if (mock_mmap_lookup(ctx, offset, length, &memfd, &off) == 0)
+        /* The cookie only selects (buffer, plane); the mapping is taken at
+         * that plane's offset inside the buffer's memfd. The mapping
+         * outlives the memfd, so REQBUFS(0) is safe. */
+        p = mmap(start, length, prot, flags & ~MAP_ANONYMOUS, memfd, off);
     mock_ctx_put(ctx);
     return p;
 }

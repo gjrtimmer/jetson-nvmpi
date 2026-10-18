@@ -51,7 +51,10 @@ struct mock_buf {
     uint32_t n_planes;
     uint32_t length[MOCK_MAX_PLANES];     /* plane capacity in bytes       */
     uint32_t bytesused[MOCK_MAX_PLANES];  /* set by QBUF or by the model   */
-    int      memfd[MOCK_MAX_PLANES];      /* MMAP backing (-1 otherwise)   */
+    int      memfd;                       /* MMAP backing, ONE per buffer
+                                           * (-1 otherwise); plane p lives
+                                           * at plane_off[p]                */
+    uint32_t plane_off[MOCK_MAX_PLANES];  /* page-aligned offsets in memfd */
     int      dmabuf_fd[MOCK_MAX_PLANES];  /* DMABUF: fd given at QBUF      */
     uint32_t flags;                       /* V4L2_BUF_FLAG_* reported at DQ */
     uint32_t sequence;
@@ -138,10 +141,10 @@ int  mock_do_stream(struct mock_ctx *ctx, uint32_t type, bool on);
 /* Model API: complete a QBUF'd buffer (queued -> done) and wake waiters.  */
 int  mock_complete_buf(struct mock_ctx *ctx, int qi, uint32_t index,
                        const uint32_t *bytesused, uint32_t flags);
-/* mmap cookie -> memfd/length; -1 + errno on a bad cookie. mu NOT needed
- * for the cookie decode, caller holds a ref. */
+/* mmap cookie -> backing memfd and the plane's offset inside it; -1 + errno
+ * on a bad cookie. Caller holds a ctx ref (takes ctx->mu itself). */
 int  mock_mmap_lookup(struct mock_ctx *ctx, int64_t offset, size_t length,
-                      int *memfd_out);
+                      int *memfd_out, int64_t *off_out);
 
 /* ---- fmt.c ----------------------------------------------------------- */
 int  mock_do_fmt(struct mock_ctx *ctx, unsigned long req, struct v4l2_format *f);

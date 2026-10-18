@@ -36,11 +36,48 @@ static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct reg_ent *g_reg;
 static size_t g_reg_n, g_reg_cap;
 
+/* Free a surface struct whose fd the application already close()d (EXPBUF
+ * fds are closed by NvBuffer teardown, not via NvBufSurfaceDestroy). Never
+ * touches the fd. Called with g_lock held, only for batch-1 surfaces. */
+static void surface_drop_mem(NvBufSurface *s)
+{
+    uint32_t pl;
+    NvBufSurfaceParams *sp = &s->surfaceList[0];
+
+    for (pl = 0; pl < sp->planeParams.num_planes; pl++)
+        if (sp->mappedAddr.addr[pl])
+            munmap(sp->mappedAddr.addr[pl], sp->planeParams.psize[pl]);
+    free(s->surfaceList);
+    memset(s, 0, sizeof(*s));
+    free(s);
+}
+
+/* Drop registry entries whose fd is no longer open (the app closed it).
+ * Run on every registration so stale entries cannot pile up or alias a
+ * recycled fd number. Caveat: if the application re-opens the SAME memfd
+ * under the recycled number (e.g. dup() of a still-open sibling), the entry
+ * is indistinguishable; the mock cannot see close(). g_lock held. */
+static void reg_sweep_locked(void)
+{
+    size_t i = 0;
+
+    while (i < g_reg_n) {
+        if (fcntl(g_reg[i].fd, F_GETFD) >= 0) {
+            i++;
+            continue;
+        }
+        if (g_reg[i].surf->batchSize == 1)
+            surface_drop_mem(g_reg[i].surf);
+        g_reg[i] = g_reg[--g_reg_n];
+    }
+}
+
 static int reg_add(int fd, NvBufSurface *surf, uint32_t index)
 {
     int rc = 0;
 
     pthread_mutex_lock(&g_lock);
+    reg_sweep_locked();
     if (g_reg_n == g_reg_cap) {
         size_t cap = g_reg_cap ? g_reg_cap * 2 : 16;
         /* Freed never: process-lifetime registry, bounded by live surfaces. */
@@ -225,150 +262,52 @@ MOCK_EXPORT int NvBufSurfaceFromFd(int dmabuf_fd, void **buffer)
     return rc;
 }
 
-/* Common index/plane validation; plane == -1 means "all planes". */
-static int check_idx(NvBufSurface *s, int index, int plane, int *first,
-                     int *last)
+/*
+ * Mock-only entry point (NOT part of the NVIDIA API), called by the V4L2
+ * mock's EXPBUF through dlsym: wrap an exported buffer fd as a registered
+ * batch-1 surface so NvBufSurfaceFromFd/Map/Sync work on it. `fd` is a
+ * dup of the V4L2 buffer's memfd that the application will close; planes
+ * are described by byte size and offset inside that memfd. The surface is
+ * freed by NvBufSurfaceDestroy or, after the app closes the fd, by the
+ * registry sweep. Returns 0 or -1 (fd untouched on failure).
+ */
+MOCK_EXPORT int mock_nvbuf_register_export(int fd, uint32_t n_planes,
+                                           const uint32_t *sizes,
+                                           const uint32_t *offsets)
 {
+    NvBufSurface *s;
     NvBufSurfaceParams *sp;
+    uint32_t pl;
 
-    if (!s || index < 0 || (uint32_t)index >= s->batchSize)
+    if (fd < 0 || !sizes || !offsets || n_planes == 0 ||
+        n_planes > NVBUF_MAX_PLANES)
         return -1;
-    sp = &s->surfaceList[index];
-    if (plane < -1 || plane >= (int)sp->planeParams.num_planes)
+    /* Allocated here; freed by NvBufSurfaceDestroy or reg_sweep_locked. */
+    s = calloc(1, sizeof(*s));
+    if (!s)
         return -1;
-    *first = plane < 0 ? 0 : plane;
-    *last = plane < 0 ? (int)sp->planeParams.num_planes - 1 : plane;
-    return 0;
-}
-
-MOCK_EXPORT int NvBufSurfaceMap(NvBufSurface *surf, int index, int plane,
-                                NvBufSurfaceMemMapFlags type)
-{
-    int pl, first, last, prot = PROT_READ | PROT_WRITE;
-    NvBufSurfaceParams *sp;
-
-    if (check_idx(surf, index, plane, &first, &last) < 0)
+    s->surfaceList = calloc(1, sizeof(*s->surfaceList));
+    if (!s->surfaceList) {
+        free(s);
         return -1;
-    sp = &surf->surfaceList[index];
-    if (type == NVBUF_MAP_READ)
-        prot = PROT_READ;
-    else if (type == NVBUF_MAP_WRITE)
-        prot = PROT_WRITE;
-    for (pl = first; pl <= last; pl++) {
-        void *m;
-
-        if (sp->mappedAddr.addr[pl])
-            continue;                   /* already mapped: idempotent   */
-        m = mmap(NULL, sp->planeParams.psize[pl], prot, MAP_SHARED,
-                 (int)sp->bufferDesc, sp->planeParams.offset[pl]);
-        if (m == MAP_FAILED)
-            return -1;
-        sp->mappedAddr.addr[pl] = m;    /* unmapped by UnMap or Destroy */
+    }
+    s->batchSize = s->numFilled = 1;
+    sp = &s->surfaceList[0];
+    sp->planeParams.num_planes = n_planes;
+    for (pl = 0; pl < n_planes; pl++) {
+        sp->planeParams.width[pl] = sizes[pl];   /* bytes: opaque plane */
+        sp->planeParams.height[pl] = 1;
+        sp->planeParams.pitch[pl] = sizes[pl];
+        sp->planeParams.bytesPerPix[pl] = 1;
+        sp->planeParams.offset[pl] = offsets[pl];
+        sp->planeParams.psize[pl] = mock_align_up(sizes[pl], MOCK_NVBUF_PAGE);
+    }
+    sp->bufferDesc = (uint64_t)fd;
+    if (reg_add(fd, s, 0) < 0) {
+        sp->bufferDesc = 0;                  /* caller keeps the fd */
+        free(s->surfaceList);
+        free(s);
+        return -1;
     }
     return 0;
-}
-
-MOCK_EXPORT int NvBufSurfaceUnMap(NvBufSurface *surf, int index, int plane)
-{
-    int pl, first, last;
-    NvBufSurfaceParams *sp;
-
-    if (check_idx(surf, index, plane, &first, &last) < 0)
-        return -1;
-    sp = &surf->surfaceList[index];
-    for (pl = first; pl <= last; pl++)
-        if (sp->mappedAddr.addr[pl]) {
-            munmap(sp->mappedAddr.addr[pl], sp->planeParams.psize[pl]);
-            sp->mappedAddr.addr[pl] = NULL;
-        }
-    return 0;
-}
-
-/* The memfd is coherent with every mapping: syncs only validate. */
-MOCK_EXPORT int NvBufSurfaceSyncForCpu(NvBufSurface *surf, int index, int plane)
-{
-    int f, l;
-    return check_idx(surf, index, plane, &f, &l);
-}
-
-MOCK_EXPORT int NvBufSurfaceSyncForDevice(NvBufSurface *surf, int index,
-                                          int plane)
-{
-    int f, l;
-    return check_idx(surf, index, plane, &f, &l);
-}
-
-MOCK_EXPORT int NvBufSurfaceMemSet(NvBufSurface *surf, int index, int plane,
-                                   uint8_t value)
-{
-    int pl, first, last;
-    NvBufSurfaceParams *sp;
-
-    if (check_idx(surf, index, plane, &first, &last) < 0)
-        return -1;
-    sp = &surf->surfaceList[index];
-    for (pl = first; pl <= last; pl++) {
-        int tmp;
-        void *m = mock_plane_acquire(sp, (uint32_t)pl, &tmp);
-
-        if (!m)
-            return -1;
-        memset(m, value, sp->planeParams.psize[pl]);
-        mock_plane_release(sp, (uint32_t)pl, m, tmp);
-    }
-    return 0;
-}
-
-MOCK_EXPORT int NvBufSurfaceCopy(NvBufSurface *src, NvBufSurface *dst)
-{
-    uint32_t i;
-
-    if (!src || !dst || src->batchSize != dst->batchSize)
-        return -1;
-    for (i = 0; i < src->batchSize; i++)
-        if (mock_copy_params(&src->surfaceList[i], &dst->surfaceList[i]) < 0)
-            return -1;
-    return 0;
-}
-
-/* Copy one plane into a tightly packed caller buffer (outwidth x outheight
- * pixels, clipped to the plane). */
-MOCK_EXPORT int NvBufSurface2Raw(NvBufSurface *surf, unsigned int index,
-                                 unsigned int plane, unsigned int outwidth,
-                                 unsigned int outheight, unsigned char *ptr)
-{
-    int f, l, tmp;
-    uint32_t y, w, h, bpp;
-    NvBufSurfaceParams *sp;
-    unsigned char *m;
-
-    if (!ptr || check_idx(surf, (int)index, (int)plane, &f, &l) < 0)
-        return -1;
-    sp = &surf->surfaceList[index];
-    bpp = sp->planeParams.bytesPerPix[plane];
-    w = outwidth < sp->planeParams.width[plane] ? outwidth
-                                                : sp->planeParams.width[plane];
-    h = outheight < sp->planeParams.height[plane]
-        ? outheight : sp->planeParams.height[plane];
-    m = mock_plane_acquire(sp, plane, &tmp);
-    if (!m)
-        return -1;
-    for (y = 0; y < h; y++)
-        memcpy(ptr + (size_t)y * outwidth * bpp,
-               m + (size_t)y * sp->planeParams.pitch[plane], (size_t)w * bpp);
-    mock_plane_release(sp, plane, m, tmp);
-    return 0;
-}
-
-/* No EGL on the mock host. */
-MOCK_EXPORT int NvBufSurfaceMapEglImage(NvBufSurface *surf, int index)
-{
-    (void)surf; (void)index;
-    return -1;
-}
-
-MOCK_EXPORT int NvBufSurfaceUnMapEglImage(NvBufSurface *surf, int index)
-{
-    (void)surf; (void)index;
-    return -1;
 }
