@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(nvmpi VERSION 3.10.0 DESCRIPTION "nvidia multimedia api")
+project(nvmpi VERSION 4.0.0 DESCRIPTION "nvidia multimedia api")
 
 # ---------------------------------------------------------------------------
 # Cross-compile sysroot
@@ -43,6 +43,11 @@ set(JETSON_MULTIMEDIA_API_DIR "" CACHE PATH
 	"Jetson Multimedia API headers and sources directory.")
 set(JETSON_MULTIMEDIA_LIB_DIR "" CACHE PATH
 	"Jetson Multimedia libraries directory.")
+# .deb packaging knobs (see the CPack section at the end of this file)
+set(NVMPI_DEB_L4T_MAJOR "" CACHE STRING
+	"L4T major pinned by libnvmpi1 Depends (36 = JP6, 35 = JP5). Empty = auto-detect.")
+set(NVMPI_DEB_VERSION "" CACHE STRING
+	"Full .deb version, e.g. 4.0.0-1~jp6. Empty = <project version>-1.")
 set(CUDA_INCLUDE_DIR "" CACHE PATH "CUDA headers directory.")
 set(CUDA_LIB_DIR "" CACHE PATH "CUDA libraries directory.")
 
@@ -65,9 +70,11 @@ if(WITH_STUBS AND NOT JETSON_MULTIMEDIA_LIB_DIR)
 elseif(NOT JETSON_MULTIMEDIA_LIB_DIR)
 	if(EXISTS "${JETSON_MULTIMEDIA_LIB_DIR_JP6}")
 		set(JETSON_MULTIMEDIA_LIB_DIR "${JETSON_MULTIMEDIA_LIB_DIR_JP6}")
+		set(NVMPI_L4T_MAJOR_DETECTED 36)
 		message(STATUS "JetPack 6 detected (nvidia lib dir)")
 	elseif(EXISTS "${JETSON_MULTIMEDIA_LIB_DIR_JP5}")
 		set(JETSON_MULTIMEDIA_LIB_DIR "${JETSON_MULTIMEDIA_LIB_DIR_JP5}")
+		set(NVMPI_L4T_MAJOR_DETECTED 35)
 		message(STATUS "JetPack 4/5 detected (tegra lib dir)")
 	else()
 		set(JETSON_MULTIMEDIA_LIB_DIR "${JETSON_MULTIMEDIA_LIB_DIR_JP5}")
@@ -203,14 +210,27 @@ target_include_directories(nvmpi PRIVATE ${NVMPI_INCLUDE_DIRS})
 target_include_directories(nvmpi_static PRIVATE ${NVMPI_INCLUDE_DIRS})
 include(GNUInstallDirs)
 configure_file(nvmpi.pc.in nvmpi.pc @ONLY)
-install(TARGETS nvmpi nvmpi_static
+# Install components: "runtime" (libnvmpi1 deb) and "dev" (libnvmpi-dev deb).
+# A plain `cmake --install` without --component installs both.
+# NAMELINK_COMPONENT moves the unversioned libnvmpi.so symlink (the FFmpeg
+# dlopen name and the link-time name) into dev; the versioned files stay runtime.
+install(TARGETS nvmpi
 	    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-	    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-	        PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+	        COMPONENT runtime
+	        NAMELINK_COMPONENT dev
+	    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev
+	    PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT dev)
+install(TARGETS nvmpi_static
+	    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev
+	    PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT dev)
+# pkg-config file: libdir copy only (the former share/pkgconfig duplicate is gone)
 install(FILES ${CMAKE_BINARY_DIR}/nvmpi.pc
-	    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/pkgconfig)
-install(FILES ${CMAKE_BINARY_DIR}/nvmpi.pc
-	    DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
+	    DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig COMPONENT dev)
+# DEP-5 copyright file, one per package (Debian policy 12.5)
+install(FILES packaging/deb/copyright
+	    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/libnvmpi1 COMPONENT runtime)
+install(FILES packaging/deb/copyright
+	    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/libnvmpi-dev COMPONENT dev)
 
 find_package(Threads REQUIRED)
 include(CTest)
@@ -227,14 +247,71 @@ if(BUILD_TESTING)
 endif()
 
 # ---------------------------------------------------------------------------
-# CPack .deb packaging — `cmake --build . --target package`
+# CPack .deb packaging: two packages, libnvmpi1 (runtime) + libnvmpi-dev.
+#   cmake -S . -B build-deb -DCMAKE_INSTALL_PREFIX=/usr \
+#         -DCMAKE_INSTALL_LIBDIR=lib/aarch64-linux-gnu -DNVMPI_DEB_VERSION=4.0.0-1~jp6
+#   cmake --build build-deb && (cd build-deb && cpack -G DEB)
+# scripts/package-deb.sh wraps this. Dependencies are listed by hand: the NVIDIA
+# libs are not resolvable by dpkg-shlibdeps, so SHLIBDEPS stays OFF.
 # ---------------------------------------------------------------------------
+if(NOT NVMPI_DEB_L4T_MAJOR)
+	if(NVMPI_L4T_MAJOR_DETECTED)
+		set(NVMPI_DEB_L4T_MAJOR "${NVMPI_L4T_MAJOR_DETECTED}")
+	else()
+		set(NVMPI_DEB_L4T_MAJOR 36)
+	endif()
+endif()
+math(EXPR NVMPI_DEB_L4T_NEXT "${NVMPI_DEB_L4T_MAJOR} + 1")
+if(NOT NVMPI_DEB_VERSION)
+	set(NVMPI_DEB_VERSION "${PROJECT_VERSION}-1")
+endif()
+if(NOT CMAKE_INSTALL_PREFIX STREQUAL "/usr")
+	message(WARNING "CMAKE_INSTALL_PREFIX is '${CMAKE_INSTALL_PREFIX}', not /usr: "
+		"nvmpi.pc in the .deb will carry the wrong prefix. Configure with -DCMAKE_INSTALL_PREFIX=/usr to package.")
+endif()
+
+set(CPACK_GENERATOR "DEB")
 set(CPACK_PACKAGE_NAME "libnvmpi")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "${PROJECT_DESCRIPTION}")
-set(CPACK_PACKAGE_CONTACT "https://github.com/gjrtimmer/jetson-ffmpeg")
-set(CPACK_GENERATOR "DEB")
-set(CPACK_DEBIAN_PACKAGE_SECTION "libs")
-set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "arm64")
+set(CPACK_PACKAGE_CONTACT "G.J.R. Timmer <6072255+gjrtimmer@users.noreply.github.com>")
+set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
+
+set(CPACK_DEB_COMPONENT_INSTALL ON)
+set(CPACK_COMPONENTS_ALL runtime dev)
+set(CPACK_DEBIAN_ENABLE_COMPONENT_DEPENDS OFF)
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS OFF)
 set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+set(CPACK_DEBIAN_PACKAGE_VERSION "${NVMPI_DEB_VERSION}")
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "${CPACK_PACKAGE_CONTACT}")
+set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/gjrtimmer/jetson-nvmpi")
+set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "arm64")
+set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
+# triggers must keep their 0644 mode (lintian), so do not force 0755 on control files
+set(CPACK_DEBIAN_PACKAGE_CONTROL_STRICT_PERMISSION TRUE)
+
+# Per-package fields. Old single package "libnvmpi" (< 4.0.0) owned all these files.
+set(CPACK_DEBIAN_RUNTIME_PACKAGE_NAME "libnvmpi1")
+set(CPACK_DEBIAN_RUNTIME_PACKAGE_SECTION "libs")
+set(CPACK_DEBIAN_RUNTIME_PACKAGE_MULTIARCH "same")
+set(CPACK_DEBIAN_RUNTIME_PACKAGE_DEPENDS
+	"nvidia-l4t-multimedia (>= ${NVMPI_DEB_L4T_MAJOR}), nvidia-l4t-multimedia (<< ${NVMPI_DEB_L4T_NEXT}), libc6, libstdc++6")
+set(CPACK_DEBIAN_RUNTIME_PACKAGE_REPLACES "libnvmpi (<< 4.0.0)")
+set(CPACK_DEBIAN_RUNTIME_PACKAGE_BREAKS "libnvmpi (<< 4.0.0)")
+set(CPACK_DEBIAN_RUNTIME_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_SOURCE_DIR}/packaging/deb/triggers")
+set(CPACK_COMPONENT_RUNTIME_DESCRIPTION
+	"NVIDIA Jetson hardware video codec library (runtime)
+ libnvmpi wraps the L4T Multimedia API (V4L2 NVDEC/NVENC, NvBufSurface and
+ VIC) behind a small C API. It is used by the jetson-ffmpeg *_nvmpi codecs.")
+
+set(CPACK_DEBIAN_DEV_PACKAGE_NAME "libnvmpi-dev")
+set(CPACK_DEBIAN_DEV_PACKAGE_SECTION "libdevel")
+set(CPACK_DEBIAN_DEV_PACKAGE_MULTIARCH "same")
+set(CPACK_DEBIAN_DEV_PACKAGE_DEPENDS "libnvmpi1 (= ${NVMPI_DEB_VERSION})")
+set(CPACK_DEBIAN_DEV_PACKAGE_REPLACES "libnvmpi (<< 4.0.0)")
+set(CPACK_DEBIAN_DEV_PACKAGE_BREAKS "libnvmpi (<< 4.0.0)")
+set(CPACK_COMPONENT_DEV_DESCRIPTION
+	"NVIDIA Jetson hardware video codec library (development files)
+ Header files, the static library, the libnvmpi.so development symlink and
+ the pkg-config file needed to build against libnvmpi.")
 include(CPack)
