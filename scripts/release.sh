@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
-# Create the release: changelog -> S3 (MinIO) -> GitLab generic package
-# registry -> GitLab Release. Intended to run inside the release-tools image on a tag pipeline
+# Create the release: GitLab generic package registry -> GitLab Release.
+# S3 upload and changelog are separate jobs (upload-s3.sh, changelog.sh).
+# Intended to run inside the release-tools image on a tag pipeline
 # (see .gitlab-ci.yml "release" job). Not meant for local use, but every
 # external dependency is an env var so it can be dry-run.
 #
 # Required (provided by GitLab CI on a tag pipeline):
 #   CI_COMMIT_TAG, CI_API_V4_URL, CI_PROJECT_ID, CI_JOB_TOKEN
-# Required (project CI/CD variables; missing = hard failure):
-#   S3_HOST, S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET
-# Requires the `mc` (MinIO client) binary (installed by the CI job).
 # Inputs:
 #   dist/*.tar.gz - archives produced by scripts/package.sh
+#   NOTES.md      - changelog produced by scripts/changelog.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,70 +22,14 @@ DIST="${REPO_ROOT}/dist"
 
 echo "=== releasing ${TAG} (version ${VERSION}) ==="
 
-# --- 1. changelog --------------------------------------------------------
-# git-cliff needs full history + tags; the CI job fetches them (GIT_DEPTH: 0).
-echo "[i] generating changelog with git-cliff"
-git-cliff --config cliff.toml --latest --strip header -o NOTES.md || {
-    echo "[!] git-cliff failed; falling back to raw git log"
-    PREV_TAG="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
-    { echo "## ${VERSION}"; echo;
-      if [ -n "${PREV_TAG}" ]; then git log --pretty='- %s' "${PREV_TAG}..${TAG}";
-      else git log --pretty='- %s' "${TAG}"; fi; } > NOTES.md
-}
-echo "----- NOTES.md -----"; cat NOTES.md; echo "--------------------"
-
-# --- 2. upload archives + changelog to S3 (NL MinIO) --------------------
+# --- 1. inputs -----------------------------------------------------------
+# NOTES.md comes from the upload:s3 job (scripts/changelog.sh) as an artifact.
+[ -f NOTES.md ] || { echo "[E] NOTES.md missing (upload:s3 artifact)" >&2; exit 1; }
 shopt -s nullglob
 ARCHIVES=( "${DIST}"/*.tar.gz )
 if [ ${#ARCHIVES[@]} -eq 0 ]; then echo "[E] no archives in ${DIST}" >&2; exit 1; fi
 
-: "${S3_HOST:?S3_HOST is required}"
-: "${S3_ACCESS_KEY:?S3_ACCESS_KEY is required}"
-: "${S3_SECRET_KEY:?S3_SECRET_KEY is required}"
-: "${S3_BUCKET:?S3_BUCKET is required}"
-
-# Determine secure/insecure based on endpoint scheme
-MC_SECURE="true"
-if [[ "${S3_HOST}" == http://* ]]; then
-    MC_SECURE="false"
-    echo "[i] S3 endpoint uses http — insecure mode (in-cluster)"
-fi
-
-# Configure mc alias for this pipeline run
-ALIAS_FLAGS=(--api S3v4 --path auto)
-[ "${MC_SECURE}" = "false" ] && ALIAS_FLAGS+=(--insecure)
-mc alias set s3 "${S3_HOST}" "${S3_ACCESS_KEY}" "${S3_SECRET_KEY}" \
-    "${ALIAS_FLAGS[@]}" 2>/dev/null
-
-S3_PREFIX="s3/${S3_BUCKET}/releases/${VERSION}"
-MC_FLAGS=()
-[ "${MC_SECURE}" = "false" ] && MC_FLAGS+=(--insecure)
-
-# One folder per JetPack: releases/<ver>/jp<N>/<archive>, derived from the
-# L4T major in the archive name (package.sh: ..._l4tr<major>.<x>.<y>_...).
-jetpack_dir() {
-    case "$1" in
-        *_l4tr36.*) echo jp6 ;;
-        *_l4tr35.*) echo jp5 ;;
-        *) echo "[E] no JetPack mapping for $1" >&2; return 1 ;;
-    esac
-}
-
-echo "[i] uploading ${#ARCHIVES[@]} archives to ${S3_PREFIX}/jp*/"
-for f in "${ARCHIVES[@]}"; do
-    name="$(basename "$f")"
-    jp="$(jetpack_dir "$name")"
-    echo "  -> ${jp}/${name}"
-    mc cp "${MC_FLAGS[@]}" "$f" "${S3_PREFIX}/${jp}/${name}"
-done
-
-echo "[i] uploading CHANGELOG.md to ${S3_PREFIX}/"
-mc cp "${MC_FLAGS[@]}" NOTES.md "${S3_PREFIX}/CHANGELOG.md"
-
-echo "[i] verifying S3 upload"
-mc ls --recursive "${MC_FLAGS[@]}" "${S3_PREFIX}/" | head -20
-
-# --- 3. upload archives to GitLab generic package registry ---------------
+# --- 2. upload archives to GitLab generic package registry ---------------
 
 ASSET_ARGS=()
 PKG_BASE="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/jetson-nvmpi/${VERSION}"
@@ -100,10 +43,10 @@ for f in "${ARCHIVES[@]}"; do
     ASSET_ARGS+=( --assets-link "{\"name\":\"${name}\",\"url\":\"${url}\",\"link_type\":\"package\"}" )
 done
 
-# --- 4. GitLab release ---------------------------------------------------
+# --- 3. GitLab release ---------------------------------------------------
 # Idempotent: delete any existing release for this tag before creating.
 # Retried pipelines and manual re-runs hit a 409 "Release already exists"
-# without this. Packages (step 3) are registry-scoped and unaffected.
+# without this. Packages (step 2) are registry-scoped and unaffected.
 RELEASE_API="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/releases/${TAG}"
 if curl --silent --fail --head --header "JOB-TOKEN: ${CI_JOB_TOKEN}" "${RELEASE_API}" >/dev/null 2>&1; then
     echo "[i] release ${TAG} already exists — deleting before recreate"

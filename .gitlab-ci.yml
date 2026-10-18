@@ -6,15 +6,21 @@
 # D5); this project only consumes them. Same runners, rules and conventions as
 # jetson-ffmpeg.
 #
-# Two kinds of pipeline:
+# Three kinds of pipeline:
 #
-#   Branch / MR pipelines (NOT a tag, deduplicated — see workflow:rules):
+#   Branch / MR pipelines (deduplicated — see workflow:rules):
 #     build   - compile libnvmpi (stubs) + unit tests, JP6 and JP5
 #     test    - test_api (built by build:jp6) on the Jetson runner
 #
-#   Tag pipelines (v<X.Y.Z>):
+#   Default-branch (main) pipelines: build + test, then dist (version
+#     <ver>-g<sha>, no tag gate) and publish (upload:s3 -> snapshots/<sha>/).
+#
+#   Tag pipelines (v<X.Y.Z>): build + test run too, so a release only
+#   happens after the Jetson test passed on that exact commit.
 #     dist    - build REAL libnvmpi against NVIDIA's apt repo libs, package it
-#     release - changelog (git-cliff) -> generic package registry + GitLab Release
+#               (needs test:api:jp6; dist:jp5 also build:jp5)
+#     publish - upload:s3 -> S3 releases/<ver>/ + changelog (git-cliff)
+#     release - generic package registry + GitLab Release
 #
 #   Downstream (manual until split Step 2):
 #     trigger:jetson-ffmpeg - starts the jetson-ffmpeg pipeline (NVMPI_REF)
@@ -26,6 +32,7 @@ stages:
   - build
   - test
   - dist
+  - publish
   - release
   - downstream
 
@@ -49,17 +56,19 @@ variables:
   BUILDER_IMAGE_JP5: "harbor.local/jetson/jetson-ffmpeg-builder-jp5:${L4T_TAG_JP5}"
   RELEASE_IMAGE: "harbor.local/docker.io/${DOCKERHUB_USERNAME}/jetson-ffmpeg-release-tools:latest"
 
-# Reusable pipeline rules:
-#   .not-on-tag — branch/MR work; skipped on tag pipelines
+# Reusable pipeline rules (build/test jobs carry no rules: workflow:rules
+# already limits pipelines, and they must also run on tags so a release is
+# gated on the Jetson test of that exact commit):
 #   .only-tag   — release work; runs only on v<X.Y.Z> tags
-.not-on-tag: &not-on-tag
-  rules:
-    - if: '$CI_COMMIT_TAG'
-      when: never
-    - when: on_success
+#   .tag-or-main — dist/publish: release tags and default-branch pipelines
+#                  (not MRs, not other branches)
 .only-tag: &only-tag
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/'
+.tag-or-main: &tag-or-main
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "merge_request_event"'
 
 default:
   image:
@@ -74,7 +83,6 @@ default:
 # ---------------------------------------------------------------------------
 .build: &build
   stage: build
-  <<: *not-on-tag
   script:
     - bash ./scripts/build.sh --stubs --clean --prefix "${NVMPI_PREFIX}" -j"$(nproc)"
     - (cd build && ctest -R bufpool --output-on-failure)
@@ -125,7 +133,6 @@ build:jp5:
 # ---------------------------------------------------------------------------
 test:api:jp6:
   stage: test
-  <<: *not-on-tag
   image:
     name: "harbor.local/jetson/l4t-jetpack6:${L4T_TAG}"
     pull_policy: always
@@ -173,22 +180,30 @@ test:api:jp6:
     - ./build/test_api
 
 # ---------------------------------------------------------------------------
-# Stage: dist — build REAL libnvmpi and package it (tag pipelines only). The
+# Stage: dist — build REAL libnvmpi and package it (tags: gated release
+# version; default branch: <ver>-g<short-sha> snapshot). The
 # stub builds above are NOT runnable. Plain container build on any arm64
 # runner; no Jetson hardware needed. --no-stubs hard-fails if the real libs
 # are missing, so a release can never ship a stub-linked tarball.
-# Produces dist/jetson-nvmpi_<ver>_l4t<tag>_aarch64.tar.gz.
+# Produces dist/jetson-nvmpi_<ver>_l4t<tag>_aarch64.tar.gz (artifacts: 1 week).
 # ---------------------------------------------------------------------------
 .dist:
   stage: dist
-  <<: *only-tag
+  <<: *tag-or-main
   before_script: *real-libs
   script:
-    - export VERSION="${CI_COMMIT_TAG#v}"
     - PFX="${CI_PROJECT_DIR}/_pkg"
-    # Release gate: the tag must match the project VERSION in CMakeLists.txt.
     - CMAKE_VERSION="$(sed -n 's/^project(nvmpi VERSION \([0-9][0-9.]*\).*/\1/p' CMakeLists.txt)"
-    - test "${CMAKE_VERSION}" = "${VERSION}" || { echo "tag ${CI_COMMIT_TAG} != CMakeLists.txt VERSION ${CMAKE_VERSION}"; exit 1; }
+    - |
+      if [ -n "${CI_COMMIT_TAG:-}" ]; then
+        # Release gate: the tag must match the project VERSION in CMakeLists.txt.
+        VERSION="${CI_COMMIT_TAG#v}"
+        test "${CMAKE_VERSION}" = "${VERSION}" || { echo "tag ${CI_COMMIT_TAG} != CMakeLists.txt VERSION ${CMAKE_VERSION}"; exit 1; }
+      else
+        # Main snapshot: no gate; build metadata marks it as a snapshot.
+        VERSION="${CMAKE_VERSION}-g${CI_COMMIT_SHORT_SHA}"
+      fi
+    - echo "[i] package version ${VERSION}"
     - bash ./scripts/build.sh --no-stubs --clean --install --prefix "${PFX}" -j"$(nproc)"
     - test -f "${PFX}/lib/libnvmpi.so"
     - >-
@@ -201,9 +216,11 @@ test:api:jp6:
 
 dist:jp6:
   extends: .dist
+  needs: ["test:api:jp6"]
 
 dist:jp5:
   extends: .dist
+  needs: ["build:jp5", "test:api:jp6"]
   image:
     name: "${BUILDER_IMAGE_JP5}"
     pull_policy: always
@@ -212,43 +229,73 @@ dist:jp5:
     L4T_SOC: "t194"
 
 # ---------------------------------------------------------------------------
-# Stage: release — changelog + S3 (NL MinIO) + generic package registry + GitLab Release.
-# Runs in the release-tools image (built by jetson-ffmpeg). Tag pipelines only.
+# Stage: publish — archives (+ changelog on tags) to S3 (NL MinIO). Runs in
+# the release-tools image (built by jetson-ffmpeg). Needs project CI/CD
+# variables S3_HOST, S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET.
+# Layout: releases/<ver>/jp<N>/ (tags), snapshots/<short-sha>/jp<N>/ (default
+# branch, no changelog). NOTES.md (tags only) is passed to release as an
+# artifact so git-cliff runs only once.
 # ---------------------------------------------------------------------------
-# Needs project CI/CD variables S3_HOST, S3_ACCESS_KEY, S3_SECRET_KEY,
-# S3_BUCKET (project 515 CI/CD variables). Layout: releases/<ver>/jp<N>/.
+.install-mc: &install-mc
+  - |
+    echo "[i] installing mc (MinIO client)"
+    curl -fsSL https://dl.min.io/client/mc/release/linux-arm64/mc -o /usr/local/bin/mc
+    chmod +x /usr/local/bin/mc
+    mc --version
+
+upload:s3:
+  stage: publish
+  <<: *tag-or-main
+  image:
+    name: "${RELEASE_IMAGE}"
+    pull_policy: always
+  needs: ["dist:jp6", "dist:jp5"]
+  variables:
+    GIT_DEPTH: "0"   # full history + tags for git-cliff
+  before_script: *install-mc
+  script:
+    - |
+      if [ -n "${CI_COMMIT_TAG:-}" ]; then
+        git fetch --tags --force || true
+        bash ./scripts/changelog.sh
+        bash ./scripts/upload-s3.sh "releases/${CI_COMMIT_TAG#v}" NOTES.md
+      else
+        bash ./scripts/upload-s3.sh "snapshots/${CI_COMMIT_SHORT_SHA}"
+      fi
+  artifacts:
+    paths:
+      - NOTES.md
+    expire_in: 1 week
+
+# ---------------------------------------------------------------------------
+# Stage: release — generic package registry + GitLab Release. Tag pipelines
+# only, after the S3 upload.
+# ---------------------------------------------------------------------------
 release:
   stage: release
   <<: *only-tag
   image:
     name: "${RELEASE_IMAGE}"
     pull_policy: always
-  needs:
-    - job: "dist:jp6"
-    - job: "dist:jp5"
-  variables:
-    GIT_DEPTH: "0"   # full history + tags for git-cliff
-  before_script:
-    - |
-      echo "[i] installing mc (MinIO client)"
-      curl -fsSL https://dl.min.io/client/mc/release/linux-arm64/mc -o /usr/local/bin/mc
-      chmod +x /usr/local/bin/mc
-      mc --version
+  needs: ["dist:jp6", "dist:jp5", "upload:s3"]
   script:
-    - git fetch --tags --force || true
     - bash ./scripts/release.sh
 
 # ---------------------------------------------------------------------------
 # Stage: downstream — start the jetson-ffmpeg pipeline with this commit as
 # NVMPI_REF. Manual everywhere for now: jetson-ffmpeg does not consume
 # NVMPI_REF yet, so an automatic trigger would burn a full Jetson hw run for
-# nothing. Step 2 of the split plan switches main + tags to automatic.
+# nothing. Keep manual until the user decides otherwise.
+# NVMPI_REF = ref name (branch/tag): jetson-ffmpeg's job token can fetch
+# dist:* artifacts by ref (jobs/artifacts/<ref>/download), not by SHA.
+# NVMPI_SHA identifies the exact commit (snapshots/<short-sha>/ on S3).
 # ---------------------------------------------------------------------------
 trigger:jetson-ffmpeg:
   stage: downstream
   allow_failure: true
   variables:
-    NVMPI_REF: "${CI_COMMIT_SHA}"
+    NVMPI_REF: "${CI_COMMIT_REF_NAME}"
+    NVMPI_SHA: "${CI_COMMIT_SHA}"
   trigger:
     project: timmertech/jetson-ffmpeg
     branch: main
