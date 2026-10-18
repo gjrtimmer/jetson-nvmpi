@@ -207,6 +207,8 @@ test:mock:jp6:
     - cmake -S . -B build-mock -DNVMPI_MOCK=ON -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Release
     - cmake --build build-mock -j"$(nproc)"
     - ls -l build-mock/mock
+    # libnvmpi probes the codec device nodes before creating a codec.
+    - bash ./scripts/mock-dev-nodes.sh
     # RPATH would beat LD_LIBRARY_PATH and could pull stubs/ in front of the
     # mock; RUNPATH/none cannot. Fail loudly if one sneaks in.
     - |
@@ -222,7 +224,7 @@ test:mock:jp6:
         grep -F "$l" /tmp/ldd.txt | grep -q "${CI_PROJECT_DIR}/build-mock/mock/" \
           || { echo "$l does not resolve to build-mock/mock"; exit 1; }
       done
-    - (cd build-mock && ctest --output-on-failure)
+    - (cd build-mock && ctest --output-on-failure -V)
   artifacts:
     when: on_failure
     paths:
