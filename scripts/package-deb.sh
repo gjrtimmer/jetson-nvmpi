@@ -75,14 +75,18 @@ for deb in "${RUNTIME_DEB}" "${DEV_DEB}"; do
     dpkg-deb -I "${deb}"
     dpkg-deb -c "${deb}"
 done
+# Capture output before grepping: grep -q exits on first match, dpkg-deb then
+# dies of SIGPIPE and pipefail turns a match into a failure.
 check() { # <deb> <extended-regex> <what>
-    dpkg-deb -c "$1" | grep -Eq "$2" || { echo "[E] $(basename "$1") lacks $3" >&2; exit 1; }
+    local listing
+    listing="$(dpkg-deb -c "$1")"
+    grep -Eq "$2" <<<"${listing}" || { echo "[E] $(basename "$1") lacks $3" >&2; exit 1; }
 }
 check "${RUNTIME_DEB}" ' \./usr/lib/aarch64-linux-gnu/libnvmpi\.so\.1( |$)' "libnvmpi.so.1"
 check "${DEV_DEB}" ' \./usr/lib/aarch64-linux-gnu/libnvmpi\.so -> ' "libnvmpi.so symlink"
 check "${DEV_DEB}" ' \./usr/include/nvmpi\.h$' "nvmpi.h"
 check "${DEV_DEB}" ' \./usr/lib/aarch64-linux-gnu/pkgconfig/nvmpi\.pc$' "nvmpi.pc"
-dpkg-deb -f "${DEV_DEB}" Depends | grep -Fq "libnvmpi1 (= ${DEBVER})" \
+grep -Fq "libnvmpi1 (= ${DEBVER})" <<<"$(dpkg-deb -f "${DEV_DEB}" Depends)" \
     || { echo "[E] libnvmpi-dev does not pin libnvmpi1 (= ${DEBVER})" >&2; exit 1; }
 
 cp -f "${RUNTIME_DEB}" "${DEV_DEB}" "${OUTDIR}/"
