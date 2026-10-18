@@ -9,6 +9,7 @@
 #   CI_COMMIT_TAG, CI_API_V4_URL, CI_PROJECT_ID, CI_JOB_TOKEN
 # Inputs:
 #   dist/*.tar.gz - archives produced by scripts/package.sh
+#   dist/*.deb    - packages produced by scripts/package-deb.sh
 #   NOTES.md      - changelog produced by scripts/changelog.sh
 set -euo pipefail
 
@@ -26,7 +27,7 @@ echo "=== releasing ${TAG} (version ${VERSION}) ==="
 # NOTES.md comes from the upload:s3 job (scripts/changelog.sh) as an artifact.
 [ -f NOTES.md ] || { echo "[E] NOTES.md missing (upload:s3 artifact)" >&2; exit 1; }
 shopt -s nullglob
-ARCHIVES=( "${DIST}"/*.tar.gz )
+ARCHIVES=( "${DIST}"/*.tar.gz "${DIST}"/*.deb )
 if [ ${#ARCHIVES[@]} -eq 0 ]; then echo "[E] no archives in ${DIST}" >&2; exit 1; fi
 
 # --- 2. upload archives to GitLab generic package registry ---------------

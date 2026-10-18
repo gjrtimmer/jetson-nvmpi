@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Upload the dist/*.tar.gz archives (and optionally a changelog) to S3 (MinIO).
+# Upload the dist/*.tar.gz archives and dist/*.deb packages (and optionally a changelog) to S3 (MinIO).
 # Intended for the CI "upload:s3" job; every external dependency is an env var
 # so it can be dry-run. Uses plain curl SigV4 (needs curl >= 7.75), no mc.
 #
@@ -15,11 +15,11 @@
 set -euo pipefail
 
 # One folder per JetPack, derived from the L4T major in the archive name
-# (package.sh: ..._l4tr<major>.<x>.<y>_...).
+# (package.sh: ..._l4tr<major>.<x>.<y>_...) or the ~jp<N> deb version suffix.
 jetpack_dir() {
     case "$1" in
-        *_l4tr36.*) echo jp6 ;;
-        *_l4tr35.*) echo jp5 ;;
+        *_l4tr36.*|*~jp6_*.deb) echo jp6 ;;
+        *_l4tr35.*|*~jp5_*.deb) echo jp5 ;;
         *) echo "[E] no JetPack mapping for $1" >&2; return 1 ;;
     esac
 }
@@ -33,7 +33,7 @@ main() {
     cd "${repo_root}"
 
     shopt -s nullglob
-    local archives=( "${repo_root}"/dist/*.tar.gz )
+    local archives=( "${repo_root}"/dist/*.tar.gz "${repo_root}"/dist/*.deb )
     if [ ${#archives[@]} -eq 0 ]; then echo "[E] no archives in ${repo_root}/dist" >&2; exit 1; fi
     if [ -n "${changelog}" ] && [ ! -f "${changelog}" ]; then
         echo "[E] changelog file not found: ${changelog}" >&2; exit 1
@@ -80,7 +80,7 @@ s3_curl() {
 s3_put() {
     local file="$1" base="$2" key="$3" size
     # Keys go into the URL unencoded, so only allow a safe charset.
-    if [[ ! "${key}" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+    if [[ ! "${key}" =~ ^[A-Za-z0-9._~/-]+$ ]]; then
         echo "[E] unsafe object key: ${key}" >&2; return 1
     fi
     echo "  -> ${key}"
