@@ -13,7 +13,7 @@
 #     test    - test_api (built by build:jp6) on the Jetson runner
 #
 #   Default-branch (main) pipelines: build + test, then dist (version
-#     <ver>-g<sha>, no tag gate) and publish (upload:s3 -> snapshots/<sha>/).
+#     <ver>-<sha>, no tag gate) and publish (upload:s3 -> snapshots/<sha>/).
 #
 #   Tag pipelines (v<X.Y.Z>): build + test run too, so a release only
 #   happens after the Jetson test passed on that exact commit.
@@ -181,7 +181,7 @@ test:api:jp6:
 
 # ---------------------------------------------------------------------------
 # Stage: dist — build REAL libnvmpi and package it (tags: gated release
-# version; default branch: <ver>-g<short-sha> snapshot). The
+# version; default branch: <ver>-<short-sha> snapshot). The
 # stub builds above are NOT runnable. Plain container build on any arm64
 # runner; no Jetson hardware needed. --no-stubs hard-fails if the real libs
 # are missing, so a release can never ship a stub-linked tarball.
@@ -201,7 +201,7 @@ test:api:jp6:
         test "${CMAKE_VERSION}" = "${VERSION}" || { echo "tag ${CI_COMMIT_TAG} != CMakeLists.txt VERSION ${CMAKE_VERSION}"; exit 1; }
       else
         # Main snapshot: no gate; build metadata marks it as a snapshot.
-        VERSION="${CMAKE_VERSION}-g${CI_COMMIT_SHORT_SHA}"
+        VERSION="${CMAKE_VERSION}-${CI_COMMIT_SHORT_SHA}"
       fi
     - echo "[i] package version ${VERSION}"
     - bash ./scripts/build.sh --no-stubs --clean --install --prefix "${PFX}" -j"$(nproc)"
