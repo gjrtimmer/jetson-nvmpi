@@ -163,16 +163,21 @@ mirror carries branches and tags to GitHub.
 
 ## Cutting a release
 
+In Claude Code, run `/create-release [vX.Y.Z]`
+(`.claude/skills/create-release/SKILL.md`); it does the steps below. By hand:
+
 ```bash
 # 1. bump the version in CMakeLists.txt: project(nvmpi VERSION X.Y.Z ...)
-# 2. commit it with a Conventional Commit message and merge to the default branch
-# 3. tag the merge commit; the tag must be v<that exact version>
+# 2. regenerate CHANGELOG.md (only post-split history, v3.10.0..HEAD)
+git-cliff --config cliff.toml --tag vX.Y.Z v3.10.0..HEAD -o CHANGELOG.md
+# 3. commit both on the default branch, push
+# 4. tag that commit; the tag must be v<that exact version>
 git tag -a vX.Y.Z -m "vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
-The changelog is generated at tag time from the Conventional Commit history;
-nothing needs to be written by hand. Follow
+`CHANGELOG.md` and the release notes come from the same `cliff.toml` and the
+Conventional Commit history; nothing is written by hand. Follow
 [SemVer](https://semver.org/). If a tag pipeline fails, fix the cause, delete the
 partial tag/release and re-tag; do not continue with a red release pipeline.
 

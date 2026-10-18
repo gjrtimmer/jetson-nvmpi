@@ -2,7 +2,15 @@
 # Commits between the previous tag and the current one.
 # Docs: https://git-cliff.org
 [changelog]
-header = "# Changelog\n\n"
+# Range is v3.10.0..HEAD (see .claude/skills/create-release): older tags are
+# jetson-ffmpeg releases from before the split and stay out of this file.
+header = """
+# Changelog
+
+libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
+including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
+
+"""
 body = """
 {% if version %}## {{ version | trim_start_matches(pat="v") }} - {{ timestamp | date(format="%Y-%m-%d") }}\
 {% else %}## Unreleased\
