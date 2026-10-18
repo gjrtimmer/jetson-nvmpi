@@ -181,9 +181,11 @@ dist:jp5:
     L4T_SOC: "t194"
 
 # ---------------------------------------------------------------------------
-# Stage: release — changelog + generic package registry + GitLab Release.
+# Stage: release — changelog + S3 (NL MinIO) + generic package registry + GitLab Release.
 # Runs in the release-tools image (built by jetson-ffmpeg). Tag pipelines only.
 # ---------------------------------------------------------------------------
+# Needs project CI/CD variables S3_HOST, S3_CLIENT_ID, S3_CLIENT_SECRET,
+# S3_BUCKET (set on project 515 as Protected; tags v* are protected).
 release:
   stage: release
   <<: *only-tag
@@ -195,6 +197,12 @@ release:
     - job: "dist:jp5"
   variables:
     GIT_DEPTH: "0"   # full history + tags for git-cliff
+  before_script:
+    - |
+      echo "[i] installing mc (MinIO client)"
+      curl -fsSL https://dl.min.io/client/mc/release/linux-arm64/mc -o /usr/local/bin/mc
+      chmod +x /usr/local/bin/mc
+      mc --version
   script:
     - git fetch --tags --force || true
     - bash ./scripts/release.sh
