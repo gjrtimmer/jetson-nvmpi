@@ -17,6 +17,11 @@
  * against fake ioctl results. CRASH is reported cleanly — it means the code
  * path needs attention but does not block the rest of the harness.
  *
+ * Environment switches (default off, stubs behaviour unchanged):
+ *   NVMPI_TEST_STRICT=1  — crashes count as failures (use on real hardware,
+ *                          where a crash is a genuine bug, not a stub gap)
+ *   NVMPI_TEST_VERBOSE=1 — keep child stderr so abort()/driver messages show
+ *
  * Build: cmake -DBUILD_TESTING=ON .. && make test_api
  * Run:   ./test_api  (on Jetson or stubs build)
  *
@@ -34,6 +39,15 @@ static int tests_run = 0;
 static int tests_passed = 0;
 static int tests_skipped = 0;
 static int tests_crashed = 0;
+static int strict_mode = 0;   /* NVMPI_TEST_STRICT: crash == failure */
+static int verbose_mode = 0;  /* NVMPI_TEST_VERBOSE: keep child stderr */
+
+/* True when the env var is set to anything other than empty or "0". */
+static int env_flag(const char *name)
+{
+    const char *v = getenv(name);
+    return v && *v && strcmp(v, "0") != 0;
+}
 
 /*
  * Run a test function in a forked child process. The child calls fn()
@@ -55,8 +69,10 @@ static int run_isolated(const char *name, int (*fn)(void))
     if (pid == 0) {
         /* Child: run the test, exit with its return code.
          * Redirect stderr to /dev/null so V4L2 noise from stubs
-         * does not clutter the harness output. */
-        (void)!freopen("/dev/null", "w", stderr);
+         * does not clutter the harness output. Skipped in verbose mode:
+         * on real hardware the abort reason is exactly what we need. */
+        if (!verbose_mode)
+            (void)!freopen("/dev/null", "w", stderr);
         int r = fn();
         _exit(r);
     }
@@ -217,6 +233,8 @@ static int test_encoder_hevc_create_close(void)
 int main(void)
 {
     printf("=== libnvmpi API test ===\n");
+    strict_mode = env_flag("NVMPI_TEST_STRICT");
+    verbose_mode = env_flag("NVMPI_TEST_VERBOSE");
 
     int fail = 0;
     fail += RUN_TEST(test_decoder_create_close);
@@ -237,7 +255,9 @@ int main(void)
     /* On stubs builds, crashes are expected — the V4L2 stubs are link-only
      * and do not emulate device behavior. Report success as long as no test
      * returned a non-zero non-signal non-skip exit code. Crashes are logged
-     * for visibility but do not fail the harness. */
-    int real_failures = fail - tests_crashed;
+     * for visibility but do not fail the harness. In strict mode (real
+     * hardware) a crash is a real defect, so it must fail the run; otherwise
+     * a fully crashing binary would report green. */
+    int real_failures = strict_mode ? fail : fail - tests_crashed;
     return (real_failures > 0) ? 1 : 0;
 }
