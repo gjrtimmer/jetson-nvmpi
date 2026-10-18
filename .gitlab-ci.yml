@@ -229,20 +229,13 @@ dist:jp5:
     L4T_SOC: "t194"
 
 # ---------------------------------------------------------------------------
-# Stage: publish — archives (+ changelog on tags) to S3 (NL MinIO). Runs in
+# Stage: publish — archives (+ changelog on tags) to S3 (NL MinIO) via curl SigV4 (no mc). Runs in
 # the release-tools image (built by jetson-ffmpeg). Needs project CI/CD
 # variables S3_HOST, S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET.
 # Layout: releases/<ver>/jp<N>/ (tags), snapshots/<short-sha>/jp<N>/ (default
 # branch, no changelog). NOTES.md (tags only) is passed to release as an
 # artifact so git-cliff runs only once.
 # ---------------------------------------------------------------------------
-.install-mc: &install-mc
-  - |
-    echo "[i] installing mc (MinIO client)"
-    curl -fsSL https://dl.min.io/client/mc/release/linux-arm64/mc -o /usr/local/bin/mc
-    chmod +x /usr/local/bin/mc
-    mc --version
-
 upload:s3:
   stage: publish
   <<: *tag-or-main
@@ -252,8 +245,8 @@ upload:s3:
   needs: ["dist:jp6", "dist:jp5"]
   variables:
     GIT_DEPTH: "0"   # full history + tags for git-cliff
-  before_script: *install-mc
   script:
+    - curl --version | head -1
     - |
       if [ -n "${CI_COMMIT_TAG:-}" ]; then
         git fetch --tags --force || true
