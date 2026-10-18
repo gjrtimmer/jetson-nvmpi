@@ -223,25 +223,46 @@ int nvmpi_encoder_flush(nvmpictx* ctx)
 }
 
 //Stops and joins the capture-plane DQ thread (no-op if never started).
-//Root cause of the create->close-without-frames SIGSEGV: stopDQThread()
-//only sets a flag. With no frame ever queued, the thread sits blocked in
-//dqBuffer()/poll() on the CAPTURE plane, no EOS buffer ever arrives, and
-//waitForDQThread(1000) times out with the thread still alive; the caller
-//then destroyed NvVideoEncoder underneath it. STREAMOFF on the CAPTURE
-//plane after the stop flag makes the blocked dqBuffer() fail, which the
-//callback treats as "stop" (v4l2_buf == NULL -> return false), so the
-//thread exits. Returns 0 when the thread is gone, -1 if the join timed
-//out (thread may still touch ctx->enc: caller must NOT free it).
+//Why EOS first: stopDQThread() only sets a flag, and on Tegra neither it nor
+//STREAMOFF unblocks a dqBuffer()/poll() that is waiting for encoded data
+//(CI evidence: job 192719 still timed out the join). With no frame ever
+//queued the thread blocks forever. The only reliable wake-up is what NVIDIA's
+//01_video_encode sample does: queue an OUTPUT buffer with bytesused == 0; the
+//encoder then returns a zero-size CAPTURE buffer, the DQ callback sets
+//capPlaneGotEOS and returns false, and the thread exits by itself.
+//Returns 0 when the thread is gone, -1 if the join timed out (thread may
+//still touch ctx->enc: caller must NOT free it).
 int nvmpi_enc_stop_dq_thread(nvmpictx* ctx)
 {
 	if (!ctx->enc || !ctx->dq_thread_started)
 		return 0;
 
-	/* 1. Ask the thread to stop (flag only). */
+	/* 1. Send EOS unless the caller already did (flushing set by
+	 *    put_frame(NULL)/put_frame_fd(-1)) or the thread already saw it.
+	 *    Only when an OUTPUT slot is still unused (ctx->index < numBuffers):
+	 *    the put_frame path then takes the slot directly and cannot block in
+	 *    dqBuffer(-1) on a stuck encoder. If every slot was used, frames are
+	 *    in flight and the thread is not idle-blocked. */
+	if (!ctx->flushing.load(std::memory_order_acquire) &&
+	    !ctx->capPlaneGotEOS.load(std::memory_order_acquire) &&
+	    ctx->index < ctx->enc->output_plane.getNumBuffers()) {
+		int eos_ret = ctx->dmabuf_external ?
+			nvmpi_encoder_put_frame_fd(ctx, -1, 0, 0, 0, 0) :
+			nvmpi_encoder_put_frame(ctx, NULL);
+		if (eos_ret < 0)
+			NVMPI_LOG(NVMPI_LOG_WARN, "could not queue EOS at close (code=%d)", eos_ret);
+	}
+
+	/* 2. Bounded wait (<= 1s) for the DQ callback to see the EOS buffer.
+	 *    Timeout is not fatal: the join below is the authority. */
+	for (int i = 0; i < 100 && ctx->flushing.load(std::memory_order_acquire) &&
+	     !ctx->capPlaneGotEOS.load(std::memory_order_acquire); i++)
+		usleep(10000);
+
+	/* 3. Ask the thread to stop (flag only), 4. STREAMOFF CAPTURE as a
+	 *    best effort wake-up, 5. join: 0 = joined, non-zero = timed out. */
 	ctx->enc->capture_plane.stopDQThread();
-	/* 2. STREAMOFF CAPTURE: wakes a thread blocked waiting for data. */
 	ctx->enc->capture_plane.setStreamStatus(false);
-	/* 3. Join; 0 = joined, non-zero = timed out / failed. */
 	if (ctx->enc->capture_plane.waitForDQThread(1000) != 0)
 		return -1;
 
