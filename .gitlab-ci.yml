@@ -10,7 +10,7 @@
 #
 #   Branch / MR pipelines (NOT a tag, deduplicated — see workflow:rules):
 #     build   - compile libnvmpi (stubs) + unit tests, JP6 and JP5
-#     test    - test_api against the real libs on the Jetson runner
+#     test    - test_api (built by build:jp6) on the Jetson runner
 #
 #   Tag pipelines (v<X.Y.Z>):
 #     dist    - build REAL libnvmpi against NVIDIA's apt repo libs, package it
@@ -115,23 +115,31 @@ build:jp5:
 
 # ---------------------------------------------------------------------------
 # Stage: test — libnvmpi public API smoke test (test/api) on real Jetson
-# hardware. Builds libnvmpi against the real libs on the runner (--no-stubs
-# hard-fails instead of silently testing stubs). Serialized via resource_group.
+# hardware. Runs the test_api binary built by build:jp6 (build/, stub-linked)
+# directly: stubs carry the real sonames, so the NVIDIA runtime's injected
+# tegra libs satisfy them at load time. NO apt and NO rebuild here: the
+# runtime bind-mounts the host tegra libs into the container, so apt cannot
+# overwrite them (dpkg "Invalid cross-device link" on nvidia-l4t-core).
+# Same image/env as jetson-ffmpeg's hw-test jobs. The image has no ctest, so
+# the binary runs directly. Serialized via resource_group.
 # ---------------------------------------------------------------------------
 test:api:jp6:
   stage: test
   <<: *not-on-tag
+  image:
+    name: "harbor.local/jetson/l4t-jetpack6:${L4T_TAG}"
+    pull_policy: always
   needs: ["build:jp6"]
   tags: [jetson, orin-nx]
   resource_group: jetson
+  timeout: 10m
   variables:
     NVIDIA_VISIBLE_DEVICES: "all"
     NVIDIA_DRIVER_CAPABILITIES: "all"
-  before_script: *real-libs
+  before_script: []
   script:
-    - export LD_LIBRARY_PATH="/usr/lib/aarch64-linux-gnu/tegra:${LD_LIBRARY_PATH:-}"
-    - bash ./scripts/build.sh --no-stubs --clean --build-dir "${CI_PROJECT_DIR}/build-real" -j"$(nproc)"
-    - (cd build-real && ctest -R api --output-on-failure)
+    - export LD_LIBRARY_PATH="${CI_PROJECT_DIR}/build:/usr/lib/aarch64-linux-gnu/tegra:${LD_LIBRARY_PATH:-}"
+    - ./build/test_api
 
 # ---------------------------------------------------------------------------
 # Stage: dist — build REAL libnvmpi and package it (tag pipelines only). The
