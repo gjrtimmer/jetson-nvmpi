@@ -187,13 +187,14 @@ test:api:jp6:
 # are missing, so a release can never ship a stub-linked tarball.
 # Produces dist/jetson-nvmpi_<ver>_l4t<tag>_aarch64.tar.gz plus the debs
 # dist/libnvmpi1_<debver>_arm64.deb and libnvmpi-dev_<debver>_arm64.deb
-# (tags: <ver>-1~jpN, main: <ver>~git<sha>-1~jpN) (artifacts: 1 week).
+# (tags: <ver>-1~jpN, main: <ver>~<count>.<sha>-1~jpN) (artifacts: 1 week).
 # ---------------------------------------------------------------------------
 .dist:
   stage: dist
   <<: *tag-or-main
   variables:
     JP: "6"
+    GIT_DEPTH: "0"   # full history + tags: snapshot commit count
   before_script: *real-libs
   script:
     - PFX="${CI_PROJECT_DIR}/_pkg"
@@ -207,7 +208,15 @@ test:api:jp6:
       else
         # Main snapshot: no gate; build metadata marks it as a snapshot.
         VERSION="${CMAKE_VERSION}-${CI_COMMIT_SHORT_SHA}"
-        DEB_VERSION="${CMAKE_VERSION}~git${CI_COMMIT_SHORT_SHA}-1~jp${JP}"
+        # Deb snapshot <ver><sep><count>.<sha>: count = commits since the last
+        # tag, so snapshots sort in commit order. '~' sorts below the upcoming
+        # release; once v<ver> is tagged (VERSION not bumped yet) use '+' so
+        # post-release snapshots sort above it.
+        git config --global --add safe.directory "${CI_PROJECT_DIR}"
+        git fetch --tags --force --quiet
+        COUNT="$(git rev-list --count "$(git describe --tags --abbrev=0)..HEAD")"
+        SEP="~"; git rev-parse -q --verify "refs/tags/v${CMAKE_VERSION}" >/dev/null && SEP="+"
+        DEB_VERSION="${CMAKE_VERSION}${SEP}${COUNT}.${CI_COMMIT_SHORT_SHA}-1~jp${JP}"
       fi
       echo "[i] package version ${VERSION}, deb version ${DEB_VERSION}"
     - bash ./scripts/build.sh --no-stubs --clean --install --prefix "${PFX}" -j"$(nproc)"
