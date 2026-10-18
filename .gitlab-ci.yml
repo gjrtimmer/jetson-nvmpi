@@ -222,7 +222,7 @@ test:mock:jp6:
         grep -F "$l" /tmp/ldd.txt | grep -q "${CI_PROJECT_DIR}/build-mock/mock/" \
           || { echo "$l does not resolve to build-mock/mock"; exit 1; }
       done
-    - (cd build-mock && ctest --output-on-failure)
+    - (cd build-mock && ctest --output-on-failure -V)
   artifacts:
     when: on_failure
     paths:
