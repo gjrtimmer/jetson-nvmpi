@@ -179,7 +179,8 @@ glab api "projects/timmertech%2Fjetson-nvmpi/pipelines?ref=${VERSION_TAG}&per_pa
 ```
 
 Stages: build → test (`test:api:hw` on Jetson) → dist (real build + `.tar.gz`
-+ `.deb`, tag/CMake gate) → publish (`upload:s3`, changelog) → release
++ `.deb`, tag/CMake gate) → test-deb (`test:deb:jp6/jp5`, clean-system
+install of the debs; a failure blocks the release) → publish (`upload:s3`, changelog) → release
 (`release:gitlab` and `release:github`, independent).
 Poll every **600s**.
 
@@ -197,7 +198,10 @@ gh release view "${VERSION_TAG}" -R gjrtimmer/jetson-nvmpi --json name,assets --
 
 - [ ] GitLab release `vX.Y.Z` exists, asset links for tarballs + debs (jp5, jp6) + `CHANGELOG.md`
 - [ ] GitHub release `vX.Y.Z` exists (created by CI, never by hand) with 6 package
-      assets (2 tarballs + 4 debs) + `CHANGELOG.md` = 7 total
+      assets (2 tarballs + 4 debs) + `CHANGELOG.md` = 7 total.
+      GitHub renames `~` to `.` in asset names: `libnvmpi1_4.0.0-1~jp6_arm64.deb`
+      appears as `libnvmpi1_4.0.0-1.jp6_arm64.deb` (the package Version field keeps
+      the `~`). Match deb assets by the `.jpN` form when verifying or downloading.
 - [ ] Release notes match the top section of `CHANGELOG.md`
 - [ ] `trigger:jetson-ffmpeg` is manual: mention it, do not run it unless asked
 
