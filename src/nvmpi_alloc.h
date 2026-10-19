@@ -38,8 +38,8 @@ static inline int nvmpi_alloc_surfaces(NvBufSurf::NvCommonAllocateParams *p,
 	in.params.layout = p->layout;
 	in.params.colorFormat = p->colorFormat;
 	in.memtag = p->memtag;
-	in.chromaSubsampling.chromaLocHoriz = p->chromaSubsampling.chromaLocHoriz;
-	in.chromaSubsampling.chromaLocVert = p->chromaSubsampling.chromaLocVert;
+	/* chromaSubsampling is left zeroed: libnvmpi never sets it, and the
+	 * JetPack 5 headers do not have it in NvCommonAllocateParams. */
 
 	for (i = 0; i < numBuffers; i++) {
 		NvBufSurface *s = NULL;
