@@ -91,6 +91,66 @@ static int pipelined(void)
     return 0;
 }
 
+/* Determinism (#111): the same input must give byte-identical access units
+ * in every run. Encodes DET_FRAMES frames the way the FFmpeg wrapper does
+ * (put, opportunistic get, EOS, drain), folds every packet's size, pts,
+ * flags and payload into one hash and compares it with the first run's.
+ * The first AU must carry SPS+PPS (the extradata scan reads it), every
+ * packet must be well-formed Annex-B (see check_au), and none may be lost. */
+#define DET_FRAMES 30
+#define DET_RUNS 40
+
+static int det_run(uint64_t *hash)
+{
+    struct ecfg c = { NV_VIDEO_CodingH264, 10, 20, 0, 0, 0 };
+    nvmpictx *ctx = e_create(&c);
+    struct epkt p;
+    int i, got = 0, r, eos = 0;
+
+    REQUIRE(ctx);
+    *hash = 1469598103934665603ull;
+#define FOLD(p_) do { \
+        *hash = (*hash ^ (p_).hash) * 1099511628211ull; \
+        *hash = (*hash ^ (p_).size ^ ((p_).pts << 20) ^ ((p_).flags << 40)) * 1099511628211ull; \
+        if (got == 0) REQUIRE((p_).has_sps && (p_).has_pps && (p_).has_idr); \
+        got++; } while (0)
+    for (i = 0; i < DET_FRAMES; i++) {
+        REQUIRE(e_put(ctx, 500 + i) == 0);
+        while ((r = e_get(ctx, 0, 0, &p)) == 0)
+            FOLD(p);
+    }
+    REQUIRE(nvmpi_encoder_put_frame(ctx, NULL) == 0);       /* EOS */
+    while (!eos) {
+        r = e_get(ctx, 0, 0, &p);      /* no wait: EOS spin is inside */
+        if (r == 0)
+            FOLD(p);
+        else
+            eos = r == -2;
+    }
+#undef FOLD
+    REQUIRE(got == DET_FRAMES);
+    REQUIRE(e_destroy(ctx, NULL) == 0);
+    return 0;
+}
+
+static int determinism(void)
+{
+    uint64_t ref = 0, h;
+    int i;
+
+    for (i = 0; i < DET_RUNS; i++) {
+        REQUIRE(det_run(&h) == 0);
+        if (i == 0)
+            ref = h;
+        else if (h != ref) {
+            fprintf(stderr, "run %d hash %016llx != %016llx\n", i,
+                    (unsigned long long)h, (unsigned long long)ref);
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int force_idr(void)
 {
     struct ecfg c = { NV_VIDEO_CodingH264, 0, 0, 0, 0, 0 };

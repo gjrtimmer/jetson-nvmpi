@@ -12,6 +12,7 @@ static const struct tcase k_cases[] = {
     { "header_idr_h264", NULL, header_idr_h264, 0 },
     { "header_idr_hevc", NULL, header_idr_hevc, 0 },
     { "pipelined", NULL, pipelined, 0 },
+    { "determinism", NULL, determinism, 0 },
     { "force_idr", NULL, force_idr, 0 },
     { "nonblock_flow", NULL, nonblock_flow, 0 },
     { "nonblock_eagain", NULL, nonblock_eagain, 0 },

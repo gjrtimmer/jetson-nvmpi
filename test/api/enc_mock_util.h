@@ -142,6 +142,7 @@ static inline int e_put(nvmpictx *ctx, long pts)
 struct epkt {
     unsigned long flags, pts, size;
     int has_idr, has_sps, has_pps, has_vps;
+    uint64_t hash;                        /* FNV-1a of the payload bytes   */
 };
 
 /* get_packet(wait) and return the packet to the pool; 0 on a packet,
@@ -157,6 +158,9 @@ static inline int e_get(nvmpictx *ctx, int hevc, int wait, struct epkt *o)
     o->flags = pk->flags;
     o->pts = pk->pts;
     o->size = pk->payload_size;
+    o->hash = 1469598103934665603ull;
+    for (size_t k = 0; k < pk->payload_size; k++)
+        o->hash = (o->hash ^ pk->payload[k]) * 1099511628211ull;
     o->has_idr = nal_has(pk->payload, pk->payload_size, hevc, hevc ? 19 : 5);
     o->has_sps = nal_has(pk->payload, pk->payload_size, hevc, hevc ? 33 : 7);
     o->has_pps = nal_has(pk->payload, pk->payload_size, hevc, hevc ? 34 : 8);
