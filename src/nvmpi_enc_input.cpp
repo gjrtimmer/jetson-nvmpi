@@ -21,7 +21,7 @@
  *                     per encoded buffer.
  *
  * Companion files:
- *   nvmpi_enc_internal.h  — shared includes, defines, nvmpictx struct,
+ *   nvmpi_enc_internal.h  — shared includes, defines, nvmpi_enc_ctx struct,
  *                           and forward declarations.
  *   nvmpi_enc_init.cpp    — nvmpi_create_encoder() (device open, format
  *                           negotiation, plane/stream setup).
@@ -67,8 +67,9 @@ int copyFrameToNvBuf(nvFrame* frame, NvBuffer& buffer)
 //frame==NULL queues a zero-byte buffer = V4L2 EOS signal and sets
 //ctx->flushing. Returns 0 on success, -2 if already flushing, negative on
 //encoder error.
-int nvmpi_encoder_put_frame(nvmpictx* ctx,nvFrame* frame)
+int nvmpi_encoder_put_frame(nvmpictx* h,nvFrame* frame)
 {
+	nvmpi_enc_ctx* ctx = static_cast<nvmpi_enc_ctx*>(h);
 	if(ctx->flushing.load(std::memory_order_acquire)) return -2;
 
 	int ret;
@@ -205,10 +206,11 @@ int nvmpi_encoder_put_frame(nvmpictx* ctx,nvFrame* frame)
 //
 //dmabuf_fd == -1 signals EOS (same as frame==NULL in put_frame).
 //Returns 0 on success, -2 if already flushing, negative on error.
-int nvmpi_encoder_put_frame_fd(nvmpictx* ctx,
+int nvmpi_encoder_put_frame_fd(nvmpictx* h,
 	int dmabuf_fd, int width, int height, int pitch,
 	int64_t timestamp)
 {
+	nvmpi_enc_ctx* ctx = static_cast<nvmpi_enc_ctx*>(h);
 	(void)width;
 	(void)height;
 	(void)pitch;

@@ -16,7 +16,7 @@
  * force_idr, set_bitrate, flush, close) live in nvmpi_enc_api.cpp.
  *
  * Companion files:
- *   nvmpi_enc_internal.h  — shared includes, defines, nvmpictx struct,
+ *   nvmpi_enc_internal.h  — shared includes, defines, nvmpi_enc_ctx struct,
  *                           and forward declarations.
  *   nvmpi_enc_output.cpp  — encoder_capture_plane_dq_callback and
  *                           setup_output_dmabuf (OUTPUT-plane DMA path).
@@ -34,7 +34,7 @@ nvmpictx* nvmpi_create_encoder(nvEncParam* param)
 {
 	int ret;
 	log_level = LOG_LEVEL_INFO;
-	nvmpictx *ctx=new nvmpictx;
+	nvmpi_enc_ctx *ctx=new nvmpi_enc_ctx;
 	ctx->index=0;
 	ctx->width=param->width;
 	ctx->height=param->height;

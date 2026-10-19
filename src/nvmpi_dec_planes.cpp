@@ -84,7 +84,7 @@ NvBufferColorFormat getNvColorFormatFromV4l2Format(v4l2_format &format, bool wan
 //NV12 DMA buffers sized to the coded resolution, REQBUFS them as
 //V4L2_MEMORY_DMABUF, start streaming and enqueue every buffer so the
 //decoder can start writing. Called from the capture thread only.
-void nvmpictx::initDecoderCapturePlane(v4l2_format &format)
+void nvmpi_dec_ctx::initDecoderCapturePlane(v4l2_format &format)
 {
 	int ret=0;
 	int32_t minimumDecoderCaptureBuffers;
@@ -201,7 +201,7 @@ void nvmpictx::initDecoderCapturePlane(v4l2_format &format)
 //Tear down the CAPTURE plane: STREAMOFF, unmap/release the V4L2 buffers
 //(deinitPlane issues REQBUFS with count 0) and destroy our DMA buffers.
 //Called on resolution change (before re-init) and from nvmpi_decoder_close.
-void nvmpictx::deinitDecoderCapturePlane()
+void nvmpi_dec_ctx::deinitDecoderCapturePlane()
 {
 	if (numberCaptureBuffers == 0)
 		return;

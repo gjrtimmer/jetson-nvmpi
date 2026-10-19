@@ -17,7 +17,7 @@
  *   - nvmpi_decoder_close()        — full teardown.
  *
  * Companion files:
- *   nvmpi_dec_internal.h  — shared includes, defines, nvmpictx struct,
+ *   nvmpi_dec_internal.h  — shared includes, defines, nvmpi_dec_ctx struct,
  *                           and forward declarations.
  *   nvmpi_dec_init.cpp    — nvmpi_create_decoder() and the frame-pool /
  *                           VIC-transform-parameter setup it depends on.
@@ -35,8 +35,9 @@
 //A zero-sized payload is the EOS marker and flips ctx->eos.
 //Returns 0 on success, -1 on dequeue failure, -2 on queue failure,
 //-3 when the packet exceeds chunk_size (packet dropped, decoder usable).
-int nvmpi_decoder_put_packet(nvmpictx* ctx,nvPacket* packet)
+int nvmpi_decoder_put_packet(nvmpictx* h,nvPacket* packet)
 {
+	nvmpi_dec_ctx* ctx = static_cast<nvmpi_dec_ctx*>(h);
 	int ret;
 	struct v4l2_buffer v4l2_buf;
 	struct v4l2_plane planes[MAX_PLANES];
@@ -104,7 +105,7 @@ int nvmpi_decoder_put_packet(nvmpictx* ctx,nvPacket* packet)
 //destination linesize (caller-chosen) usually differ; only
 //frame_linedatasize valid bytes per line are copied. Unmaps when done.
 //frame->payload[] must point at sufficiently large caller-owned memory.
-int copyNvBufToFrame(nvmpictx* ctx, nvmpi_frame_buffer *nvmpiBuf, nvFrame* frame)
+int copyNvBufToFrame(nvmpi_dec_ctx* ctx, nvmpi_frame_buffer *nvmpiBuf, nvFrame* frame)
 {
 	int ret;
 	char *dataDst;
@@ -158,8 +159,9 @@ int copyNvBufToFrame(nvmpictx* ctx, nvmpi_frame_buffer *nvmpiBuf, nvFrame* frame
 //tiered wait. Returns -1 on timeout or shutdown.
 //On success the frame data is copied into the caller's buffers, the pts
 //is set, and the pool buffer is immediately recycled to the "empty" queue.
-int nvmpi_decoder_get_frame(nvmpictx* ctx, nvFrame* frame, bool wait)
+int nvmpi_decoder_get_frame(nvmpictx* h, nvFrame* frame, bool wait)
 {
+	nvmpi_dec_ctx* ctx = static_cast<nvmpi_dec_ctx*>(h);
 	int ret;
 	nvmpi_frame_buffer* fb;
 
@@ -189,12 +191,12 @@ int nvmpi_decoder_get_frame(nvmpictx* ctx, nvFrame* frame, bool wait)
 struct nvmpi_frame_ref {
 	nvmpi_frame_buffer *fb;
 	NVMPI_bufPool<nvmpi_frame_buffer*> *pool;
-	/* Shared flag from nvmpictx::pool_alive — stays valid after decoder
+	/* Shared flag from nvmpi_dec_ctx::pool_alive — stays valid after decoder
 	 * close because the shared_ptr ref-count keeps it alive. Checked
 	 * before accessing pool to avoid use-after-free when FFmpeg's
 	 * scheduler drops frame refs after codec close (FFmpeg 8.1+). */
 	std::shared_ptr<std::atomic<bool>> pool_alive;
-	/* Shared counter from nvmpictx::frames_checked_out — decremented
+	/* Shared counter from nvmpi_dec_ctx::frames_checked_out — decremented
 	 * on release so respondToResolutionEvent knows when all frames
 	 * have been returned before destroying the pool. */
 	std::shared_ptr<std::atomic<int>> checked_out_count;
@@ -245,11 +247,12 @@ static void frame_fd_release_impl(void *opaque)
 //Ownership: the frame buffer is borrowed from the pool. Invoking the
 //release callback returns it to the empty queue. Failure to release
 //starves the pool and stalls decoding.
-int nvmpi_decoder_get_frame_fd(nvmpictx* ctx,
+int nvmpi_decoder_get_frame_fd(nvmpictx* h,
 	int *dmabuf_fd, int *width, int *height, int *pitch,
 	int64_t *timestamp,
 	nvmpi_frame_release_cb *release, void **opaque, bool wait)
 {
+	nvmpi_dec_ctx* ctx = static_cast<nvmpi_dec_ctx*>(h);
 	nvmpi_frame_buffer* fb;
 
 	/* Dequeue a filled frame buffer — same path as get_frame. */
@@ -315,8 +318,9 @@ int nvmpi_decoder_get_frame_fd(nvmpictx* ctx,
 //
 //The caller MUST re-prime extradata after this call so the hardware
 //decoder can reconfigure its capture plane (same path as initial setup).
-int nvmpi_decoder_flush(nvmpictx* ctx)
+int nvmpi_decoder_flush(nvmpictx* h)
 {
+	nvmpi_dec_ctx* ctx = static_cast<nvmpi_dec_ctx*>(h);
 	ctx->eos.store(true);
 	ctx->dec->capture_plane.setStreamStatus(false);
 	if (ctx->dec_capture_loop.joinable())
@@ -352,8 +356,9 @@ int nvmpi_decoder_flush(nvmpictx* ctx)
 //  7. Free the pool container, decoder device, and context.
 //
 //The handle is invalid after this call.
-int nvmpi_decoder_close(nvmpictx* ctx)
+int nvmpi_decoder_close(nvmpictx* h)
 {
+	nvmpi_dec_ctx* ctx = static_cast<nvmpi_dec_ctx*>(h);
 	if (!ctx)
 		return -1;
 

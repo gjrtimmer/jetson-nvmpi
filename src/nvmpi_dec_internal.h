@@ -1,6 +1,6 @@
 #pragma once
 
-#include "nvmpi.h"
+#include "nvmpi_ctx_base.h"
 #include "NvVideoDecoder.h"
 #include "nvUtils2NvBuf.h"
 #include "NVMPI_bufPool.hpp"
@@ -44,7 +44,7 @@ using namespace std;
 //nvmpi_decoder_close(). Shared between the user thread and the internal
 //capture thread; cross-thread handoff happens through framePool, and the
 //'eos' flag is the (best-effort) shutdown signal.
-struct nvmpictx
+struct nvmpi_dec_ctx : nvmpictx
 {
 	NvVideoDecoder *dec{nullptr};       //NVIDIA V4L2 decoder device wrapper
 	std::atomic<bool> eos{false};       //set on EOS or fatal error; stops capture loop
@@ -114,10 +114,10 @@ struct nvmpictx
 
 	//empty frame queue and free buffers memory
 	void deinitFramePool();
-	//alloc frame buffers based on frame_size data in nvmpictx
+	//alloc frame buffers based on frame_size data in nvmpi_dec_ctx
 	void initFramePool();
 
-	//get dst_dma buffer params and set corresponding frame size and linesize in nvmpictx
+	//get dst_dma buffer params and set corresponding frame size and linesize in nvmpi_dec_ctx
 	void updateFrameSizeParams();
 	//refresh src/dst rects and filter settings for the per-frame transform
 	void updateBufferTransformParams();
@@ -131,5 +131,5 @@ struct nvmpictx
 //Forward declarations
 NvBufferColorFormat getNvColorFormatFromV4l2Format(v4l2_format &format, bool want_10bit);
 void dec_capture_loop_fcn(void *arg);
-void respondToResolutionEvent(v4l2_format &format, v4l2_crop &crop, nvmpictx* ctx);
-int copyNvBufToFrame(nvmpictx* ctx, nvmpi_frame_buffer *nvmpiBuf, nvFrame* frame);
+void respondToResolutionEvent(v4l2_format &format, v4l2_crop &crop, nvmpi_dec_ctx* ctx);
+int copyNvBufToFrame(nvmpi_dec_ctx* ctx, nvmpi_frame_buffer *nvmpiBuf, nvFrame* frame);

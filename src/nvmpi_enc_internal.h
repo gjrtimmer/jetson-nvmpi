@@ -1,6 +1,6 @@
 #pragma once
 
-#include "nvmpi.h"
+#include "nvmpi_ctx_base.h"
 #include "NvVideoEncoder.h"
 #include "nvUtils2NvBuf.h"
 #include "NVMPI_bufPool.hpp"
@@ -36,10 +36,10 @@
 using namespace std;
 
 //Encoder context behind the opaque nvmpictx* handle of the public API
-//(a different struct than the decoder's nvmpictx in nvmpi_dec_internal.h — the
+//(a different struct than the decoder's nvmpi_dec_ctx in nvmpi_dec_internal.h — the
 //two are never mixed). Most fields mirror nvEncParam after translation to
 //V4L2 enums; shared between the user thread and the capture DQ thread.
-struct nvmpictx
+struct nvmpi_enc_ctx : nvmpictx
 {
 	uint32_t index;                //next OUTPUT-plane buffer index until all used once
 	uint32_t width;
@@ -123,4 +123,4 @@ bool encoder_capture_plane_dq_callback(struct v4l2_buffer *v4l2_buf, NvBuffer *b
 int copyFrameToNvBuf(nvFrame* frame, NvBuffer& buffer);
 //nvmpi_enc_stop_dq_thread: defined in nvmpi_enc_api.cpp; stops and joins the
 //capture DQ thread safely (see definition). Returns 0 ok, -1 join timed out.
-int nvmpi_enc_stop_dq_thread(nvmpictx* ctx);
+int nvmpi_enc_stop_dq_thread(nvmpi_enc_ctx* ctx);

@@ -5,7 +5,7 @@
  * prevent driver deadlock between capture thread and filter thread. */
 extern pthread_mutex_t nvmpi_transform_mutex;
 
-void respondToResolutionEvent(v4l2_format &format, v4l2_crop &crop,nvmpictx* ctx)
+void respondToResolutionEvent(v4l2_format &format, v4l2_crop &crop,nvmpi_dec_ctx* ctx)
 {
 	int ret=0;
 
@@ -94,11 +94,11 @@ void respondToResolutionEvent(v4l2_format &format, v4l2_crop &crop,nvmpictx* ctx
 struct transFormWorker
 {
 	std::thread _workerThr;
-	nvmpictx* _ctx = NULL;
+	nvmpi_dec_ctx* _ctx = NULL;
 
-	//void init(nvmpictx* ctx);
+	//void init(nvmpi_dec_ctx* ctx);
 
-	void start(nvmpictx* ctx);
+	void start(nvmpi_dec_ctx* ctx);
 	void stop();
 
 	bool isWaiting();
@@ -106,7 +106,7 @@ struct transFormWorker
 	void workerFnc();
 };
 
-void transFormWorker::start(nvmpictx* ctx)
+void transFormWorker::start(nvmpi_dec_ctx* ctx)
 {
 	_ctx = ctx;
 	_workerThr = std::thread(&transFormWorker::workerFnc,this);
@@ -131,7 +131,7 @@ void transFormWorker::workerFnc()
 //Exits when ctx->eos is set (EOS buffer, fatal error, or close()).
 void dec_capture_loop_fcn(void *arg)
 {
-	nvmpictx* ctx=(nvmpictx*)arg;
+	nvmpi_dec_ctx* ctx=(nvmpi_dec_ctx*)arg;
 	NvVideoDecoder *dec = ctx->dec;
 
 	struct v4l2_format v4l2Format;

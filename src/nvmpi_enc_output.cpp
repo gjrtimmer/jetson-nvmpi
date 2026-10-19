@@ -12,7 +12,7 @@
 //sizes the pool via the packet_pool_size option to avoid this.
 bool encoder_capture_plane_dq_callback(struct v4l2_buffer *v4l2_buf, NvBuffer * buffer, NvBuffer * shared_buffer __attribute__((unused)), void *arg)
 {
-	nvmpictx *ctx = (nvmpictx*)arg;
+	nvmpi_enc_ctx *ctx = (nvmpi_enc_ctx*)arg;
 
 	if (v4l2_buf == NULL)
 	{
@@ -72,7 +72,7 @@ bool encoder_capture_plane_dq_callback(struct v4l2_buffer *v4l2_buf, NvBuffer * 
 //YUV420 NvBufSurface per buffer, storing the fds in ctx->output_plane_fd
 //(freed in nvmpi_encoder_close). NvUtils-only code path.
 #if (OUTPLANE_MEMTYPE == OUTPLANE_MEMTYPE_DMA)
-int setup_output_dmabuf(nvmpictx *ctx, uint32_t num_buffers )
+int setup_output_dmabuf(nvmpi_enc_ctx *ctx, uint32_t num_buffers )
 {
     int ret=0;
     NvBufSurf::NvCommonAllocateParams cParams;

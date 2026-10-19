@@ -20,7 +20,7 @@
  * nvmpi_dec_capture.cpp: respondToResolutionEvent()).
  *
  * Companion files:
- *   nvmpi_dec_internal.h  — shared includes, defines, nvmpictx struct,
+ *   nvmpi_dec_internal.h  — shared includes, defines, nvmpi_dec_ctx struct,
  *                           and forward declarations.
  *   nvmpi_dec_api.cpp     — runtime API: put_packet, get_frame,
  *                           get_frame_fd, copyNvBufToFrame, flush, close.
@@ -35,7 +35,7 @@
 //These values drive the memcpy in copyNvBufToFrame(); the allocator may
 //choose pitches different from width, so they must be read back, not
 //assumed. Uses peekEmptyBuf() — safe only because no consumer runs yet.
-void nvmpictx::updateFrameSizeParams()
+void nvmpi_dec_ctx::updateFrameSizeParams()
 {
 	//it's safe when called from respondToResolutionEvent() after initFramePool()
 	nvmpi_frame_buffer* fb = framePool->peekEmptyBuf();
@@ -97,7 +97,7 @@ void nvmpictx::updateFrameSizeParams()
 //output resolution (downscale happens here when the resize option is set).
 //The two APIs differ slightly: NvUtils takes rect pointers, the legacy API
 //embeds the rects and needs the explicit session handle.
-void nvmpictx::updateBufferTransformParams()
+void nvmpi_dec_ctx::updateBufferTransformParams()
 {
 	src_rect.top = 0;
 	src_rect.left = 0;
@@ -127,7 +127,7 @@ void nvmpictx::updateBufferTransformParams()
 //pool queues. Uses the vector instead of the queues so that buffers
 //temporarily outside both queues (e.g. held by a concurrent get_frame
 //call during resolution change) are still freed.
-void nvmpictx::deinitFramePool()
+void nvmpi_dec_ctx::deinitFramePool()
 {
 	while(framePool->dqEmptyBuf()) {}
 	while(framePool->dqFilledBuf()) {}
@@ -144,7 +144,7 @@ void nvmpictx::deinitFramePool()
 //and user-requested pixel format, and seed the pool's "empty" queue with
 //them. These are the destination buffers of the VIC transform — distinct
 //from the block-linear CAPTURE-plane buffers the decoder writes into.
-void nvmpictx::initFramePool()
+void nvmpi_dec_ctx::initFramePool()
 {
 	/* Validate pool size — zero or negative would allocate nothing, causing
 	 * downstream dqEmptyBuf() to block forever or return null. */
@@ -224,7 +224,7 @@ nvmpictx* nvmpi_create_decoder(nvDecParam* param)
 	}
 #endif
 
-	nvmpictx* ctx=new nvmpictx();
+	nvmpi_dec_ctx* ctx=new nvmpi_dec_ctx();
 
 	/* Open the V4L2 decoder device. Retry up to 3 times with 100ms
 	 * backoff. Before each factory call, probe the device node ourselves

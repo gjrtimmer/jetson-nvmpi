@@ -25,7 +25,7 @@
  * or frees packet memory.
  *
  * Companion files:
- *   nvmpi_enc_internal.h  — shared includes, defines, nvmpictx struct,
+ *   nvmpi_enc_internal.h  — shared includes, defines, nvmpi_enc_ctx struct,
  *                           and forward declarations.
  *   nvmpi_enc_init.cpp    — nvmpi_create_encoder() (device open, format
  *                           negotiation, plane/stream setup).
@@ -39,8 +39,9 @@
 //Public API: take an empty packet out of the pool (e.g. to free or replace
 //it). Non-blocking: -1 when the empty queue is exhausted. The caller
 //assumes ownership of the returned packet.
-int nvmpi_encoder_dqEmptyPacket(nvmpictx* ctx,nvPacket** packet)
+int nvmpi_encoder_dqEmptyPacket(nvmpictx* h,nvPacket** packet)
 {
+	nvmpi_enc_ctx* ctx = static_cast<nvmpi_enc_ctx*>(h);
 	nvPacket* pkt = ctx->pktPool->dqEmptyBuf();
 	if(!pkt) return -1;
 	*packet = pkt;
@@ -50,8 +51,9 @@ int nvmpi_encoder_dqEmptyPacket(nvmpictx* ctx,nvPacket** packet)
 //Public API: donate an empty, caller-allocated packet to the pool so the
 //capture DQ callback can fill it. The pool stores only the pointer; the
 //caller remains responsible for the packet's eventual deallocation.
-void nvmpi_encoder_qEmptyPacket(nvmpictx* ctx,nvPacket* packet)
+void nvmpi_encoder_qEmptyPacket(nvmpictx* h,nvPacket* packet)
 {
+	nvmpi_enc_ctx* ctx = static_cast<nvmpi_enc_ctx*>(h);
 	ctx->pktPool->qEmptyBuf(packet);
 	return;
 }
@@ -64,8 +66,9 @@ void nvmpi_encoder_qEmptyPacket(nvmpictx* ctx,nvPacket* packet)
 //a packet arrives (0) or the DQ callback saw the EOS buffer (-2).
 //On success the caller holds the packet until re-queueing it via
 //nvmpi_encoder_qEmptyPacket().
-int nvmpi_encoder_get_packet(nvmpictx* ctx, nvPacket** packet, bool wait)
+int nvmpi_encoder_get_packet(nvmpictx* h, nvPacket** packet, bool wait)
 {
+	nvmpi_enc_ctx* ctx = static_cast<nvmpi_enc_ctx*>(h);
 	nvPacket* pkt;
 
 	if (wait)
@@ -96,8 +99,9 @@ int nvmpi_encoder_get_packet(nvmpictx* ctx, nvPacket** packet, bool wait)
 //V4L2_CID_MPEG_MFC51_VIDEO_FORCE_FRAME_TYPE. Safe to call from the user
 //thread while the DQ thread is running — the V4L2 ioctl is thread-safe.
 //Returns 0 on success, -1 on ioctl failure.
-int nvmpi_encoder_force_idr(nvmpictx* ctx)
+int nvmpi_encoder_force_idr(nvmpictx* h)
 {
+	nvmpi_enc_ctx* ctx = static_cast<nvmpi_enc_ctx*>(h);
 	int ret = ctx->enc->forceIDR();
 	if (ret < 0) {
 		NVMPI_LOG(NVMPI_LOG_ERROR, "Could not force IDR frame");
@@ -112,8 +116,9 @@ int nvmpi_encoder_force_idr(nvmpictx* ctx)
 //ctx->bitrate so the internal state stays consistent. For VBR mode the caller
 //should also adjust peak_bitrate externally if needed.
 //Returns 0 on success, -1 on ioctl failure.
-int nvmpi_encoder_set_bitrate(nvmpictx* ctx, unsigned int bitrate)
+int nvmpi_encoder_set_bitrate(nvmpictx* h, unsigned int bitrate)
 {
+	nvmpi_enc_ctx* ctx = static_cast<nvmpi_enc_ctx*>(h);
 	int ret = ctx->enc->setBitrate(bitrate);
 	if (ret < 0) {
 		NVMPI_LOG(NVMPI_LOG_ERROR, "Could not set bitrate to %u", bitrate);
@@ -142,8 +147,9 @@ int nvmpi_encoder_set_bitrate(nvmpictx* ctx, unsigned int bitrate)
 //
 //The caller (FFmpeg wrapper) is responsible for resetting its own
 //encoder_flushing flag and forcing the next frame to IDR if needed.
-int nvmpi_encoder_flush(nvmpictx* ctx)
+int nvmpi_encoder_flush(nvmpictx* h)
 {
+	nvmpi_enc_ctx* ctx = static_cast<nvmpi_enc_ctx*>(h);
 	int ret;
 
 	/* 1. Stop DQ thread — must complete before STREAMOFF to avoid
@@ -232,7 +238,7 @@ int nvmpi_encoder_flush(nvmpictx* ctx)
 //capPlaneGotEOS and returns false, and the thread exits by itself.
 //Returns 0 when the thread is gone, -1 if the join timed out (thread may
 //still touch ctx->enc: caller must NOT free it).
-int nvmpi_enc_stop_dq_thread(nvmpictx* ctx)
+int nvmpi_enc_stop_dq_thread(nvmpi_enc_ctx* ctx)
 {
 	if (!ctx->enc || !ctx->dq_thread_started)
 		return 0;
@@ -274,8 +280,9 @@ int nvmpi_enc_stop_dq_thread(nvmpictx* ctx)
 //dmabufs (DMA mode only), then destroys the device and the (by now empty)
 //packet pool. Packets still inside the pool are NOT freed here — the
 //FFmpeg wrapper drains and frees them first (nvmpienc_deinitPktPool).
-int nvmpi_encoder_close(nvmpictx* ctx)
+int nvmpi_encoder_close(nvmpictx* h)
 {
+	nvmpi_enc_ctx* ctx = static_cast<nvmpi_enc_ctx*>(h);
 	if (!ctx)
 		return -1;
 
