@@ -24,8 +24,9 @@ Contents:
 
 | Kind | Trigger | Jobs | Publishes |
 | --- | --- | --- | --- |
-| Branch / merge request | push to a branch, MR event | `build:jp6`, `build:jp5`, `test:api:jp6` | nothing |
-| Main snapshot | push to the default branch (also scheduled runs on it) | the above, then `dist:jp6`, `dist:jp5`, `upload:s3` | tarballs to S3 `snapshots/<short-sha>/` |
+| Branch / merge request | push to a branch, MR event | `build:jp6`, `build:jp5`, `test:mock:jp6`, `test:api:jp6` (docs-only MR: `ci:docs-only`) | nothing |
+| Main snapshot | push to the default branch | `build:*`, then `dist:jp6`, `dist:jp5`, `upload:s3` (no `test:api:jp6`) | tarballs to S3 `snapshots/<short-sha>/` |
+| Scheduled / web | schedule, manual web run | full set including `test:api:jp6` | snapshot when run on main |
 | Release | tag `vX.Y.Z` | the above, then `dist:*`, `upload:s3`, `release:gitlab`, `release:github` | S3 `releases/<ver>/`, package registry, GitLab Release, GitHub Release |
 | Downstream | manual | `trigger:jetson-ffmpeg` | starts a jetson-ffmpeg pipeline |
 
@@ -33,6 +34,34 @@ Pipeline de-duplication (`workflow:rules`): tag pipelines always run; a merge
 request pipeline runs for MR events; a branch pipeline is suppressed while the
 branch has an open MR (only the MR pipeline runs); otherwise branch pipelines
 run.
+
+## Pipeline rules (docs-only skip, fast-forward merges, image pins)
+
+- **Docs-only changes do not build.** `changes:` cannot be negated, so the
+  code paths (`src include stubs mock cmake vendor scripts packaging test`,
+  `CMakeLists.txt`, `nvmpi.pc.in`, `cliff.toml`, `.gitlab-ci.yml`) are listed
+  positively. Branch pipelines (main: against the previous push, others:
+  against `main`) are created only when one of them changed. Tag, schedule,
+  web, API and pipeline-trigger sources always run. An MR always gets a
+  pipeline: build and test jobs run only for code changes, otherwise just
+  `ci:docs-only`, so the merge gate (pipeline must succeed) still passes. A new
+  code directory must be added to the `paths` lists in `.gitlab-ci.yml`.
+- **Fast-forward merges.** The project merge method is `ff`, so `main` HEAD is
+  the commit the MR pipeline tested. `test:api:jp6` (the Orin) therefore does
+  not run on main pushes; it runs on MR, tag, schedule and web pipelines.
+  `dist:*` need it as `optional`, so tags still gate on it and main snapshots
+  do not wait for it.
+- **Pinned images.** Builder, runtime and release-tools images come from
+  `timmertech/jetson-builder` with immutable `<tag>-<sha8>` tags
+  (`JETSON_BUILDER_SHA`), pulled with `if-not-present`. To adopt new images,
+  take the sha8 of the latest green jetson-builder main pipeline and bump it.
+- **ccache.** `build:*` use ccache as CMake compiler launcher with a per-job
+  GitLab cache (`.ccache`, `CCACHE_COMPILERCHECK=content`).
+- **Downstream.** `trigger:jetson-ffmpeg` stays manual until jetson-ffmpeg
+  consumes `NVMPI_REF`; then automatic only on tag and nightly pipelines.
+- **API test iterations.** `test_api` rapid create/close loops default to 5
+  (decoder) and 10 (encoder); set `NVMPI_TEST_ITER` (the weekly schedule does)
+  for longer soak runs.
 
 ## Stages and jobs
 
@@ -115,9 +144,8 @@ it. If a Jetson job reports no matching runner, check that a runner carrying
 both tags is online.
 
 Builder and runtime images (JetPack 5 and JetPack 6 builder, the Jetson test
-image and the release-tools image) are built and published by the sibling
-[jetson-ffmpeg](https://github.com/gjrtimmer/jetson-ffmpeg) project's pipeline;
-this project only consumes them.
+image and the release-tools image) are built and published by the
+`timmertech/jetson-builder` project's pipeline; this project only consumes them.
 
 ## Branch and merge request pipelines
 
