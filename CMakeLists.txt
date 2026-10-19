@@ -273,7 +273,12 @@ if(BUILD_TESTING)
     set(NVMPI_MOCK_LD "${CMAKE_BINARY_DIR}/mock:${CMAKE_BINARY_DIR}:${CMAKE_CURRENT_SOURCE_DIR}/stubs")
     add_test(NAME mock_selftest COMMAND test_mock)
     add_test(NAME api_mock COMMAND test_api)
-    set_tests_properties(mock_selftest api_mock PROPERTIES
+    # Decoder data path + fault matrix (needs the mock model; mock-only).
+    add_executable(test_api_dec_mock test/api/test_api_dec_mock.c)
+    target_include_directories(test_api_dec_mock PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(test_api_dec_mock PRIVATE nvmpi Threads::Threads)
+    add_test(NAME api_mock_dec COMMAND test_api_dec_mock)
+    set_tests_properties(mock_selftest api_mock api_mock_dec PROPERTIES
       ENVIRONMENT "LD_LIBRARY_PATH=${NVMPI_MOCK_LD}"
       TIMEOUT 300)
   else()

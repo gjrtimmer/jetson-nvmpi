@@ -6,43 +6,17 @@
  * blocking DQBUF woken by STREAMOFF and by close, mmap/EXPBUF backing, event
  * queue, and NvBufSurface alloc/map/strict-FromFd/transform.
  *
+ * Decoder-model and fault-injection groups live in test_mock_dec.c and
+ * test_mock_fault.c (issue #99).
+ *
  * Runs on any Linux host (no Tegra). Exit 0 = all pass. A global alarm turns
  * a hang (the failure mode of a broken wake-up) into a clean failure.
  */
-#define _GNU_SOURCE
-#include <errno.h>
-#include <fcntl.h>
-#include <linux/videodev2.h>
-#include <nvbufsurface.h>
+#include "mock_test.h"
+
 #include <poll.h>
-#include <pthread.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <string.h>
-#include <sys/mman.h>
-#include <unistd.h>
 
-/* libnvv4l2 API (libv4l2.h is not part of the build image). */
-int v4l2_open(const char *file, int oflag, ...);
-int v4l2_close(int fd);
-int v4l2_ioctl(int fd, unsigned long int request, ...);
-void *v4l2_mmap(void *start, size_t length, int prot, int flags, int fd,
-                int64_t offset);
-/* Transform entry point, declared locally: avoids CUDA headers. */
-int NvBufSurfTransform(NvBufSurface *src, NvBufSurface *dst, void *params);
-
-static int fails;
-#define CHECK(c)                                                          \
-    do {                                                                  \
-        if (!(c)) {                                                       \
-            fprintf(stderr, "FAIL %s:%d: %s (errno %d)\n", __FILE__,      \
-                    __LINE__, #c, errno);                                 \
-            fails++;                                                      \
-        }                                                                 \
-    } while (0)
-
-#define OUT V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE
-#define CAP V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE
+int mock_fails;
 
 static int set_fmt(int fd, uint32_t type, uint32_t size)
 {
@@ -303,13 +277,15 @@ static void test_nvbufsurface(void)
 
 int main(void)
 {
-    alarm(60);                           /* a hang is a failure, not a stall */
+    alarm(120);                           /* a hang is a failure, not a stall */
     test_queue_basics();
     test_blocking_wakeups(0);
     test_blocking_wakeups(1);
     test_nvbufsurface();
-    if (fails) {
-        fprintf(stderr, "test_mock: %d check(s) failed\n", fails);
+    test_decoder_model();
+    test_fault_injection();
+    if (mock_fails) {
+        fprintf(stderr, "test_mock: %d check(s) failed\n", mock_fails);
         return 1;
     }
     printf("test_mock: all checks passed\n");
