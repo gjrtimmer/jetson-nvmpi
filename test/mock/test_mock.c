@@ -288,6 +288,7 @@ int main(void)
     test_blocking_wakeups(0);
     test_blocking_wakeups(1);
     test_nvbufsurface();
+    test_transform_nv12_i420();
     test_decoder_model();
     test_fault_injection();
     test_encoder_model();

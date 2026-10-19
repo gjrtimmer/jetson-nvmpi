@@ -106,54 +106,166 @@ static inline void mock_plane_release(const NvBufSurfaceParams *p,
     munmap(m, p->planeParams.psize[plane]);
 }
 
+/* A plane must lie inside its allocation: rows fit the pitch and the pitch
+ * times the height fits psize. Guards the mapped-memory accesses below
+ * against inconsistent (e.g. hand-built or fuzzed) planeParams. */
+static inline int mock_plane_fits(const NvBufSurfaceParams *p, uint32_t pl)
+{
+    const NvBufSurfacePlaneParams *pp = &p->planeParams;
+
+    return pp->width[pl] && pp->height[pl] && pp->bytesPerPix[pl] &&
+           (uint64_t)pp->width[pl] * pp->bytesPerPix[pl] <= pp->pitch[pl] &&
+           (uint64_t)pp->pitch[pl] * pp->height[pl] <= pp->psize[pl];
+}
+
+/* Copy plane spl of s into plane dpl of d, nearest-neighbour scaled when the
+ * sizes differ. Same bytes per pixel required. Returns 0 or -1. */
+static inline int mock_copy_plane(const NvBufSurfaceParams *s, uint32_t spl,
+                                  const NvBufSurfaceParams *d, uint32_t dpl)
+{
+    uint32_t bpp = s->planeParams.bytesPerPix[spl];
+    uint32_t sw = s->planeParams.width[spl], sh = s->planeParams.height[spl];
+    uint32_t dw = d->planeParams.width[dpl], dh = d->planeParams.height[dpl];
+    uint32_t y, x;
+    int st, dt;
+    unsigned char *sm, *dm;
+
+    if (bpp == 0 || bpp != d->planeParams.bytesPerPix[dpl] ||
+        sw == 0 || sh == 0 || dw == 0 || dh == 0)
+        return -1;
+    sm = mock_plane_acquire(s, spl, &st);
+    dm = sm ? mock_plane_acquire(d, dpl, &dt) : NULL;
+    if (!sm || !dm) {
+        if (sm)
+            mock_plane_release(s, spl, sm, st);
+        return -1;
+    }
+    for (y = 0; y < dh; y++) {
+        const unsigned char *srow = sm +
+            (uint64_t)(y * sh / dh) * s->planeParams.pitch[spl];
+        unsigned char *drow = dm + (uint64_t)y * d->planeParams.pitch[dpl];
+
+        if (sw == dw) {
+            memcpy(drow, srow, (size_t)dw * bpp);
+            continue;
+        }
+        for (x = 0; x < dw; x++)
+            memcpy(drow + (size_t)x * bpp,
+                   srow + (size_t)(x * sw / dw) * bpp, bpp);
+    }
+    mock_plane_release(s, spl, sm, st);
+    mock_plane_release(d, dpl, dm, dt);
+    return 0;
+}
+
+/* 8-bit 4:2:0 semi-planar (NV12 and its colour-range variants: same bytes)
+ * and planar (I420 family) share the luma plane and differ only in chroma
+ * packing. The colour-range tags are metadata; no pixel maths is modelled. */
+static inline int mock_is_nv12(int cf)
+{
+    return cf == NVBUF_COLOR_FORMAT_NV12 || cf == NVBUF_COLOR_FORMAT_NV12_ER ||
+           cf == NVBUF_COLOR_FORMAT_NV12_709 ||
+           cf == NVBUF_COLOR_FORMAT_NV12_709_ER ||
+           cf == NVBUF_COLOR_FORMAT_NV12_2020;
+}
+
+static inline int mock_is_i420(int cf)
+{
+    return cf == NVBUF_COLOR_FORMAT_YUV420 ||
+           cf == NVBUF_COLOR_FORMAT_YUV420_ER ||
+           cf == NVBUF_COLOR_FORMAT_YUV420_709 ||
+           cf == NVBUF_COLOR_FORMAT_YUV420_709_ER;
+}
+
+/*
+ * NV12 <-> I420 in one pass (convert + nearest-neighbour scale): the luma
+ * plane goes through mock_copy_plane; the interleaved UV plane is
+ * deinterleaved into U/V (or the reverse), sampling the source chroma grid
+ * at the scaled position. Returns 0 or -1 (inconsistent layout).
+ */
+static inline int mock_convert_420(const NvBufSurfaceParams *s,
+                                   const NvBufSurfaceParams *d)
+{
+    int semi_src = mock_is_nv12(s->colorFormat);
+    const NvBufSurfaceParams *sem = semi_src ? s : d;
+    const NvBufSurfaceParams *pla = semi_src ? d : s;
+    uint32_t sw = s->planeParams.width[1], sh = s->planeParams.height[1];
+    uint32_t dw = d->planeParams.width[1], dh = d->planeParams.height[1];
+    uint32_t pl, k, y, x;
+    int mt, pt[2], rc = -1;
+    unsigned char *mm, *pm[2];
+
+    if (sem->planeParams.num_planes != 2 || pla->planeParams.num_planes != 3)
+        return -1;
+    for (pl = 0; pl < 3; pl++)
+        if ((pl < 2 && !mock_plane_fits(sem, pl)) || !mock_plane_fits(pla, pl))
+            return -1;
+    /* Layout the model expects: Y 1 B/px, UV pairs 2 B/px, U and V 1 B/px,
+     * and the two planar chroma planes identical in size. */
+    if (sem->planeParams.bytesPerPix[0] != 1 ||
+        sem->planeParams.bytesPerPix[1] != 2 ||
+        pla->planeParams.bytesPerPix[0] != 1 ||
+        pla->planeParams.bytesPerPix[1] != 1 ||
+        pla->planeParams.bytesPerPix[2] != 1 ||
+        pla->planeParams.width[1] != pla->planeParams.width[2] ||
+        pla->planeParams.height[1] != pla->planeParams.height[2])
+        return -1;
+    if (mock_copy_plane(s, 0, d, 0) < 0)
+        return -1;
+
+    mm = mock_plane_acquire(sem, 1, &mt);
+    if (!mm)
+        return -1;
+    pm[0] = mock_plane_acquire(pla, 1, &pt[0]);
+    pm[1] = pm[0] ? mock_plane_acquire(pla, 2, &pt[1]) : NULL;
+    if (pm[0] && pm[1]) {
+        for (y = 0; y < dh; y++)
+            for (x = 0; x < dw; x++) {
+                uint32_t sx = x * sw / dw, sy = y * sh / dh;
+
+                for (k = 0; k < 2; k++) {
+                    if (semi_src)
+                        pm[k][(uint64_t)y * pla->planeParams.pitch[1 + k] + x] =
+                            mm[(uint64_t)sy * sem->planeParams.pitch[1] +
+                               (uint64_t)sx * 2 + k];
+                    else
+                        mm[(uint64_t)y * sem->planeParams.pitch[1] +
+                           (uint64_t)x * 2 + k] =
+                            pm[k][(uint64_t)sy * pla->planeParams.pitch[1 + k] +
+                                  sx];
+                }
+            }
+        rc = 0;
+    }
+    if (pm[1])
+        mock_plane_release(pla, 2, pm[1], pt[1]);
+    if (pm[0])
+        mock_plane_release(pla, 1, pm[0], pt[0]);
+    mock_plane_release(sem, 1, mm, mt);
+    return rc;
+}
+
 /*
  * Copy (and nearest-neighbour scale when sizes differ) all planes of
- * src -> dst. Both must have the same plane count and per-plane bytes per
- * pixel (no colour conversion in the skeleton: that belongs to the decoder
- * model, #99). Returns 0 or -1. Callers serialise concurrent use.
+ * src -> dst. Same-layout pairs need the same plane count and per-plane
+ * bytes per pixel; 8-bit NV12 <-> I420 is converted (mock_convert_420).
+ * Any other cross-format pair is rejected. Returns 0 or -1. Callers
+ * serialise concurrent use.
  */
 static inline int mock_copy_params(const NvBufSurfaceParams *s,
                                    const NvBufSurfaceParams *d)
 {
-    uint32_t pl, y, x, n = s->planeParams.num_planes;
-    int rc = 0;
+    uint32_t pl, n = s->planeParams.num_planes;
 
+    if ((mock_is_nv12(s->colorFormat) && mock_is_i420(d->colorFormat)) ||
+        (mock_is_i420(s->colorFormat) && mock_is_nv12(d->colorFormat)))
+        return mock_convert_420(s, d);
     if (n == 0 || n != d->planeParams.num_planes)
         return -1;
-    for (pl = 0; pl < n && !rc; pl++) {
-        uint32_t bpp = s->planeParams.bytesPerPix[pl];
-        uint32_t sw = s->planeParams.width[pl], sh = s->planeParams.height[pl];
-        uint32_t dw = d->planeParams.width[pl], dh = d->planeParams.height[pl];
-        int st, dt;
-        unsigned char *sm, *dm;
-
-        if (bpp == 0 || bpp != d->planeParams.bytesPerPix[pl] ||
-            sw == 0 || sh == 0 || dw == 0 || dh == 0)
+    for (pl = 0; pl < n; pl++)
+        if (mock_copy_plane(s, pl, d, pl) < 0)
             return -1;
-        sm = mock_plane_acquire(s, pl, &st);
-        dm = sm ? mock_plane_acquire(d, pl, &dt) : NULL;
-        if (!sm || !dm) {
-            if (sm)
-                mock_plane_release(s, pl, sm, st);
-            return -1;
-        }
-        for (y = 0; y < dh; y++) {
-            const unsigned char *srow = sm +
-                (uint64_t)(y * sh / dh) * s->planeParams.pitch[pl];
-            unsigned char *drow = dm + (uint64_t)y * d->planeParams.pitch[pl];
-
-            if (sw == dw) {
-                memcpy(drow, srow, (size_t)dw * bpp);
-                continue;
-            }
-            for (x = 0; x < dw; x++)
-                memcpy(drow + (size_t)x * bpp,
-                       srow + (size_t)(x * sw / dw) * bpp, bpp);
-        }
-        mock_plane_release(s, pl, sm, st);
-        mock_plane_release(d, pl, dm, dt);
-    }
-    return rc;
+    return 0;
 }
 
 #endif /* NVMPI_MOCK_NVBUF_UTIL_H */

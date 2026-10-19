@@ -7,9 +7,13 @@
  * libnvmpi serialises them itself (nvmpi_vic.cpp). Serialising here keeps the
  * mock data-race free; it does not try to reproduce the deadlock.
  *
+ * Colour conversion is limited to 8-bit 4:2:0 NV12 <-> I420 (chroma
+ * (de)interleave, combinable with scaling; see mock_convert_420). Other
+ * format pairs must have matching plane layouts, else XFORM_UNSUPP.
+ *
  * Not modelled yet (decoder/encoder data models, #99/#100): crop rectangles,
- * flips, colour conversion between different formats (plane counts must
- * match), composite/blend, async sync objects.
+ * flips, any other colour conversion (10-bit, 4:4:4, RGB), composite/blend,
+ * async sync objects.
  *
  * The CUDA/transform headers are not included: only the NvBufSurface layout
  * is needed, and the unsupported entry points take opaque pointers (the C
