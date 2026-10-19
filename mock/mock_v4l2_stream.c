@@ -1,6 +1,6 @@
 /*
- * mock_v4l2_stream.c - EXPBUF, STREAMON/OFF and the v4l2_mmap cookie lookup
- * of the V4L2 mock (split from mock_v4l2_queue.c to stay under 400 LOC).
+ * mock_v4l2_stream.c - EXPBUF and STREAMON/OFF of the V4L2 mock (split from
+ * mock_v4l2_queue.c to stay under 400 LOC).
  * Each function takes ctx->mu itself; callers hold only a ctx reference.
  */
 #define _GNU_SOURCE
@@ -113,46 +113,6 @@ int mock_do_stream(struct mock_ctx *ctx, uint32_t type, bool on)
     }
     pthread_cond_broadcast(&ctx->cv);    /* wake DQBUF waiters */
     mock_update_ready(ctx);
-    pthread_mutex_unlock(&ctx->mu);
-    if (ret) {
-        errno = ret;
-        return -1;
-    }
-    return 0;
-}
-
-/* v4l2_mmap helper: decode the cookie back to (queue, buffer, plane) and
- * return the buffer's memfd plus the plane's offset inside it. */
-int mock_mmap_lookup(struct mock_ctx *ctx, int64_t offset, size_t length,
-                     int *memfd_out, int64_t *off_out)
-{
-    int ret = 0;
-    int64_t c;
-    uint32_t plane, idx, qi;
-    struct mock_queue *q;
-
-    if (offset <= 0 || offset % MOCK_PAGE) {
-        errno = EINVAL;
-        return -1;
-    }
-    c = offset / MOCK_PAGE - 1;
-    plane = (uint32_t)(c % MOCK_MAX_PLANES);
-    idx = (uint32_t)((c / MOCK_MAX_PLANES) % MOCK_MAX_BUFS);
-    qi = (uint32_t)(c / MOCK_MAX_PLANES / MOCK_MAX_BUFS);
-    if (qi >= MOCK_NQ) {
-        errno = EINVAL;
-        return -1;
-    }
-    pthread_mutex_lock(&ctx->mu);
-    q = &ctx->q[qi];
-    if (q->memory != V4L2_MEMORY_MMAP || idx >= q->n_bufs ||
-        plane >= q->bufs[idx].n_planes || q->bufs[idx].memfd < 0 ||
-        length > q->bufs[idx].length[plane]) {
-        ret = EINVAL;
-    } else {
-        *memfd_out = q->bufs[idx].memfd;
-        *off_out = q->bufs[idx].plane_off[plane];
-    }
     pthread_mutex_unlock(&ctx->mu);
     if (ret) {
         errno = ret;

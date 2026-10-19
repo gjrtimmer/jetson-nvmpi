@@ -43,6 +43,7 @@
 #define _GNU_SOURCE
 #include "mock_v4l2.h"
 #include "mock_dec.h"
+#include "mock_env.h"
 #include "mock_log.h"
 
 #include <errno.h>
@@ -64,22 +65,6 @@
 #define DEC_MAX_FILL    (1u << 28) /* never touch a surface bigger than this */
 
 
-/* Parse a decimal env var in [lo, hi]; false when unset/invalid. */
-static bool env_uint(const char *name, uint32_t lo, uint32_t hi, uint32_t *out)
-{
-    const char *s = getenv(name);
-    char *end = NULL;
-    unsigned long v;
-
-    if (!s || *s < '0' || *s > '9')
-        return false;
-    v = strtoul(s, &end, 10);
-    if (*end != '\0' || v < lo || v > hi)
-        return false;
-    *out = (uint32_t)v;
-    return true;
-}
-
 static void dec_on_open(struct mock_ctx *ctx)
 {
     /* Allocated here; freed in dec_on_close() (single deallocation point). */
@@ -89,14 +74,14 @@ static void dec_on_open(struct mock_ctx *ctx)
     if (!m)
         return;                    /* ctx->model NULL: model stays inert    */
     m->last_idx = -1;
-    if (env_uint("NVMPI_MOCK_WIDTH", MOCK_DEC_MIN_DIM, MOCK_DEC_MAX_DIM, &w) &&
-        env_uint("NVMPI_MOCK_HEIGHT", MOCK_DEC_MIN_DIM, MOCK_DEC_MAX_DIM, &h) &&
+    if (mock_env_uint("NVMPI_MOCK_WIDTH", MOCK_DEC_MIN_DIM, MOCK_DEC_MAX_DIM, &w) &&
+        mock_env_uint("NVMPI_MOCK_HEIGHT", MOCK_DEC_MIN_DIM, MOCK_DEC_MAX_DIM, &h) &&
         !(w & 1) && !(h & 1)) {
         m->env_dims = true;
         m->env_w = w;
         m->env_h = h;
     }
-    (void)env_uint("NVMPI_MOCK_DQBUF_WAIT_MS", 0, 60000, &wait);
+    (void)mock_env_uint("NVMPI_MOCK_DQBUF_WAIT_MS", 0, 60000, &wait);
     ctx->dq_wait_ms = wait;
     /* A DQBUF released by STREAMOFF reports EAGAIN, not EINVAL. libnvmpi's
      * flush()/close() stream the CAPTURE queue off while its capture thread

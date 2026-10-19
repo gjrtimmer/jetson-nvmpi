@@ -9,6 +9,7 @@
 #define _GNU_SOURCE
 #include "mock_v4l2.h"
 #include "mock_log.h"
+#include "mock_faults.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -89,6 +90,12 @@ MOCK_EXPORT int v4l2_open(const char *file, int oflag, ...)
      * /dev/nvhost-nvdec, ... Anything else is "no such device". */
     if (!file || strncmp(file, "/dev/", 5) != 0) {
         errno = ENOENT;
+        return -1;
+    }
+
+    /* NVMPI_MOCK_FAULT=open@N: the device is "gone" (driver not loaded). */
+    if (mock_fault_hit(MFP_OPEN)) {
+        errno = ENODEV;
         return -1;
     }
 
@@ -282,23 +289,17 @@ MOCK_EXPORT int v4l2_ioctl(int fd, unsigned long int request, ...)
     return ret;
 }
 
+/* MMAP buffers are mapped through their EXPBUF fd at the QUERYBUF mem_offset
+ * (what NvBuffer::map() does; the offset is the plane's position in the
+ * buffer's memfd, 0 for plane 0, so it cannot identify a buffer on the
+ * device fd). Nothing in libnvmpi or the sample classes uses v4l2_mmap. */
 MOCK_EXPORT void *v4l2_mmap(void *start, size_t length, int prot, int flags,
                             int fd, int64_t offset)
 {
-    struct mock_ctx *ctx = mock_ctx_get(fd);
-    int memfd = -1;
-    int64_t off = 0;
-    void *p = MAP_FAILED;
-
-    if (!ctx)
-        return MAP_FAILED;
-    if (mock_mmap_lookup(ctx, offset, length, &memfd, &off) == 0)
-        /* The cookie only selects (buffer, plane); the mapping is taken at
-         * that plane's offset inside the buffer's memfd. The mapping
-         * outlives the memfd, so REQBUFS(0) is safe. */
-        p = mmap(start, length, prot, flags & ~MAP_ANONYMOUS, memfd, off);
-    mock_ctx_put(ctx);
-    return p;
+    (void)start; (void)length; (void)prot; (void)flags; (void)fd;
+    (void)offset;
+    errno = ENODEV;
+    return MAP_FAILED;
 }
 
 MOCK_EXPORT int v4l2_munmap(void *start, size_t length)
