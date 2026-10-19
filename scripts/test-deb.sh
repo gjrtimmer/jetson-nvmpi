@@ -76,7 +76,13 @@ PKGS=(wget gcc libc6-dev pkg-config binutils)
 [ -s /etc/ssl/certs/ca-certificates.crt ] || PKGS+=(ca-certificates)
 apt-get install -y -qq --no-install-recommends "${PKGS[@]}"
 if ! grep -rqs "repo.download.nvidia.com/jetson/${SOC}" /etc/apt/sources.list /etc/apt/sources.list.d/; then
-    wget -qO /etc/apt/trusted.gpg.d/jetson-ota-public.asc https://repo.download.nvidia.com/jetson/jetson-ota-public.asc
+    wget -O /etc/apt/trusted.gpg.d/jetson-ota-public.asc https://repo.download.nvidia.com/jetson/jetson-ota-public.asc || {
+        echo "[E] fetching the NVIDIA apt key failed; CA setup:" >&2
+        grep -E ' /etc/ssl' /proc/mounts >&2 || true
+        ls -ld /etc/ssl /etc/ssl/certs /etc/ssl/certs/ca-certificates.crt >&2 || true
+        grep -c 'BEGIN CERTIFICATE' /etc/ssl/certs/ca-certificates.crt >&2 || true
+        exit 1
+    }
     {
         echo "deb https://repo.download.nvidia.com/jetson/common ${L4T} main"
         echo "deb https://repo.download.nvidia.com/jetson/${SOC} ${L4T} main"
