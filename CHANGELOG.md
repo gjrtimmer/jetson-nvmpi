@@ -3,6 +3,34 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.0.2 - 2026-10-19
+
+### Bug Fixes
+
+
+**enc**
+
+
+- Do not lose tail packets when draining at EOS (#111)
+
+
+### Documentation
+
+
+**api**
+
+
+- Document all return codes of create/close/get_frame (#95)
+
+
+### Testing
+
+
+**mock**
+
+
+- Add encoder determinism and tail-loss stress case
+
 ## 4.0.1 - 2026-10-19
 
 ### Bug Fixes
