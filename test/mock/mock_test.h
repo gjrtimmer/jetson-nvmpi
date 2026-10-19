@@ -42,5 +42,7 @@ extern int mock_fails;
 /* test_mock_dec.c: decoder model. test_mock_fault.c: fault/delay injection. */
 void test_decoder_model(void);
 void test_fault_injection(void);
+/* test_mock_enc.c: encoder model. */
+void test_encoder_model(void);
 
 #endif /* NVMPI_TEST_MOCK_TEST_H */

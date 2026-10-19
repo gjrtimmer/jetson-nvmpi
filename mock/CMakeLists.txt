@@ -56,7 +56,8 @@ if(BUILD_TESTING)
 	add_executable(test_mock
 		${CMAKE_SOURCE_DIR}/test/mock/test_mock.c
 		${CMAKE_SOURCE_DIR}/test/mock/test_mock_dec.c
-		${CMAKE_SOURCE_DIR}/test/mock/test_mock_fault.c)
+		${CMAKE_SOURCE_DIR}/test/mock/test_mock_fault.c
+		${CMAKE_SOURCE_DIR}/test/mock/test_mock_enc.c)
 	target_include_directories(test_mock PRIVATE ${MOCK_INCLUDE_DIRS})
 	target_link_libraries(test_mock PRIVATE
 		nvv4l2_mock nvbufsurface_mock nvbufsurftransform_mock Threads::Threads)
