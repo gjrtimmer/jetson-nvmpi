@@ -80,13 +80,15 @@ s3_curl() {
 # s3_put <file> <base-url-with-bucket> <key>: PUT then verify with signed HEAD.
 s3_put() {
     local file="$1" base="$2" key="$3" size
-    # Keys go into the URL unencoded, so only allow a safe charset.
-    if [[ ! "${key}" =~ ^[A-Za-z0-9._~/-]+$ ]]; then
+    # Keys go into the URL, so only allow a safe charset. '+' (snapshot deb
+    # versions) is sent as %2B, its SigV4 canonical form.
+    if [[ ! "${key}" =~ ^[A-Za-z0-9._~+/-]+$ ]]; then
         echo "[E] unsafe object key: ${key}" >&2; return 1
     fi
     echo "  -> ${key}"
-    s3_curl --upload-file "${file}" "${base}/${key}"
-    size="$(s3_curl -I "${base}/${key}" | tr -d '\r' | awk 'tolower($1)=="content-length:" {print $2}')"
+    local url="${base}/${key//+/%2B}"
+    s3_curl --upload-file "${file}" "${url}"
+    size="$(s3_curl -I "${url}" | tr -d '\r' | awk 'tolower($1)=="content-length:" {print $2}')"
     echo "[i] verified ${key} (${size:-unknown} bytes)"
 }
 
