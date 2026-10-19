@@ -80,12 +80,19 @@ int nvmpi_encoder_get_packet(nvmpictx* h, nvPacket** packet, bool wait)
 	if(!pkt)
 	{
 		if(!ctx->flushing.load(std::memory_order_acquire)) return -1;
-		bool spin = true;
-		while(spin)
+		/* Read the EOS flag BEFORE polling the filled queue (#111). The DQ
+		 * thread publishes every packet (qFilledBuf) before it stores the
+		 * EOS flag (release), so once this acquire load sees EOS, all
+		 * packets are already queued and a following empty dq means the
+		 * stream is really drained. The old order (poll, then load) let
+		 * the DQ thread publish the last packets and set EOS in between,
+		 * and the tail of the stream was lost (-2 with packets queued). */
+		for(;;)
 		{
+			bool eos = ctx->capPlaneGotEOS.load(std::memory_order_acquire);
 			pkt = ctx->pktPool->dqFilledBuf();
-			if(pkt || ctx->capPlaneGotEOS.load(std::memory_order_acquire)) spin = false;
-			else std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			if(pkt || eos) break;
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
 		}
 		if(!pkt) return -2; //if got eos
 	}
