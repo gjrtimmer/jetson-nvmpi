@@ -8,6 +8,7 @@
  */
 #include "nvmpi_frame_buffer.hpp"
 #include "nvmpi_log.h"
+#include "nvmpi_alloc.h"
 
 //Allocate one hardware DMA buffer according to input_params and take
 //ownership of it. Returns true on success. On the NvUtils path the
@@ -20,7 +21,7 @@ bool nvmpi_frame_buffer::alloc(NvBufferCreateParams& input_params)
 #ifdef WITH_NVUTILS
 	//NvUtils path: allocate a single surface-array buffer; the fd is the
 	//handle used for queueing/destruction.
-	ret = NvBufSurf::NvAllocate(&input_params, 1, &dst_dma_fd);
+	ret = nvmpi_alloc_surfaces(&input_params, 1, &dst_dma_fd);
 	if(ret<0)
 	{
 		NVMPI_LOG(NVMPI_LOG_ERROR, "Failed to allocate buffer");

@@ -39,6 +39,15 @@ void nvmpictx::updateFrameSizeParams()
 {
 	//it's safe when called from respondToResolutionEvent() after initFramePool()
 	nvmpi_frame_buffer* fb = framePool->peekEmptyBuf();
+	/* initFramePool() may have allocated no buffer at all (allocator
+	 * exhausted); there is no geometry to cache then, and dereferencing the
+	 * missing buffer crashed here. The pool is rebuilt at the next resolution
+	 * change; until then no frame can be produced (num_planes stays 0). */
+	if (!fb) {
+		NVMPI_LOG(NVMPI_LOG_ERROR, "updateFrameSizeParams: frame pool is empty (allocation failed)");
+		num_planes = 0;
+		return;
+	}
 #ifdef WITH_NVUTILS
 	NvBufSurfacePlaneParams parm;
 	NvBufSurfaceParams dst_dma_surface_params;

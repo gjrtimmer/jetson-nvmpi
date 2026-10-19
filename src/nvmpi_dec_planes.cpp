@@ -1,4 +1,5 @@
 #include "nvmpi_dec_internal.h"
+#include "nvmpi_alloc.h"
 
 //Map the colorspace/quantization reported by the decoder on its CAPTURE
 //plane to the matching NvBuffer NV12 color format variant (BT.601/709/2020,
@@ -111,10 +112,10 @@ void nvmpictx::initDecoderCapturePlane(v4l2_format &format)
 
 	//NvUtils path: allocate all buffers in one call, then resolve the
 	//NvBufSurface view of each fd for use with NvBufSurfTransform.
-	ret = NvBufSurf::NvAllocate(&cParams, numberCaptureBuffers, dmaBufferFileDescriptor);
+	ret = nvmpi_alloc_surfaces(&cParams, numberCaptureBuffers, dmaBufferFileDescriptor);
 	if (ret < 0) {
 		NVMPI_LOG(NVMPI_LOG_ERROR, "Failed to create capture-plane buffers (code=%d)", ret);
-		/* NvAllocate is all-or-nothing — no partial cleanup needed. */
+		/* nvmpi_alloc_surfaces is all-or-nothing — no partial cleanup needed. */
 		numberCaptureBuffers = 0;
 		return;
 	}
@@ -125,7 +126,7 @@ void nvmpictx::initDecoderCapturePlane(v4l2_format &format)
 			NVMPI_LOG(NVMPI_LOG_ERROR,
 				  "Failed to get surface for buffer %d (code=%d); "
 				  "cleaning up %d allocated fds", index, ret, numberCaptureBuffers);
-			/* Destroy all batch-allocated fds — NvAllocate succeeded so
+			/* Destroy all batch-allocated fds — the batch allocation succeeded so
 			 * all numberCaptureBuffers fds are valid. */
 			for (int j = 0; j < numberCaptureBuffers; j++) {
 				NvBufferDestroy(dmaBufferFileDescriptor[j]);
