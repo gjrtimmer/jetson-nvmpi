@@ -178,7 +178,7 @@ git push origin "$VERSION_TAG"
 glab api "projects/timmertech%2Fjetson-nvmpi/pipelines?ref=${VERSION_TAG}&per_page=1" | jq '.[0] | {id,status}'
 ```
 
-Stages: build → test (`test:api:jp6` on Jetson) → dist (real build + `.tar.gz`
+Stages: build → test (`test:api:hw` on Jetson) → dist (real build + `.tar.gz`
 + `.deb`, tag/CMake gate) → publish (`upload:s3`, changelog) → release
 (`release:gitlab` and `release:github`, independent).
 Poll every **600s**.
