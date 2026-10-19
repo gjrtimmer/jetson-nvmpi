@@ -375,7 +375,8 @@ hardware suites live in the jetson-ffmpeg repository.
 The GitLab pipeline:
 
 ```text
-build (stubs: jp6, jp5; unit tests)  ->  test (test_api on the Jetson runner)
+build (stubs: jp6, jp5; unit tests)  ->  test (test:api:hw on the Jetson runner;
+        stub jp6/jp5, ASan, TSan on the mock, in parallel)
         -> dist (real libs, package: jp6, jp5)  ->  publish (S3)  ->  release
 ```
 

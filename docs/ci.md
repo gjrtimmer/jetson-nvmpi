@@ -24,9 +24,9 @@ Contents:
 
 | Kind | Trigger | Jobs | Publishes |
 | --- | --- | --- | --- |
-| Branch / merge request | push to a branch, MR event | `build:jp6`, `build:jp5`, `test:mock:jp6`, `test:api:jp6` (docs-only MR: `ci:docs-only`) | nothing |
-| Main snapshot | push to the default branch | `build:*`, then `dist:jp6`, `dist:jp5`, `upload:s3` (no `test:api:jp6`) | tarballs to S3 `snapshots/<short-sha>/` |
-| Scheduled / web | schedule, manual web run | full set including `test:api:jp6` | snapshot when run on main |
+| Branch / merge request | push to a branch, MR event | `build:jp6`, `build:jp5`, `test:api:stub:jp6`, `test:api:stub:jp5`, `test:api:asan`, `test:api:tsan`, `test:api:hw` (docs-only MR: `ci:docs-only`) | nothing |
+| Main snapshot | push to the default branch | `build:*`, then `dist:jp6`, `dist:jp5`, `upload:s3` (no `test:api:hw`) | tarballs to S3 `snapshots/<short-sha>/` |
+| Scheduled / web | schedule, manual web run | full set including `test:api:hw` | snapshot when run on main |
 | Release | tag `vX.Y.Z` | the above, then `dist:*`, `upload:s3`, `release:gitlab`, `release:github` | S3 `releases/<ver>/`, package registry, GitLab Release, GitHub Release |
 | Downstream | manual | `trigger:jetson-ffmpeg` | starts a jetson-ffmpeg pipeline |
 
@@ -47,7 +47,7 @@ run.
   `ci:docs-only`, so the merge gate (pipeline must succeed) still passes. A new
   code directory must be added to the `paths` lists in `.gitlab-ci.yml`.
 - **Fast-forward merges.** The project merge method is `ff`, so `main` HEAD is
-  the commit the MR pipeline tested. `test:api:jp6` (the Orin) therefore does
+  the commit the MR pipeline tested. `test:api:hw` (the Orin) therefore does
   not run on main pushes; it runs on MR, tag, schedule and web pipelines.
   `dist:*` need it as `optional`, so tags still gate on it and main snapshots
   do not wait for it.
@@ -71,9 +71,12 @@ Stages, in order: `build`, `test`, `dist`, `publish`, `release`, `downstream`.
 | --- | --- | --- | --- |
 | build | `build:jp6` | Compile libnvmpi against the **stubs** (compile check, not runnable) in the JetPack 6 builder image, run the `bufpool` unit test with `ctest`, install into `_nvmpi/`. | any runner |
 | build | `build:jp5` | Same in the JetPack 5 builder image. Catches V4L2 headers/symbols that exist on JetPack 6 (kernel 5.15+) but not on JetPack 5 (kernel 5.10); covers all JetPack 5 releases. | any runner |
-| test | `test:api:jp6` | Run the `test_api` binary built by `build:jp6` on real Jetson hardware. | Jetson runner |
-| dist | `dist:jp6` | Build the **real** (non-stub) library against NVIDIA's apt-repository libraries and package it. Needs `test:api:jp6`. | any arm64 runner |
-| dist | `dist:jp5` | Same for JetPack 5. Needs `build:jp5` and `test:api:jp6`. | any arm64 runner |
+| test | `test:api:hw` | Run the `test_api` binary built by `build:jp6` on real Jetson hardware. | Jetson runner |
+| test | `test:api:stub:jp6`, `test:api:stub:jp5` | Build the behavioural Jetson mock (`NVMPI_MOCK=ON`) in the JetPack 6 / 5 builder image and run `ctest` (`mock_selftest`, `api_mock`, `api_mock_dec`, `api_mock_enc`). | any runner, no tags |
+| test | `test:api:asan` | Same suite in an ASan + UBSan + LSan build (`NVMPI_SANITIZER=address`). | any runner, no tags |
+| test | `test:api:tsan` | Same suite in a TSan build (`NVMPI_SANITIZER=thread`), run under `setarch -R`. | any runner, no tags |
+| dist | `dist:jp6` | Build the **real** (non-stub) library against NVIDIA's apt-repository libraries and package it. Needs `test:api:hw`. | any arm64 runner |
+| dist | `dist:jp5` | Same for JetPack 5. Needs `build:jp5` and `test:api:hw`. | any arm64 runner |
 | publish | `upload:s3` | Upload the tarballs (and, on tags, the changelog) to the S3 bucket. | release-tools image |
 | release | `release:gitlab` | Upload to the GitLab generic package registry and create the GitLab Release. Tags only. | release-tools image |
 | downstream | `trigger:jetson-ffmpeg` | Manual: start a jetson-ffmpeg pipeline for this commit. | trigger |
@@ -84,7 +87,7 @@ Details per job:
   then `ctest -R bufpool` and `cmake --install build`. Artifacts: `_nvmpi/` and
   `build/`, kept 1 hour. `build/` carries the stub-linked `test_api` used by
   the Jetson test.
-- **`test:api:jp6`** is described in [Hardware test](#hardware-test).
+- **`test:api:hw`** is described in [Hardware test](#hardware-test).
 - **`dist:*`** install NVIDIA's `nvidia-l4t-multimedia` and
   `nvidia-l4t-multimedia-utils` packages from NVIDIA's public Jetson apt
   repository inside a plain container (a touch file skips the package's "must run
@@ -96,9 +99,29 @@ Details per job:
   `NOTES.md` on as an artifact so the changelog is generated only once.
 - **`release:gitlab`** runs `scripts/release.sh`.
 
+### Stub, sanitizer and hardware jobs
+
+The mock jobs are **additive**: no hardware suite is removed or replaced, and
+`test:api:hw` runs exactly what it ran before. The mock catches logic,
+lifecycle, memory and thread bugs early; real driver behaviour is only proven
+on the Orin.
+
+- All of `test:api:stub:*`, `test:api:asan`, `test:api:tsan` and `test:api:hw`
+  start in parallel: the mock jobs use `needs: []` (they build their own tree),
+  `test:api:hw` needs `build:jp6`.
+- `workflow:auto_cancel:on_job_failure: all` cancels the rest of the pipeline,
+  including a still-queued `test:api:hw`, when any job fails, so a mock failure
+  does not occupy the shared Orin.
+- Forked test children end with `_exit()`, which skips LeakSanitizer's exit
+  check. `test/api/leak_check.h` runs `__lsan_do_leaks_check()` before each
+  `_exit()` in ASan builds (no-op otherwise), so leaks fail the offending case
+  without valgrind.
+- Locally: `cmake -S . -B build-asan -DNVMPI_MOCK=ON -DNVMPI_SANITIZER=address`
+  (or `thread`), build, `scripts/mock-dev-nodes.sh`, `ctest`.
+
 ### Hardware test
 
-`test:api:jp6` runs `build/test_api` (see
+`test:api:hw` runs `build/test_api` (see
 [Testing](../README.md#testing)) with:
 
 ```text
@@ -136,7 +159,7 @@ Design constraints:
 | Tag | Used by | Purpose |
 | --- | --- | --- |
 | _(none)_ | `build:*`, `dist:*`, `upload:s3`, `release:*`, `trigger:*` | Run on any available runner; the project's runners are Kubernetes (k3s) based. No GPU needed. |
-| `jetson` and `orin-nx` | `test:api:jp6` only | Selects the runner with real Orin NX hardware. Both tags are required. |
+| `jetson` and `orin-nx` | `test:api:hw` only | Selects the runner with real Orin NX hardware. Both tags are required. |
 
 Adding a new hardware variant means registering a project runner tagged
 `jetson` plus the variant tag and adding a job (or matrix entry) that selects
@@ -149,7 +172,7 @@ image and the release-tools image) are built and published by the
 
 ## Branch and merge request pipelines
 
-`build:jp6`, `build:jp5` and `test:api:jp6`. These jobs carry no `rules:` of
+`build:jp6`, `build:jp5` and `test:api:hw`. These jobs carry no `rules:` of
 their own: `workflow:rules` already limits pipelines, and they must also run on
 tag pipelines, so a release only happens after the Jetson test passed on that
 exact commit. Nothing is published.
