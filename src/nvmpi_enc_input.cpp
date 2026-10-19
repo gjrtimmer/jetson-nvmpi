@@ -29,6 +29,7 @@
  *                           setup_output_dmabuf (OUTPUT-plane DMA path).
  */
 #include "nvmpi_enc_internal.h"
+#include "nvmpi_alloc.h"
 
 //Copy the caller's raw frame planes into a V4L2 OUTPUT-plane NvBuffer.
 //Line-by-line memcpy because the caller's linesize and the hw buffer's
@@ -286,7 +287,9 @@ int nvmpi_encoder_put_frame_fd(nvmpictx* ctx,
 			cParams.memType = NVBUF_MEM_SURFACE_ARRAY;
 
 			int fd = -1;
-			ret = NvBufSurf::NvAllocate(&cParams, 1, &fd);
+			/* Checked allocation: NvAllocate dereferences NULL when the
+			 * allocator fails (see nvmpi_alloc.h). */
+			ret = nvmpi_alloc_surfaces(&cParams, 1, &fd);
 			if (ret < 0 || fd < 0) {
 				NVMPI_LOG(NVMPI_LOG_ERROR,
 					  "Failed to allocate internal DMABUF for slot %d", slot);

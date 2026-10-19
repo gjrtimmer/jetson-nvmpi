@@ -22,6 +22,7 @@
  */
 #include "nvmpi.h"
 #include "nvUtils2NvBuf.h"
+#include "nvmpi_alloc.h"
 #include "nvmpi_log.h"
 #include <string.h>
 #include <sys/mman.h>
@@ -72,7 +73,9 @@ static int nvmpi_surface_alloc_internal(unsigned int width, unsigned int height,
 
 	int fd = -1;
 #ifdef WITH_NVUTILS
-	int ret = NvBufSurf::NvAllocate(&params, 1, &fd);
+	/* Checked allocation: NvAllocate dereferences NULL when the allocator
+	 * fails (nvmpi_alloc.h); fd stays -1 on failure. */
+	int ret = nvmpi_alloc_surfaces(&params, 1, &fd);
 #else
 	int ret = NvBufferCreateEx(&fd, &params);
 #endif
