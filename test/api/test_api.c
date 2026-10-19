@@ -27,6 +27,7 @@
  *
  * Issue: gjrtimmer/jetson-ffmpeg#27
  */
+#include "leak_check.h"
 #include <nvmpi.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -90,6 +91,7 @@ static int run_isolated(const char *name, int (*fn)(void))
         if (!verbose_mode)
             (void)!freopen("/dev/null", "w", stderr);
         int r = fn();
+        nvmpi_test_leak_check();
         _exit(r);
     }
 

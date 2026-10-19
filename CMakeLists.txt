@@ -37,6 +37,8 @@ set(CUDA_LIB_DIR_DEFAULT "${SYSROOT}/usr/local/cuda/lib64")
 # ---------------------------------------------------------------------------
 option(WITH_STUBS "Build against stubs instead of real Jetson libraries." OFF)
 option(NVMPI_MOCK "Build the behavioural Jetson mock libs (mock/) into <build>/mock and run test_api against them. Implies WITH_STUBS (link-time only; the mock replaces the stubs at run time)." OFF)
+set(NVMPI_SANITIZER "" CACHE STRING "Sanitizer build for the mock tests: address (ASan+UBSan+LSan) or thread (TSan). Empty = off.")
+set_property(CACHE NVMPI_SANITIZER PROPERTY STRINGS "" address thread)
 option(WITH_VENDORED_NVV4L2 "Use vendored NvV4l2ElementPlane.cpp with pthread_join guard." ON)
 
 if(NVMPI_MOCK)
@@ -49,6 +51,27 @@ if(NVMPI_MOCK)
 	# DT_RUNPATH would not; neither is present this way).
 	set(CMAKE_SKIP_BUILD_RPATH ON)
 	message(STATUS "NVMPI_MOCK=ON: mock libs in ${CMAKE_BINARY_DIR}/mock, stubs link-only")
+endif()
+
+if(NVMPI_SANITIZER)
+	if(NOT NVMPI_MOCK)
+		message(FATAL_ERROR "NVMPI_SANITIZER needs NVMPI_MOCK=ON (stub-linked builds are not runnable)")
+	endif()
+	if(NVMPI_SANITIZER STREQUAL "address")
+		set(NVMPI_SAN_FLAGS "-fsanitize=address,undefined -fno-sanitize-recover=undefined")
+	elseif(NVMPI_SANITIZER STREQUAL "thread")
+		set(NVMPI_SAN_FLAGS "-fsanitize=thread")
+	else()
+		message(FATAL_ERROR "NVMPI_SANITIZER must be address or thread")
+	endif()
+	# Compile AND link flags: libnvmpi, the mock libs and the tests all carry
+	# the runtime, so the instrumented code and the mock see each other.
+	string(APPEND NVMPI_SAN_FLAGS " -fno-omit-frame-pointer -g")
+	string(APPEND CMAKE_C_FLAGS " ${NVMPI_SAN_FLAGS}")
+	string(APPEND CMAKE_CXX_FLAGS " ${NVMPI_SAN_FLAGS}")
+	string(APPEND CMAKE_EXE_LINKER_FLAGS " ${NVMPI_SAN_FLAGS}")
+	string(APPEND CMAKE_SHARED_LINKER_FLAGS " ${NVMPI_SAN_FLAGS}")
+	message(STATUS "NVMPI_SANITIZER=${NVMPI_SANITIZER}")
 endif()
 
 # Path options — CACHE PATH, not option() (option() is boolean-only)

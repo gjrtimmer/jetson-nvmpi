@@ -23,6 +23,7 @@
  * case, not the run. Exit status of the child: 0 pass, anything else fail.
  * Run under ASan/valgrind to prove the teardown paths leak nothing.
  */
+#include "leak_check.h"
 #include <signal.h>
 #include <sys/wait.h>
 
@@ -322,6 +323,7 @@ static int run_case(const struct tcase *t)
             (void)!freopen("/dev/null", "w", stderr);
         st = t->fn ? t->fn() : fault_case(t);
         fflush(stdout);
+        nvmpi_test_leak_check();
         _exit(st & 0xff);
     }
     waitpid(pid, &st, 0);
