@@ -149,6 +149,8 @@ test:api:jp6:
     # message must be visible (see test/api/test_api.c).
     NVMPI_TEST_STRICT: "1"
     NVMPI_TEST_VERBOSE: "1"
+    # Rapid create/close loops default to 5 (decoder) / 10 (encoder); the weekly
+    # schedule sets NVMPI_TEST_ITER (schedule variable) for the long soak.
   before_script: []
   script:
     # Read-only diagnostics: which libs the runtime injected, which device

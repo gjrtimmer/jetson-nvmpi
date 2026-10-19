@@ -50,6 +50,22 @@ static int env_flag(const char *name)
 }
 
 /*
+ * Iteration count for the rapid create/close loops. NVMPI_TEST_ITER overrides
+ * the per-test default (weekly schedule sets a high value for soak coverage).
+ * Input is untrusted env text: parse strictly and clamp so a typo or huge
+ * value cannot turn the loop into an endless run or overflow the counter.
+ */
+static int iter_count(int def)
+{
+    const char *v = getenv("NVMPI_TEST_ITER");
+    if (!v || !*v) return def;
+    char *end = NULL;
+    long n = strtol(v, &end, 10);
+    if (*end != '\0' || n < 1 || n > 10000) return def;
+    return (int)n;
+}
+
+/*
  * Run a test function in a forked child process. The child calls fn()
  * and _exit()s with its return value. The parent waitpid()s and interprets
  * the result. Returns 0 for PASS, 77 for SKIP, 1 for FAIL/CRASH.
@@ -154,8 +170,10 @@ static int test_encoder_create_close(void)
 }
 
 /*
- * Decoder: create/close 50 times in a tight loop — leak/crash detector.
- * If the V4L2 device is not properly released, later iterations will fail
+ * Decoder: create/close in a tight loop (default 5, NVMPI_TEST_ITER
+ * overrides) — leak/crash detector. Each decoder create costs ~1s on real
+ * hardware, so the default is small; the leak/crash assertion (every create
+ * must succeed after a close) is unchanged. If the V4L2 device is not properly released, later iterations will fail
  * to open or the system will run out of DMA-buf file descriptors.
  */
 static int test_decoder_rapid_lifecycle(void)
@@ -163,7 +181,7 @@ static int test_decoder_rapid_lifecycle(void)
     nvDecParam param;
     dec_param_init(&param, NV_VIDEO_CodingH264);
 
-    for (int i = 0; i < 50; i++) {
+    for (int i = 0, n = iter_count(5); i < n; i++) {
         nvmpictx *ctx = nvmpi_create_decoder(&param);
         if (!ctx) return 77;
         nvmpi_decoder_close(ctx);
@@ -172,8 +190,8 @@ static int test_decoder_rapid_lifecycle(void)
 }
 
 /*
- * Encoder: create/close 50 times in a tight loop — leak/crash detector.
- * Same rationale as the decoder variant: DQ thread start/stop + V4L2
+ * Encoder: create/close in a tight loop (default 10, NVMPI_TEST_ITER
+ * overrides) — leak/crash detector. Same rationale as the decoder variant: DQ thread start/stop + V4L2
  * device open/close must not leak handles.
  */
 static int test_encoder_rapid_lifecycle(void)
@@ -181,7 +199,7 @@ static int test_encoder_rapid_lifecycle(void)
     nvEncParam param;
     enc_param_init(&param);
 
-    for (int i = 0; i < 50; i++) {
+    for (int i = 0, n = iter_count(10); i < n; i++) {
         nvmpictx *ctx = nvmpi_create_encoder(&param);
         if (!ctx) return 77;
         nvmpi_encoder_close(ctx);
