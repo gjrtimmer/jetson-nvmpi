@@ -290,6 +290,7 @@ int main(void)
     test_nvbufsurface();
     test_decoder_model();
     test_fault_injection();
+    test_encoder_model();
     if (mock_fails) {
         fprintf(stderr, "test_mock: %d check(s) failed\n", mock_fails);
         return 1;

@@ -278,7 +278,12 @@ if(BUILD_TESTING)
     target_include_directories(test_api_dec_mock PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_link_libraries(test_api_dec_mock PRIVATE nvmpi Threads::Threads)
     add_test(NAME api_mock_dec COMMAND test_api_dec_mock)
-    set_tests_properties(mock_selftest api_mock api_mock_dec PROPERTIES
+    # Encoder data path, teardown and fault matrix (mock-only).
+    add_executable(test_api_enc_mock test/api/test_api_enc_mock.c)
+    target_include_directories(test_api_enc_mock PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(test_api_enc_mock PRIVATE nvmpi Threads::Threads)
+    add_test(NAME api_mock_enc COMMAND test_api_enc_mock)
+    set_tests_properties(mock_selftest api_mock api_mock_dec api_mock_enc PROPERTIES
       ENVIRONMENT "LD_LIBRARY_PATH=${NVMPI_MOCK_LD}"
       TIMEOUT 300)
   else()

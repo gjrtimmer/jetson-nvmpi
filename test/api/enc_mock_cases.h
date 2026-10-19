@@ -1,0 +1,43 @@
+/*
+ * enc_mock_cases.h - the case table of test_api_enc_mock.c (kept apart so
+ * the fault matrix can be tuned without touching the case bodies). Included
+ * once, after struct tcase and the case functions.
+ */
+#ifndef NVMPI_TEST_ENC_MOCK_CASES_H
+#define NVMPI_TEST_ENC_MOCK_CASES_H
+
+static const struct tcase k_cases[] = {
+    { "blocking_h264", NULL, blocking_h264, 0 },
+    { "blocking_hevc", NULL, blocking_hevc, 0 },
+    { "header_idr_h264", NULL, header_idr_h264, 0 },
+    { "header_idr_hevc", NULL, header_idr_hevc, 0 },
+    { "pipelined", NULL, pipelined, 0 },
+    { "force_idr", NULL, force_idr, 0 },
+    { "nonblock_flow", NULL, nonblock_flow, 0 },
+    { "nonblock_eagain", NULL, nonblock_eagain, 0 },
+    { "flush_restart", NULL, flush_restart, 0 },
+    { "dmabuf_flow", NULL, dmabuf_flow, 0 },
+    { "teardown_in_flight", NULL, teardown_in_flight, 0 },
+    { "teardown_wrapped", NULL, teardown_wrapped, 0 },
+    { "teardown_after_eos", NULL, teardown_after_eos, 0 },
+    { "teardown_no_data", NULL, teardown_no_data, 0 },
+    { "teardown_all_slots", NULL, teardown_all_slots, 0 },
+    /* fault matrix: fn == NULL -> fault_case() */
+    { "fault_none_control", "dqbuf@9999", NULL, 0 },
+    { "fault_open@1", "open@1", NULL, 0 },        /* factory retry recovers */
+    { "fault_open@1+", "open@1+", NULL, 1 },
+    { "fault_reqbufs@1", "reqbufs@1", NULL, 1 },
+    { "fault_reqbufs@2", "reqbufs@2", NULL, 1 },
+    { "fault_streamon@1", "streamon@1", NULL, 1 },
+    { "fault_streamon@2", "streamon@2", NULL, 1 },
+    { "fault_qbuf@1", "qbuf@1", NULL, 1 },
+    { "fault_qbuf@6", "qbuf@6", NULL, 1 },
+    { "fault_qbuf@3+", "qbuf@3+", NULL, 1 },
+    { "fault_dqbuf@1", "dqbuf@1", NULL, 1 },
+    { "fault_dqbuf@4", "dqbuf@4", NULL, 1 },
+    { "fault_dqbuf@2+", "dqbuf@2+", NULL, 1 },
+    { "fault_surface_alloc", "alloc@1", fault_surface_alloc, 0 },
+    { "fault_dmabuf_alloc", "alloc@2", fault_dmabuf_alloc, 0 },
+};
+
+#endif /* NVMPI_TEST_ENC_MOCK_CASES_H */
