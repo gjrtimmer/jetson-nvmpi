@@ -281,10 +281,14 @@ test:api:jp6:
 # only (the build tree has no RPATH/RUNPATH in mock mode); the job asserts
 # that, then prints how the three Jetson sonames resolve, then runs ctest:
 #   mock_selftest  the mock libs on their own (queue state machine, blocking
-#                  wake-ups, NvBufSurface strict FromFd, transform)
+#                  wake-ups, NvBufSurface strict FromFd, transform, decoder
+#                  model, fault/delay injection)
 #   api_mock       test/api/test_api against the mock (create/close paths;
-#                  data-path suites arrive with the decoder/encoder models,
-#                  #99/#100, and are reported SKIP/PASS by test_api itself)
+#                  the encoder suites arrive with the encoder model, #100)
+#   api_mock_dec   libnvmpi decoder against the mock decoder model (#99):
+#                  N-packet decode, resolution change, teardown, flush and a
+#                  fault-injection matrix (NVMPI_MOCK_FAULT), each case in a
+#                  forked child under alarm()
 # ---------------------------------------------------------------------------
 test:mock:jp6:
   stage: test
