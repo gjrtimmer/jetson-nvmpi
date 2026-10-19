@@ -24,10 +24,10 @@ Contents:
 
 | Kind | Trigger | Jobs | Publishes |
 | --- | --- | --- | --- |
-| Branch / merge request | push to a branch, MR event | `build:jp6`, `build:jp5`, `test:api:stub:jp6`, `test:api:stub:jp5`, `test:api:asan`, `test:api:tsan`, `test:api:hw` (docs-only MR: `ci:docs-only`) | nothing |
-| Main snapshot | push to the default branch | `build:*`, then `dist:jp6`, `dist:jp5`, `upload:s3` (no `test:api:hw`) | tarballs to S3 `snapshots/<short-sha>/` |
+| Branch / merge request | push to a branch, MR event | `build:jp6`, `build:jp5`, `test:api:stub:jp6`, `test:api:stub:jp5`, `test:api:asan`, `test:api:tsan`, `test:api:hw` (docs-only MR: `ci:docs-only`); plus `dist:*` and `test:deb:*` when a packaging path changed | nothing |
+| Main snapshot | push to the default branch | `build:*`, then `dist:jp6`, `dist:jp5`, `test:deb:jp6`, `test:deb:jp5`, `upload:s3` (no `test:api:hw`) | tarballs to S3 `snapshots/<short-sha>/` |
 | Scheduled / web | schedule, manual web run | full set including `test:api:hw` | snapshot when run on main |
-| Release | tag `vX.Y.Z` | the above, then `dist:*`, `upload:s3`, `release:gitlab`, `release:github` | S3 `releases/<ver>/`, package registry, GitLab Release, GitHub Release |
+| Release | tag `vX.Y.Z` | the above, then `dist:*`, `test:deb:*`, `upload:s3`, `release:gitlab`, `release:github` | S3 `releases/<ver>/`, package registry, GitLab Release, GitHub Release |
 | Downstream | manual | `trigger:jetson-ffmpeg` | starts a jetson-ffmpeg pipeline |
 
 Pipeline de-duplication (`workflow:rules`): tag pipelines always run; a merge
@@ -65,7 +65,7 @@ run.
 
 ## Stages and jobs
 
-Stages, in order: `build`, `test`, `dist`, `publish`, `release`, `downstream`.
+Stages, in order: `build`, `test`, `release-test`, `dist`, `test-deb`, `publish`, `release`, `downstream`.
 
 | Stage | Job | What it does | Runs on |
 | --- | --- | --- | --- |
@@ -77,6 +77,8 @@ Stages, in order: `build`, `test`, `dist`, `publish`, `release`, `downstream`.
 | test | `test:api:tsan` | Same suite in a TSan build (`NVMPI_SANITIZER=thread`), run under `setarch -R`. | any runner, no tags |
 | dist | `dist:jp6` | Build the **real** (non-stub) library against NVIDIA's apt-repository libraries and package it. Needs `test:api:hw`. | any arm64 runner |
 | dist | `dist:jp5` | Same for JetPack 5. Needs `build:jp5` and `test:api:hw`. | any arm64 runner |
+| test-deb | `test:deb:jp6` | Install the `dist:jp6` debs in a clean `ubuntu:22.04` with NVIDIA's r36.4 apt repo and run `scripts/test-deb.sh --jp 6 --lintian`. | any runner, no tags |
+| test-deb | `test:deb:jp5` | Same in `ubuntu:20.04` with r35.4, static checks only (see below). | any runner, no tags |
 | publish | `upload:s3` | Upload the tarballs (and, on tags, the changelog) to the S3 bucket. | release-tools image |
 | release | `release:gitlab` | Upload to the GitLab generic package registry and create the GitLab Release. Tags only. | release-tools image |
 | downstream | `trigger:jetson-ffmpeg` | Manual: start a jetson-ffmpeg pipeline for this commit. | trigger |
@@ -95,6 +97,22 @@ Details per job:
   `scripts/build.sh --no-stubs --clean --install` and `scripts/package.sh`.
   `--no-stubs` hard-fails if the real libraries are missing, so a release can
   never ship a stub-linked tarball. Artifacts: `dist/`, kept 1 week.
+- **`test:deb:*`** run `scripts/test-deb.sh` in a plain ubuntu image, not the
+  builder image (which already carries every library), so missing package
+  dependencies show up. Steps: install `libnvmpi1` alone (dependency
+  resolution); `ldconfig` lists `libnvmpi.so.1` and the unversioned
+  `libnvmpi.so` is absent; JP6 `dlopen("libnvmpi.so.1")` + `dlsym` of the codec
+  entry points (the jetson-ffmpeg scenario), JP5 a static `readelf` export
+  check because NVIDIA's r35.4 libs abort in a constructor without
+  `/dev/nvmap` (so JP5 also only compiles and links the `libnvmpi-dev`
+  program, JP6 runs it); install `libnvmpi-dev` (`libnvmpi.so` symlink,
+  `nvmpi.h`, `nvmpi.pc`, pkg-config compile and link); purge both and check no
+  owned file remains; lintian (`E:` tags fail, others are printed). Run it
+  locally with `scripts/test-deb.sh --jp 6 --debdir <dir>` inside a container.
+  `dist:*` and `test:deb:*` run on tags, main and MRs that change
+  `scripts/package*.sh`, `scripts/test-deb.sh`, `packaging/`, `CMakeLists.txt`,
+  `nvmpi.pc.in` or `.gitlab-ci.yml`. `upload:s3`, `release:gitlab` and
+  `release:github` need both jobs, so a broken deb blocks the release.
 - **`upload:s3`** runs with full git history (`GIT_DEPTH: 0`) and passes
   `NOTES.md` on as an artifact so the changelog is generated only once.
 - **`release:gitlab`** runs `scripts/release.sh`.
