@@ -18,7 +18,7 @@
 #ifdef NVMPI_TEST_ASAN
 #include <sanitizer/lsan_interface.h>
 /* Terminates the process with the sanitizer exit code if leaks are found. */
-static inline void nvmpi_test_leak_check(void) { __lsan_do_leaks_check(); }
+static inline void nvmpi_test_leak_check(void) { __lsan_do_leak_check(); }
 #else
 static inline void nvmpi_test_leak_check(void) {}
 #endif
