@@ -69,7 +69,7 @@ mkdir -p /opt/nvidia/l4t-packages
 touch /opt/nvidia/l4t-packages/.nv-l4t-disable-boot-fw-update-in-preinstall
 
 apt-get update -qq
-apt-get install -y -qq --no-install-recommends ca-certificates wget gcc libc6-dev pkg-config binutils >/dev/null
+apt-get install -y -qq --no-install-recommends ca-certificates wget gcc libc6-dev pkg-config binutils
 if ! grep -rqs "repo.download.nvidia.com/jetson/${SOC}" /etc/apt/sources.list /etc/apt/sources.list.d/; then
     wget -qO /etc/apt/trusted.gpg.d/jetson-ota-public.asc https://repo.download.nvidia.com/jetson/jetson-ota-public.asc
     {
