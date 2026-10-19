@@ -69,20 +69,22 @@ mkdir -p /opt/nvidia/l4t-packages
 touch /opt/nvidia/l4t-packages/.nv-l4t-disable-boot-fw-update-in-preinstall
 
 apt-get update -qq
-# Some CI runners mount their own CA bundle read-only over /etc/ssl, which
-# makes dpkg fail on the openssl/ca-certificates packages: only install
-# ca-certificates when the image has no CA bundle.
-PKGS=(wget gcc libc6-dev pkg-config binutils)
-[ -s /etc/ssl/certs/ca-certificates.crt ] || PKGS+=(ca-certificates)
-apt-get install -y -qq --no-install-recommends "${PKGS[@]}"
+# Never install the ca-certificates package here: some CI runners mount the
+# host's /etc/ssl read-only into the pod (dpkg then fails on openssl, and the
+# mounted bundle can lack NVIDIA's CA). Instead unpack the distro's
+# ca-certificates .deb to a private path and point wget and apt at that bundle.
+apt-get install -y -qq --no-install-recommends wget gcc libc6-dev pkg-config binutils
+CADIR=/usr/local/share/nvmpi-test-ca
+if [ ! -s "${CADIR}/ca-bundle.crt" ]; then
+    mkdir -p "${CADIR}/x"
+    (cd "${CADIR}" && apt-get download ca-certificates && dpkg-deb -x ca-certificates_*.deb x)
+    cat "${CADIR}"/x/usr/share/ca-certificates/mozilla/*.crt > "${CADIR}/ca-bundle.crt"
+    rm -rf "${CADIR}/x" "${CADIR}"/ca-certificates_*.deb
+fi
+echo "Acquire::https::CaInfo \"${CADIR}/ca-bundle.crt\";" > /etc/apt/apt.conf.d/99nvmpi-test-ca
 if ! grep -rqs "repo.download.nvidia.com/jetson/${SOC}" /etc/apt/sources.list /etc/apt/sources.list.d/; then
-    wget -O /etc/apt/trusted.gpg.d/jetson-ota-public.asc https://repo.download.nvidia.com/jetson/jetson-ota-public.asc || {
-        echo "[E] fetching the NVIDIA apt key failed; CA setup:" >&2
-        grep -E ' /etc/ssl' /proc/mounts >&2 || true
-        ls -ld /etc/ssl /etc/ssl/certs /etc/ssl/certs/ca-certificates.crt >&2 || true
-        grep -c 'BEGIN CERTIFICATE' /etc/ssl/certs/ca-certificates.crt >&2 || true
-        exit 1
-    }
+    wget -qO /etc/apt/trusted.gpg.d/jetson-ota-public.asc --ca-certificate="${CADIR}/ca-bundle.crt" \
+        https://repo.download.nvidia.com/jetson/jetson-ota-public.asc
     {
         echo "deb https://repo.download.nvidia.com/jetson/common ${L4T} main"
         echo "deb https://repo.download.nvidia.com/jetson/${SOC} ${L4T} main"
