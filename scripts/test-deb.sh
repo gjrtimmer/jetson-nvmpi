@@ -151,7 +151,7 @@ apt-get install -y --no-install-recommends "${DEV}" || die "4: libnvmpi-dev inst
 [ -f /usr/include/nvmpi.h ] || die "4: nvmpi.h missing"
 [ -f "${LIBDIR}/pkgconfig/nvmpi.pc" ] || die "4: nvmpi.pc missing"
 PCVER="$(pkg-config --modversion nvmpi)"
-case "${VER}" in "${PCVER}"-*) ;; *) die "4: nvmpi.pc version ${PCVER} != package ${VER}" ;; esac
+case "${VER}" in "${PCVER}"[-+~]*) ;; *) die "4: nvmpi.pc version ${PCVER} != package ${VER}" ;; esac
 cat > "${WORK}/link.c" <<'CEOF'
 #include <stdio.h>
 #include <nvmpi.h>
