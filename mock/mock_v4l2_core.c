@@ -18,6 +18,7 @@
 #include <string.h>
 #include <sys/eventfd.h>
 #include <sys/mman.h>
+#include <time.h>
 #include <unistd.h>
 
 #define MOCK_EXPORT __attribute__((visibility("default")))
@@ -106,7 +107,14 @@ MOCK_EXPORT int v4l2_open(const char *file, int oflag, ...)
     ctx->nonblock = (oflag & O_NONBLOCK) != 0;
     snprintf(ctx->node, sizeof(ctx->node), "%s", file);
     pthread_mutex_init(&ctx->mu, NULL);
-    pthread_cond_init(&ctx->cv, NULL);
+    {   /* CLOCK_MONOTONIC so timed DQBUF waits ignore wall-clock jumps */
+        pthread_condattr_t ca;
+
+        pthread_condattr_init(&ca);
+        pthread_condattr_setclock(&ca, CLOCK_MONOTONIC);
+        pthread_cond_init(&ctx->cv, &ca);
+        pthread_condattr_destroy(&ca);
+    }
     for (i = 0; i < MOCK_NQ; i++) {
         int p, b;
 

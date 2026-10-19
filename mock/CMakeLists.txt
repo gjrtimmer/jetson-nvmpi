@@ -31,14 +31,15 @@ endfunction()
 # libnvv4l2: soname libv4l2.so.0 (same as stubs/ and the NVIDIA library).
 nvmpi_mock_lib(nvv4l2_mock nvv4l2 libv4l2.so.0
 	mock_v4l2_core.c mock_v4l2_queue.c mock_v4l2_stream.c
-	mock_v4l2_fmt.c mock_v4l2_models.c)
+	mock_v4l2_fmt.c mock_v4l2_models.c mock_faults.c
+	mock_dec.c mock_dec_ctl.c mock_dec_nal.c)
 add_custom_command(TARGET nvv4l2_mock POST_BUILD
 	COMMAND ${CMAKE_COMMAND} -E create_symlink libnvv4l2.so
 		"${MOCK_OUT}/libv4l2.so.0")
 
 # libnvbufsurface / libnvbufsurftransform: the filename IS the soname
 # (libX.so.1.0.0) and libX.so is a symlink, mirroring the NVIDIA packaging.
-set(nvbufsurface_SRCS mock_nvbufsurface.c mock_nvbufsurface_ops.c)
+set(nvbufsurface_SRCS mock_nvbufsurface.c mock_nvbufsurface_ops.c mock_faults.c)
 set(nvbufsurftransform_SRCS mock_nvbufsurftransform.c)
 foreach(lib nvbufsurface nvbufsurftransform)
 	nvmpi_mock_lib(${lib}_mock ${lib} lib${lib}.so.1.0.0 ${${lib}_SRCS})

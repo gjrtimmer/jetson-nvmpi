@@ -21,6 +21,7 @@
 #define _GNU_SOURCE
 #include "mock_nvbuf_util.h"
 #include "mock_log.h"
+#include "mock_faults.h"
 
 #include <fcntl.h>
 #include <pthread.h>
@@ -167,6 +168,13 @@ static int alloc_surfaces(NvBufSurface **out, uint32_t batch,
     NvBufSurface *s;
     uint32_t i, total;
 
+    /* Injected allocation failure (NVMPI_MOCK_FAULT=alloc@N): fails like an
+     * exhausted allocator, before anything is allocated. */
+    if (mock_fault_hit(MFP_ALLOC)) {
+        if (out)
+            *out = NULL;
+        return -1;
+    }
     if (!out || !cp || batch == 0 || batch > MOCK_MAX_BATCH ||
         cp->width == 0 || cp->height == 0 ||
         cp->width > MOCK_NVBUF_MAX_DIM || cp->height > MOCK_NVBUF_MAX_DIM)

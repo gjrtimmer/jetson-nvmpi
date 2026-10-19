@@ -6,6 +6,7 @@
 #define _GNU_SOURCE
 #include "mock_v4l2.h"
 #include "mock_log.h"
+#include "mock_faults.h"
 
 #include <dlfcn.h>
 #include <errno.h>
@@ -44,11 +45,15 @@ int mock_do_expbuf(struct mock_ctx *ctx, struct v4l2_exportbuffer *e)
             sizes[p] = mb->length[p];
             offs[p] = mb->plane_off[p];
         }
-        /* dup of the buffer memfd: the caller owns (closes) it, like a
-         * dma-buf fd. One fd covers all planes. */
-        fd = fcntl(mb->memfd, F_DUPFD_CLOEXEC, 3);
-        if (fd < 0)
-            ret = errno;
+        if (mock_fault_hit(MFP_EXPBUF)) {     /* NVMPI_MOCK_FAULT=expbuf@N */
+            ret = ENOMEM;
+        } else {
+            /* dup of the buffer memfd: the caller owns (closes) it, like a
+             * dma-buf fd. One fd covers all planes. */
+            fd = fcntl(mb->memfd, F_DUPFD_CLOEXEC, 3);
+            if (fd < 0)
+                ret = errno;
+        }
     }
     pthread_mutex_unlock(&ctx->mu);
     if (!ret) {
@@ -86,6 +91,8 @@ int mock_do_stream(struct mock_ctx *ctx, uint32_t type, bool on)
     if (on) {
         if (q->n_bufs == 0)
             ret = EINVAL;                /* nothing to stream */
+        else if (!q->streaming && mock_fault_hit(MFP_STREAMON))
+            ret = EIO;                   /* NVMPI_MOCK_FAULT=streamon@N */
         else if (!q->streaming) {
             q->streaming = true;
             if (ctx->ops && ctx->ops->on_streamon)

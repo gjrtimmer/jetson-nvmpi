@@ -28,6 +28,7 @@
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <sys/time.h>
 #include <linux/videodev2.h>
 
 #define MOCK_MAX_BUFS   32           /* per queue; Tegra uses <= 32        */
@@ -58,6 +59,10 @@ struct mock_buf {
     int      dmabuf_fd[MOCK_MAX_PLANES];  /* DMABUF: fd given at QBUF      */
     uint32_t flags;                       /* V4L2_BUF_FLAG_* reported at DQ */
     uint32_t sequence;
+    uintptr_t userptr[MOCK_MAX_PLANES];   /* USERPTR: caller memory given
+                                           * at QBUF (never owned/freed)    */
+    struct timeval ts;                    /* QBUF timestamp, copied to the
+                                           * DQ'd buffer by the model       */
 };
 
 struct mock_queue {
@@ -88,6 +93,9 @@ struct mock_ops {
     int  (*on_qbuf)(struct mock_ctx *ctx, int qi, uint32_t index);
     int  (*on_streamon)(struct mock_ctx *ctx, int qi);
     void (*on_streamoff)(struct mock_ctx *ctx, int qi);
+    /* DQBUF found queue qi empty. Fill b->flags if needed (e.g. LAST).
+     * Non-zero return = report EAGAIN now instead of waiting. */
+    int  (*on_dq_empty)(struct mock_ctx *ctx, int qi, struct v4l2_buffer *b);
     /* Return 1 when the ioctl was handled (result in *ret / errno). */
     int  (*on_ioctl)(struct mock_ctx *ctx, unsigned long req, void *arg,
                      int *ret);
@@ -98,6 +106,13 @@ struct mock_ctx {
     bool nonblock;                        /* O_NONBLOCK at open            */
     bool closing;                         /* set by v4l2_close             */
     bool signalled;                       /* eventfd currently readable    */
+    uint32_t dq_wait_ms;                  /* blocking DQBUF gives up with
+                                           * EAGAIN after this long; 0 =
+                                           * wait until woken (default)     */
+    bool dq_wake_eagain;                  /* a DQBUF that was blocked when
+                                           * its queue was streamed off
+                                           * returns EAGAIN, not EINVAL
+                                           * (see mock_dec.c for why)       */
     int  refs;                            /* in-flight calls (g_lock)      */
     char node[64];                        /* device node path as opened    */
     const struct mock_ops *ops;
@@ -138,6 +153,8 @@ int  mock_do_qbuf(struct mock_ctx *ctx, struct v4l2_buffer *b);
 int  mock_do_dqbuf(struct mock_ctx *ctx, struct v4l2_buffer *b);
 int  mock_do_expbuf(struct mock_ctx *ctx, struct v4l2_exportbuffer *e);
 int  mock_do_stream(struct mock_ctx *ctx, uint32_t type, bool on);
+/* Model API: index of the oldest QBUF'd buffer on queue qi, or -1. mu held. */
+int  mock_peek_queued(struct mock_ctx *ctx, int qi);
 /* Model API: complete a QBUF'd buffer (queued -> done) and wake waiters.  */
 int  mock_complete_buf(struct mock_ctx *ctx, int qi, uint32_t index,
                        const uint32_t *bytesused, uint32_t flags);
@@ -154,7 +171,9 @@ int  mock_do_event(struct mock_ctx *ctx, unsigned long req, void *arg);
  * not subscribed. mu held. */
 void mock_push_event(struct mock_ctx *ctx, uint32_t type, uint32_t u32);
 
-/* ---- models.c (extension point for #99/#100) ------------------------- */
+/* ---- models.c: which behaviour a device node gets ---------------------- */
 const struct mock_ops *mock_model_for_node(const char *node);
+/* mock_dec.c: the decoder model (nvdec nodes). */
+extern const struct mock_ops mock_dec_ops;
 
 #endif /* NVMPI_MOCK_V4L2_H */

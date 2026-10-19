@@ -109,7 +109,7 @@ static void test_queue_basics(void)
     struct pollfd pfd;
     unsigned type = OUT;
     unsigned char *m, *m2;
-    int fd = v4l2_open("/dev/v4l2-nvdec", O_RDWR | O_NONBLOCK);
+    int fd = v4l2_open("/dev/v4l2-mock-raw", O_RDWR | O_NONBLOCK);
 
     CHECK(fd >= 0);
     CHECK(v4l2_open("/not/a/dev", O_RDWR) < 0 && errno == ENOENT);
@@ -206,7 +206,7 @@ static void test_blocking_wakeups(int close_wakes)
     struct waiter w;
     pthread_t t;
     unsigned type = CAP;
-    int fd = v4l2_open("/dev/v4l2-nvdec", O_RDWR);   /* blocking */
+    int fd = v4l2_open("/dev/v4l2-mock-raw", O_RDWR);   /* blocking */
 
     CHECK(fd >= 0);
     CHECK(set_fmt(fd, CAP, 4096) == 0);

@@ -11,10 +11,12 @@
 #define _GNU_SOURCE
 #include "mock_v4l2.h"
 #include "mock_log.h"
+#include "mock_faults.h"
 
 #include <errno.h>
 #include <fcntl.h>
 #include <string.h>
+#include <time.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
@@ -99,6 +101,13 @@ int mock_do_reqbufs(struct mock_ctx *ctx, struct v4l2_requestbuffers *rb)
         ret = EBUSY;
         goto out;
     }
+    /* Injected allocation failure (NVMPI_MOCK_FAULT=reqbufs@N). Only real
+     * allocations count: REQBUFS(0), the teardown, must stay infallible.
+     * State is left untouched, as when a driver rejects the request. */
+    if (rb->count > 0 && mock_fault_hit(MFP_REQBUFS)) {
+        ret = ENOMEM;
+        goto out;
+    }
     mock_queue_free_bufs(q);
     count = rb->count > MOCK_MAX_BUFS ? MOCK_MAX_BUFS : rb->count;
     if (count > 0) {
@@ -164,6 +173,7 @@ static void fill_buffer(struct v4l2_buffer *b, const struct mock_queue *q,
     b->flags = mb->flags | (mb->state == MB_QUEUED ? V4L2_BUF_FLAG_QUEUED : 0)
              | (mb->state == MB_DONE ? V4L2_BUF_FLAG_DONE : 0);
     b->sequence = mb->sequence;
+    b->timestamp = mb->ts;
     b->length = mb->n_planes;
     if (!b->m.planes)
         return;
@@ -222,17 +232,29 @@ int mock_do_qbuf(struct mock_ctx *ctx, struct v4l2_buffer *b)
             if (q->memory == V4L2_MEMORY_DMABUF) {
                 int fd = b->m.planes[p].m.fd;
 
-                /* The real driver rejects a closed/invalid dma-buf fd. */
-                if (fd < 0 || fcntl(fd, F_GETFD) < 0)
+                /* Tegra DMABUF buffers carry ONE fd (plane 0) that covers
+                 * every plane (NvBufSurface); NvV4l2ElementPlane::qBuffer
+                 * only fills planes[0].m.fd. Validate that one; the real
+                 * driver rejects a closed/invalid dma-buf fd. */
+                if (p > 0)
+                    mb->dmabuf_fd[p] = -1;
+                else if (fd < 0 || fcntl(fd, F_GETFD) < 0)
                     ret = EBADF;
                 else
                     mb->dmabuf_fd[p] = fd;
-            } else if (q->memory == V4L2_MEMORY_USERPTR &&
-                       !b->m.planes[p].m.userptr) {
-                ret = EINVAL;
+            } else if (q->memory == V4L2_MEMORY_USERPTR) {
+                if (!b->m.planes[p].m.userptr)
+                    ret = EINVAL;
+                else
+                    mb->userptr[p] = (uintptr_t)b->m.planes[p].m.userptr;
             }
         }
+        /* Injected QBUF failure (NVMPI_MOCK_FAULT=qbuf@N): the buffer stays
+         * with the application, like a driver that rejected it. */
+        if (!ret && mock_fault_hit(MFP_QBUF))
+            ret = EIO;
         if (!ret) {
+            mb->ts = b->timestamp;
             for (p = 0; p < mb->n_planes; p++)
                 mb->bytesused[p] = qi == MOCK_Q_OUTPUT
                     ? b->m.planes[p].bytesused : 0;
@@ -256,6 +278,13 @@ int mock_do_qbuf(struct mock_ctx *ctx, struct v4l2_buffer *b)
         return -1;
     }
     return 0;
+}
+
+int mock_peek_queued(struct mock_ctx *ctx, int qi)
+{
+    const struct mock_fifo *f = &ctx->q[qi].queued;
+
+    return f->count ? (int)f->idx[f->head] : -1;
 }
 
 int mock_complete_buf(struct mock_ctx *ctx, int qi, uint32_t index,
@@ -283,12 +312,20 @@ int mock_complete_buf(struct mock_ctx *ctx, int qi, uint32_t index,
  * DQBUF. Honours O_NONBLOCK like the driver: EAGAIN when empty and
  * non-blocking; otherwise waits on ctx->cv. STREAMOFF and close wake the
  * waiter, which then fails (EINVAL when no longer streaming, EBADF when
- * closing) instead of hanging.
+ * closing) instead of hanging. A model may bound the wait (ctx->dq_wait_ms:
+ * EAGAIN on timeout, so the caller can service events) or answer "empty"
+ * itself through ops->on_dq_empty (e.g. end of stream).
+ *
+ * Injection: the dqbuf fault fires only when a buffer IS ready (the buffer
+ * stays DONE for the application), and NVMPI_MOCK_DELAY_US is slept after a
+ * successful dequeue, outside the lock.
  */
 int mock_do_dqbuf(struct mock_ctx *ctx, struct v4l2_buffer *b)
 {
     int qi = mock_qidx(b->type), ret = 0;
     struct mock_queue *q;
+    struct timespec deadline;
+    bool timed = false, waited = false;
 
     if (qi < 0 || !b->m.planes) {
         errno = EINVAL;
@@ -298,18 +335,47 @@ int mock_do_dqbuf(struct mock_ctx *ctx, struct v4l2_buffer *b)
     q = &ctx->q[qi];
     for (;;) {
         if (ctx->closing) { ret = EBADF; break; }
-        if (!q->streaming) { ret = EINVAL; break; }
+        if (!q->streaming) {
+            /* Spec: EINVAL on a queue that is not streaming. A waiter that
+             * was released BY the STREAMOFF may be told EAGAIN instead
+             * (ctx->dq_wake_eagain), like a poll timeout. */
+            ret = waited && ctx->dq_wake_eagain ? EAGAIN : EINVAL;
+            break;
+        }
         if (q->done.count > 0) {
-            uint32_t idx = fifo_pop(&q->done);
+            uint32_t idx;
 
+            if (mock_fault_hit(MFP_DQBUF)) { ret = EIO; break; }
+            idx = fifo_pop(&q->done);
             q->bufs[idx].state = MB_DEQUEUED;
             fill_buffer(b, q, qi, idx);
             /* flags: DONE is not reported after DQ */
             b->flags &= ~(uint32_t)(V4L2_BUF_FLAG_DONE | V4L2_BUF_FLAG_QUEUED);
             break;
         }
+        if (ctx->ops && ctx->ops->on_dq_empty &&
+            ctx->ops->on_dq_empty(ctx, qi, b)) { ret = EAGAIN; break; }
         if (ctx->nonblock) { ret = EAGAIN; break; }
-        pthread_cond_wait(&ctx->cv, &ctx->mu);
+        waited = true;
+        if (ctx->dq_wait_ms == 0) {
+            pthread_cond_wait(&ctx->cv, &ctx->mu);
+            continue;
+        }
+        if (!timed) {                    /* one deadline for the whole call */
+            clock_gettime(CLOCK_MONOTONIC, &deadline);
+            deadline.tv_sec += ctx->dq_wait_ms / 1000;
+            deadline.tv_nsec += (long)(ctx->dq_wait_ms % 1000) * 1000000L;
+            if (deadline.tv_nsec >= 1000000000L) {
+                deadline.tv_sec++;
+                deadline.tv_nsec -= 1000000000L;
+            }
+            timed = true;
+        }
+        if (pthread_cond_timedwait(&ctx->cv, &ctx->mu, &deadline) == ETIMEDOUT &&
+            q->done.count == 0) {
+            ret = EAGAIN;
+            break;
+        }
     }
     mock_update_ready(ctx);
     pthread_mutex_unlock(&ctx->mu);
@@ -317,6 +383,8 @@ int mock_do_dqbuf(struct mock_ctx *ctx, struct v4l2_buffer *b)
      * a polling DQ thread from pinning a CI core. Outside the lock. */
     if (ret == EAGAIN)
         usleep(200);
+    else if (!ret)
+        mock_fault_delay();
     if (ret) {
         errno = ret;
         return -1;
