@@ -276,6 +276,24 @@ install(FILES packaging/deb/copyright
 	    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/libnvmpi1 COMPONENT runtime)
 install(FILES packaging/deb/copyright
 	    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/libnvmpi-dev COMPONENT dev)
+# changelog.Debian.gz (Debian policy 12.7; lintian: no-changelog). Generated
+# at configure time so the entry carries the deb version; gzip -n keeps the
+# archive reproducible for a given date.
+find_program(NVMPI_GZIP gzip)
+if(NVMPI_GZIP)
+	set(NVMPI_DEB_MAINTAINER "G.J.R. Timmer <6072255+gjrtimmer@users.noreply.github.com>")
+	string(TIMESTAMP NVMPI_DEB_DATE "%a, %d %b %Y %H:%M:%S +0000" UTC)
+	configure_file(packaging/deb/changelog.in ${CMAKE_BINARY_DIR}/changelog.Debian @ONLY)
+	execute_process(COMMAND ${NVMPI_GZIP} -9nc ${CMAKE_BINARY_DIR}/changelog.Debian
+		OUTPUT_FILE ${CMAKE_BINARY_DIR}/changelog.Debian.gz RESULT_VARIABLE NVMPI_GZ_RC)
+	if(NOT NVMPI_GZ_RC EQUAL 0)
+		message(FATAL_ERROR "gzip of changelog.Debian failed")
+	endif()
+	install(FILES ${CMAKE_BINARY_DIR}/changelog.Debian.gz
+		    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/libnvmpi1 COMPONENT runtime)
+	install(FILES ${CMAKE_BINARY_DIR}/changelog.Debian.gz
+		    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/libnvmpi-dev COMPONENT dev)
+endif()
 
 find_package(Threads REQUIRED)
 include(CTest)
@@ -361,16 +379,20 @@ set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "arm64")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
 # triggers must keep their 0644 mode (lintian), so do not force 0755 on control files
 set(CPACK_DEBIAN_PACKAGE_CONTROL_STRICT_PERMISSION TRUE)
+# Strip the shipped library (lintian: unstripped-binary-or-object)
+set(CPACK_STRIP_FILES TRUE)
+# shlibs control file so packages linking libnvmpi.so.1 get a libnvmpi1 dependency
+configure_file(packaging/deb/shlibs.in ${CMAKE_BINARY_DIR}/shlibs @ONLY)
 
 # Per-package fields. Old single package "libnvmpi" (< 4.0.0) owned all these files.
 set(CPACK_DEBIAN_RUNTIME_PACKAGE_NAME "libnvmpi1")
 set(CPACK_DEBIAN_RUNTIME_PACKAGE_SECTION "libs")
 set(CPACK_DEBIAN_RUNTIME_PACKAGE_MULTIARCH "same")
 set(CPACK_DEBIAN_RUNTIME_PACKAGE_DEPENDS
-	"nvidia-l4t-multimedia (>= ${NVMPI_DEB_L4T_MAJOR}), nvidia-l4t-multimedia (<< ${NVMPI_DEB_L4T_NEXT}), libc6, libstdc++6")
+	"nvidia-l4t-multimedia (>= ${NVMPI_DEB_L4T_MAJOR}), nvidia-l4t-multimedia (<< ${NVMPI_DEB_L4T_NEXT}), libc6, libstdc++6, libjpeg-turbo8")
 set(CPACK_DEBIAN_RUNTIME_PACKAGE_REPLACES "libnvmpi (<< 4.0.0)")
 set(CPACK_DEBIAN_RUNTIME_PACKAGE_BREAKS "libnvmpi (<< 4.0.0)")
-set(CPACK_DEBIAN_RUNTIME_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_SOURCE_DIR}/packaging/deb/triggers")
+set(CPACK_DEBIAN_RUNTIME_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_SOURCE_DIR}/packaging/deb/triggers;${CMAKE_BINARY_DIR}/shlibs")
 set(CPACK_COMPONENT_RUNTIME_DESCRIPTION
 	"NVIDIA Jetson hardware video codec library (runtime)
  libnvmpi wraps the L4T Multimedia API (V4L2 NVDEC/NVENC, NvBufSurface and

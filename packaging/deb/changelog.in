@@ -1,0 +1,6 @@
+libnvmpi (@NVMPI_DEB_VERSION@) unstable; urgency=medium
+
+  * Packaged release of libnvmpi @PROJECT_VERSION@ for NVIDIA Jetson.
+    Release notes: https://github.com/gjrtimmer/jetson-nvmpi/releases
+
+ -- @NVMPI_DEB_MAINTAINER@  @NVMPI_DEB_DATE@
