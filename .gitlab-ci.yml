@@ -430,7 +430,7 @@ test:api:tsan:
   variables:
     NVMPI_SANITIZER: "thread"
     BUILD_TYPE: "Debug"
-    TSAN_OPTIONS: "halt_on_error=1:second_deadlock_stack=1"
+    TSAN_OPTIONS: "halt_on_error=1:second_deadlock_stack=1:suppressions=${CI_PROJECT_DIR}/test/tsan.supp"
     # TSan aborts at startup with "unexpected memory mapping" when the host
     # kernel randomises mmap with more bits than the shadow layout supports
     # (vm.mmap_rnd_bits=32). Run ctest (and so every child) without ASLR.

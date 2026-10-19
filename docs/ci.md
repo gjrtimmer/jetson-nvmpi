@@ -113,9 +113,13 @@ on the Orin.
   including a still-queued `test:api:hw`, when any job fails, so a mock failure
   does not occupy the shared Orin.
 - Forked test children end with `_exit()`, which skips LeakSanitizer's exit
-  check. `test/api/leak_check.h` runs `__lsan_do_leaks_check()` before each
+  check. `test/api/leak_check.h` runs `__lsan_do_leak_check()` before each
   `_exit()` in ASan builds (no-op otherwise), so leaks fail the offending case
   without valgrind.
+- `test/tsan.supp` lists the only TSan suppressions, each with its reason: the
+  GCC 11 libtsan false "double lock" on `condition_variable::wait_for`
+  (`pthread_cond_clockwait` is not intercepted), and the benign plain-bool flag
+  reads in NVIDIA's vendored `NvV4l2ElementPlane` DQ thread.
 - Locally: `cmake -S . -B build-asan -DNVMPI_MOCK=ON -DNVMPI_SANITIZER=address`
   (or `thread`), build, `scripts/mock-dev-nodes.sh`, `ctest`.
 

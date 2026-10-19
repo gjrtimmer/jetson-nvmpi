@@ -1,0 +1,16 @@
+# ThreadSanitizer suppressions for the mock test jobs (test:api:tsan).
+# Each entry is a known non-libnvmpi report; keep this list short and justified.
+
+# NVMPI_bufPool waits with condition_variable::wait_for, which libstdc++ on
+# jammy (GCC 11) maps to pthread_cond_clockwait. GCC 11's libtsan does not
+# intercept that call, so it misses the mutex release inside the wait and
+# reports "double lock" on every later lock from another thread. Toolchain
+# false positive (GCC PR 101978, fixed in GCC 12's libtsan).
+mutex:NVMPI_bufPool
+
+# NvV4l2ElementPlane (NVIDIA sample class, vendored copy): the DQ thread
+# polls the plain-bool streamon/is_in_error flags that the owner writes under
+# the plane lock. Pre-existing upstream pattern; benign on aarch64 (aligned
+# byte, loop re-reads). Not a libnvmpi defect.
+race:NvV4l2ElementPlane::dqThread
+race:NvV4l2ElementPlane::isInError
