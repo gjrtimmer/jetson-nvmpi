@@ -20,7 +20,7 @@ function(nvmpi_mock_lib target outname soname)
 	target_compile_options(${target} PRIVATE ${MOCK_C_FLAGS})
 	# Mock .so files must resolve every symbol on their own (fail the build,
 	# not the test run) and carry exactly the soname the consumer NEEDs.
-	target_link_libraries(${target} PRIVATE Threads::Threads
+	target_link_libraries(${target} PRIVATE Threads::Threads ${CMAKE_DL_LIBS}
 		-Wl,--no-undefined -Wl,-soname,${soname})
 	set_target_properties(${target} PROPERTIES
 		OUTPUT_NAME ${outname}
@@ -38,8 +38,10 @@ add_custom_command(TARGET nvv4l2_mock POST_BUILD
 
 # libnvbufsurface / libnvbufsurftransform: the filename IS the soname
 # (libX.so.1.0.0) and libX.so is a symlink, mirroring the NVIDIA packaging.
+set(nvbufsurface_SRCS mock_nvbufsurface.c mock_nvbufsurface_ops.c)
+set(nvbufsurftransform_SRCS mock_nvbufsurftransform.c)
 foreach(lib nvbufsurface nvbufsurftransform)
-	nvmpi_mock_lib(${lib}_mock ${lib} lib${lib}.so.1.0.0 mock_${lib}.c)
+	nvmpi_mock_lib(${lib}_mock ${lib} lib${lib}.so.1.0.0 ${${lib}_SRCS})
 	set_target_properties(${lib}_mock PROPERTIES SUFFIX ".so.1.0.0")
 	add_custom_command(TARGET ${lib}_mock POST_BUILD
 		COMMAND ${CMAKE_COMMAND} -E create_symlink lib${lib}.so.1.0.0
