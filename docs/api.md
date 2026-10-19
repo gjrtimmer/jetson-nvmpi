@@ -227,16 +227,23 @@ and publishes them to a frame pool.
 
 ### `nvmpi_create_decoder`
 
-`nvmpi.h:170` -- `nvmpictx* nvmpi_create_decoder(nvDecParam* param);`
+`nvmpi.h:175` -- `nvmpictx* nvmpi_create_decoder(nvDecParam* param);`
 
 Opens the V4L2 decoder, sets up the compressed-input (OUTPUT) plane and spawns
-the capture thread. `param` is read once. Returns a handle, or `NULL` on failure
-(for example no decoder device node, or creation failed after 3 attempts). The
-decoder device is looked up as `/dev/nvhost-nvdec` or `/dev/v4l2-nvdec`.
+the capture thread. `param` is read once. The decoder device is looked up as
+`/dev/nvhost-nvdec` or `/dev/v4l2-nvdec`. Returns a handle, or `NULL` when:
+
+- `pixFormat` is `NV_PIX_P010` and the build has no NvUtils buffer API
+  (legacy `nvbuf_utils`, pre-JetPack 5); 10-bit output cannot be honoured.
+- Neither device node exists, or opening it fails with `ENODEV`, `ENXIO` or
+  `EACCES`, or with `EBUSY` on all 3 attempts (100 ms apart).
+- The decoder could not be created after 3 attempts.
+- Event subscription or OUTPUT-plane setup fails (format, frame input mode,
+  DPB, max-perf, buffer setup, STREAMON).
 
 ### `nvmpi_decoder_put_packet`
 
-`nvmpi.h:178` -- `int nvmpi_decoder_put_packet(nvmpictx* ctx, nvPacket* packet);`
+`nvmpi.h:183` -- `int nvmpi_decoder_put_packet(nvmpictx* ctx, nvPacket* packet);`
 
 Feeds one compressed packet (Annex-B for H.264/HEVC). May block waiting for a
 free V4L2 OUTPUT-plane buffer once all buffers are in flight. A packet with
@@ -255,7 +262,7 @@ only.
 
 ### `nvmpi_decoder_get_frame`
 
-`nvmpi.h:186` -- `int nvmpi_decoder_get_frame(nvmpictx* ctx, nvFrame* frame, bool wait);`
+`nvmpi.h:194` -- `int nvmpi_decoder_get_frame(nvmpictx* ctx, nvFrame* frame, bool wait);`
 
 Copies one decoded frame into `frame->payload[]`. The planes must already be
 allocated with sufficient size and `linesize[]` set; the copy is line by line,
@@ -267,12 +274,17 @@ so your stride may differ from the hardware's. The number of planes written is
 | `false` | Non-blocking; returns `-1` immediately when no frame is ready. |
 | `true` | Blocks up to `wait_timeout` ms (default 500); returns `-1` on timeout or shutdown. |
 
-Returns `0` on success, `-1` when no frame is available, or a non-zero error
-code if mapping the buffer for CPU access fails. Threading: user thread only.
+| Return | Meaning |
+| --- | --- |
+| `0` | Success. |
+| `-1` | No frame available (non-blocking), or timeout / shutdown (blocking). |
+| other non-zero | The result of the failed CPU buffer-map call (`NvBufSurfaceMap` on NvUtils, `NvBufferMemMap` on the legacy API), passed through unchanged. The pool buffer is still recycled and `frame->timestamp` is set, but the planes are not valid. |
+
+Threading: user thread only.
 
 ### `nvmpi_decoder_flush`
 
-`nvmpi.h:192` -- `int nvmpi_decoder_flush(nvmpictx* ctx);`
+`nvmpi.h:200` -- `int nvmpi_decoder_flush(nvmpictx* ctx);`
 
 Resets the pipeline for a seek or stream restart: stops and joins the capture
 thread, drains in-flight frames back to the pool, restarts the thread. The
@@ -282,11 +294,11 @@ thread only; joins the capture thread internally.
 
 ### `nvmpi_decoder_close`
 
-`nvmpi.h:196` -- `int nvmpi_decoder_close(nvmpictx* ctx);`
+`nvmpi.h:205` -- `int nvmpi_decoder_close(nvmpictx* ctx);`
 
 Stops the capture thread, frees all DMA buffers and pools and destroys the
-context; the handle is invalid afterwards. Returns 0 (the implementation
-returns -1 only for a `NULL` ctx). Frames borrowed through `get_frame_fd` and
+context; the handle is invalid afterwards. Returns `0`, or
+`-1` for a `NULL` ctx (nothing is done). Frames borrowed through `get_frame_fd` and
 released after close are handled safely: the release callback checks a shared
 "pool alive" flag and skips the pool access. Threading: user thread only.
 
@@ -299,11 +311,15 @@ pooled `nvPacket`.
 
 ### `nvmpi_create_encoder`
 
-`nvmpi.h:247` -- `nvmpictx* nvmpi_create_encoder(nvEncParam* param);`
+`nvmpi.h:258` -- `nvmpictx* nvmpi_create_encoder(nvEncParam* param);`
 
 Opens the V4L2 encoder, programs profile, level and rate control from `param`,
 sets up both planes and starts the capture-plane dequeue thread. Returns a
-handle (check for `NULL`).
+handle, or `NULL` when no encoder device node exists, the device probe fails
+(`ENODEV`, `ENXIO`, `EACCES`, or `EBUSY` on all 3 attempts), the encoder cannot
+be created after 3 attempts, or a critical format, plane or stream setup step
+fails (the half-built context is released; in the rare case the dequeue thread
+cannot be joined it is leaked and `NULL` is still returned).
 
 The caller must still fill the packet pool with `nvmpi_encoder_qEmptyPacket`
 before encoded output can be delivered: if no empty packet is available when a
@@ -311,19 +327,26 @@ buffer is encoded, that encoded frame is dropped with a warning.
 
 ### `nvmpi_encoder_put_frame`
 
-`nvmpi.h:256` -- `int nvmpi_encoder_put_frame(nvmpictx* ctx, nvFrame* frame);`
+`nvmpi.h:269` -- `int nvmpi_encoder_put_frame(nvmpictx* ctx, nvFrame* frame);`
 
 Copies the frame planes into a V4L2 OUTPUT-plane buffer and queues it. In
 blocking mode (default) it blocks waiting for a free buffer. With
 `nonblocking=1` it returns `NVMPI_ERR_EAGAIN` when none is free. `frame == NULL`
 sends EOS and puts the encoder into flushing mode.
 
-Returns `0` on success, `NVMPI_ERR_EAGAIN` (non-blocking, no buffer), or a
-negative value on error or if already flushing. Threading: user thread only.
+| Return | Meaning |
+| --- | --- |
+| `0` | Success. |
+| `NVMPI_ERR_EAGAIN` (-11) | Non-blocking mode and no OUTPUT buffer is free. |
+| `-2` | Already flushing (EOS was sent). |
+| `-1` | Encoder is in an error state, or the blocking dequeue failed. |
+| other negative | The error code from queueing the buffer on the OUTPUT plane. |
+
+Threading: user thread only.
 
 ### `nvmpi_encoder_get_packet`
 
-`nvmpi.h:264` -- `int nvmpi_encoder_get_packet(nvmpictx* ctx, nvPacket** packet, bool wait);`
+`nvmpi.h:277` -- `int nvmpi_encoder_get_packet(nvmpictx* ctx, nvPacket** packet, bool wait);`
 
 Dequeues one encoded packet (the pointer is one of the packets you donated).
 
@@ -340,7 +363,7 @@ dropped with an error log.
 
 ### `nvmpi_encoder_dqEmptyPacket`
 
-`nvmpi.h:268` -- `int nvmpi_encoder_dqEmptyPacket(nvmpictx* ctx, nvPacket** packet);`
+`nvmpi.h:281` -- `int nvmpi_encoder_dqEmptyPacket(nvmpictx* ctx, nvPacket** packet);`
 
 Non-blocking removal of one packet from the empty pool; returns `-1` when the
 pool is exhausted. The caller takes ownership. Use it to drain and free the
@@ -348,7 +371,7 @@ pool before closing.
 
 ### `nvmpi_encoder_qEmptyPacket`
 
-`nvmpi.h:273` -- `void nvmpi_encoder_qEmptyPacket(nvmpictx* ctx, nvPacket* packet);`
+`nvmpi.h:286` -- `void nvmpi_encoder_qEmptyPacket(nvmpictx* ctx, nvPacket* packet);`
 
 Hands a caller-allocated packet (payload buffer included) to the pool; the
 dequeue thread fills it later. The pool stores only the pointer: the caller
@@ -357,7 +380,7 @@ packets obtained from `get_packet`.
 
 ### `nvmpi_encoder_force_idr`
 
-`nvmpi.h:278` -- `int nvmpi_encoder_force_idr(nvmpictx* ctx);`
+`nvmpi.h:291` -- `int nvmpi_encoder_force_idr(nvmpictx* ctx);`
 
 Forces an IDR frame for the next queued input (sets
 `V4L2_CID_MPEG_MFC51_VIDEO_FORCE_FRAME_TYPE`). May be called at any time while
@@ -365,7 +388,7 @@ the encoder runs. Returns `0`, or `-1` on ioctl failure.
 
 ### `nvmpi_encoder_set_bitrate`
 
-`nvmpi.h:283` -- `int nvmpi_encoder_set_bitrate(nvmpictx* ctx, unsigned int bitrate);`
+`nvmpi.h:296` -- `int nvmpi_encoder_set_bitrate(nvmpictx* ctx, unsigned int bitrate);`
 
 Changes the target bitrate mid-stream (updates `V4L2_CID_MPEG_VIDEO_BITRATE`);
 takes effect from the next encoded frame. For VBR, `peak_bitrate` is not
@@ -373,7 +396,7 @@ adjusted. Returns `0`, or `-1` on failure.
 
 ### `nvmpi_encoder_flush`
 
-`nvmpi.h:288` -- `int nvmpi_encoder_flush(nvmpictx* ctx);`
+`nvmpi.h:303` -- `int nvmpi_encoder_flush(nvmpictx* ctx);`
 
 Mid-stream reset: stops the dequeue thread, STREAMOFF on both planes, moves
 pending encoded packets back to the empty pool, clears flushing/EOS state,
@@ -384,7 +407,7 @@ needs a clean random-access point.
 
 ### `nvmpi_encoder_close`
 
-`nvmpi.h:292` -- `int nvmpi_encoder_close(nvmpictx* ctx);`
+`nvmpi.h:310` -- `int nvmpi_encoder_close(nvmpictx* ctx);`
 
 Stops the dequeue thread and frees the context. Packets still held in the
 pools are **not** returned to you: drain the pool first with
@@ -406,14 +429,14 @@ is rejected. Output is YUV420.
 
 ### `nvmpi_create_jpeg_decoder`
 
-`nvmpi.h:203` -- `nvmpictx* nvmpi_create_jpeg_decoder(void);`
+`nvmpi.h:212` -- `nvmpictx* nvmpi_create_jpeg_decoder(void);`
 
 No parameters: the decoder configures itself per frame from the JPEG header.
 Returns `NULL` on failure.
 
 ### `nvmpi_jpeg_decoder_put_packet`
 
-`nvmpi.h:209` -- `int nvmpi_jpeg_decoder_put_packet(nvmpictx* ctx, nvPacket* packet);`
+`nvmpi.h:218` -- `int nvmpi_jpeg_decoder_put_packet(nvmpictx* ctx, nvPacket* packet);`
 
 Decodes one JPEG frame synchronously. `payload_size == 0` signals EOS (no
 decode; sets the internal EOS flag). The decoded frame is queued internally.
@@ -421,7 +444,7 @@ Returns `0`, or `-1` on decode error or unsupported format (progressive).
 
 ### `nvmpi_jpeg_decoder_get_frame`
 
-`nvmpi.h:213` -- `int nvmpi_jpeg_decoder_get_frame(nvmpictx* ctx, nvFrame* frame, bool wait);`
+`nvmpi.h:222` -- `int nvmpi_jpeg_decoder_get_frame(nvmpictx* ctx, nvFrame* frame, bool wait);`
 
 Retrieves one decoded frame into caller-allocated planes. With `wait == true`
 it blocks up to 500 ms. Returns `0`, or `-1` when no frame is available
@@ -429,7 +452,7 @@ it blocks up to 500 ms. Returns `0`, or `-1` when no frame is available
 
 ### `nvmpi_jpeg_decoder_close`
 
-`nvmpi.h:216` -- `int nvmpi_jpeg_decoder_close(nvmpictx* ctx);`
+`nvmpi.h:225` -- `int nvmpi_jpeg_decoder_close(nvmpictx* ctx);`
 
 Destroys the context and frees all DMA buffers; the handle is invalid
 afterwards.
@@ -441,7 +464,7 @@ no dequeue thread, no rate control: quality-based, one frame at a time.
 
 ### `nvmpi_create_jpeg_encoder`
 
-`nvmpi.h:226` -- `nvmpictx* nvmpi_create_jpeg_encoder(int quality);`
+`nvmpi.h:235` -- `nvmpictx* nvmpi_create_jpeg_encoder(int quality);`
 
 `quality` is libjpeg style, 1 to 100. The header documents an out-of-range
 value as clamped with 85 as the default; pass a value in range to be explicit.
@@ -451,14 +474,14 @@ encoder there.
 
 ### `nvmpi_jpeg_encoder_put_frame`
 
-`nvmpi.h:231` -- `int nvmpi_jpeg_encoder_put_frame(nvmpictx* ctx, nvFrame* frame);`
+`nvmpi.h:240` -- `int nvmpi_jpeg_encoder_put_frame(nvmpictx* ctx, nvFrame* frame);`
 
 Encodes one YUV420 frame. `frame == NULL` signals EOS. The encoded JPEG is
 staged internally. Returns `0`, or `-1` on error.
 
 ### `nvmpi_jpeg_encoder_get_packet`
 
-`nvmpi.h:237` -- `int nvmpi_jpeg_encoder_get_packet(nvmpictx* ctx, nvPacket* packet);`
+`nvmpi.h:246` -- `int nvmpi_jpeg_encoder_get_packet(nvmpictx* ctx, nvPacket* packet);`
 
 Copies the encoded JPEG into `packet->payload`, which the caller must
 pre-allocate with enough capacity (note: this is a plain copy into a caller
@@ -473,7 +496,7 @@ buffer, not the video encoder's packet pool). `packet->flags` is set to 1
 
 ### `nvmpi_jpeg_encoder_close`
 
-`nvmpi.h:240` -- `int nvmpi_jpeg_encoder_close(nvmpictx* ctx);`
+`nvmpi.h:249` -- `int nvmpi_jpeg_encoder_close(nvmpictx* ctx);`
 
 Destroys the context and frees all resources.
 
@@ -484,7 +507,7 @@ pixels through caller memory. Buffers are pitch-linear NV12.
 
 ### `nvmpi_decoder_get_frame_fd`
 
-`nvmpi.h:311-314`
+`nvmpi.h:329-332`
 
 ```c
 int nvmpi_decoder_get_frame_fd(nvmpictx* ctx,
@@ -510,7 +533,7 @@ bookkeeping allocation fails).
 
 ### `nvmpi_encoder_put_frame_fd`
 
-`nvmpi.h:324-326`
+`nvmpi.h:342-344`
 
 ```c
 int nvmpi_encoder_put_frame_fd(nvmpictx* ctx,
@@ -536,7 +559,7 @@ allocators reject zero dimensions and sizes above 8192 in either direction
 
 ### `nvmpi_surface_alloc`
 
-`nvmpi.h:334-335` -- `int nvmpi_surface_alloc(unsigned int width, unsigned int height, int *dmabuf_fd);`
+`nvmpi.h:352-353` -- `int nvmpi_surface_alloc(unsigned int width, unsigned int height, int *dmabuf_fd);`
 
 Allocates a surface tagged for VIC transform (`NvBufSurfaceTag_VIDEO_CONVERT`).
 Use it for surfaces that are VIC source or destination, not for surfaces passed
@@ -545,7 +568,7 @@ and sets `*dmabuf_fd` to `-1`.
 
 ### `nvmpi_surface_alloc_for_enc`
 
-`nvmpi.h:345-346` -- `int nvmpi_surface_alloc_for_enc(unsigned int width, unsigned int height, int *dmabuf_fd);`
+`nvmpi.h:363-364` -- `int nvmpi_surface_alloc_for_enc(unsigned int width, unsigned int height, int *dmabuf_fd);`
 
 Allocates a surface tagged for the encoder (`NvBufSurfaceTag_VIDEO_ENC`) so it
 is registered in the encoder's NvMap domain. Use it for surfaces passed to
@@ -554,14 +577,14 @@ Returns `0` or `-1`.
 
 ### `nvmpi_surface_destroy`
 
-`nvmpi.h:351` -- `int nvmpi_surface_destroy(int dmabuf_fd);`
+`nvmpi.h:369` -- `int nvmpi_surface_destroy(int dmabuf_fd);`
 
 Destroys a surface from either allocator. Safe with `dmabuf_fd == -1` (no-op).
 Returns `0`, or `-1` if the underlying destroy fails.
 
 ### `nvmpi_surface_copy_from_dmabuf`
 
-`nvmpi.h:358-360`
+`nvmpi.h:376-378`
 
 ```c
 int nvmpi_surface_copy_from_dmabuf(int dst_fd, int src_fd,
@@ -582,13 +605,13 @@ pitch-linear conversion and colour conversion in hardware, with no CPU copies.
 
 ### `nvmpi_vic_ctx`
 
-`nvmpi.h:368` -- opaque context typedef. **A context must not be shared across
+`nvmpi.h:386` -- opaque context typedef. **A context must not be shared across
 threads**: the VIC session is thread-local, so each thread needs its own
 context.
 
 ### `nvmpi_vic_create`
 
-`nvmpi.h:374` -- `nvmpi_vic_ctx *nvmpi_vic_create(void);`
+`nvmpi.h:392` -- `nvmpi_vic_ctx *nvmpi_vic_create(void);`
 
 Binds the VIC engine for the calling thread (`NvBufSurfTransformSetSessionParams`
 on NvUtils, `NvBufferSessionCreate` on the legacy API). Returns `NULL` on
@@ -596,7 +619,7 @@ failure.
 
 ### `nvmpi_vic_transform`
 
-`nvmpi.h:382-385`
+`nvmpi.h:400-403`
 
 ```c
 int nvmpi_vic_transform(nvmpi_vic_ctx *ctx,
@@ -613,7 +636,7 @@ so concurrent callers do not run in parallel.
 
 ### `nvmpi_vic_close`
 
-`nvmpi.h:389` -- `void nvmpi_vic_close(nvmpi_vic_ctx *ctx);`
+`nvmpi.h:407` -- `void nvmpi_vic_close(nvmpi_vic_ctx *ctx);`
 
 Destroys the context and releases the VIC session. Safe with `NULL`.
 

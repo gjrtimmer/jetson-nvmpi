@@ -166,7 +166,12 @@ extern "C" {
 
 	//Create a decoder context: opens the V4L2 decoder device, sets up the
 	//bitstream (OUTPUT) plane and spawns the internal capture thread.
-	//Returns NULL-checked opaque handle; param is read once and not retained.
+	//Returns an opaque handle; param is read once and not retained.
+	//Returns NULL on failure: no decoder device node, device probe error
+	//(ENODEV/ENXIO/EACCES, or EBUSY on all 3 attempts), decoder creation
+	//failed after 3 attempts, or any OUTPUT-plane setup/ioctl error. Also
+	//returns NULL for nvDecParam.pixFormat == NV_PIX_P010 in builds without
+	//the NvUtils buffer API (legacy nvbuf_utils, pre-JetPack 5).
 	nvmpictx* nvmpi_create_decoder(nvDecParam* param);
 
 	//Feed one compressed packet (Annex-B for H.264/HEVC). May block waiting
@@ -182,7 +187,10 @@ extern "C" {
 	//linesize). When wait is false: non-blocking, returns -1 immediately
 	//if no frame is ready. When wait is true: blocks up to wait_timeout
 	//milliseconds (configurable via nvDecParam.wait_timeout, default
-	//500ms). Returns -1 on timeout or shutdown.
+	//500ms). Returns 0 on success, -1 when no frame is available (timeout
+	//or shutdown), or the non-zero result of the failed CPU buffer-map call
+	//(NvBufSurfaceMap / NvBufferMemMap) if the frame could not be copied;
+	//the buffer is still recycled to the pool in that case.
 	int nvmpi_decoder_get_frame(nvmpictx* ctx, nvFrame* frame,bool wait);
 
 	//Reset the decoder pipeline for seek / stream restart: stops the
@@ -192,7 +200,8 @@ extern "C" {
 	int nvmpi_decoder_flush(nvmpictx* ctx);
 
 	//Stop the capture thread, free all DMA buffers/pools and destroy ctx.
-	//The handle is invalid afterwards. Always returns 0.
+	//The handle is invalid afterwards. Returns 0, or -1 if ctx is NULL
+	//(nothing is done).
 	int nvmpi_decoder_close(nvmpictx* ctx);
 
 	//--- JPEG decoder (synchronous, NvJPEGDecoder-backed, no V4L2) ---
@@ -241,7 +250,9 @@ extern "C" {
 
 	//Create an encoder context: opens the V4L2 encoder device, programs
 	//profile/level/rate-control from param, sets up both planes and starts
-	//the capture-plane dequeue thread. Returns opaque handle.
+	//the capture-plane dequeue thread. Returns opaque handle, or NULL on
+	//failure (no encoder device node, device probe error, creation failed
+	//after 3 attempts, or a critical format/plane/stream setup error).
 	//NOTE: the caller must still fill the packet pool (qEmptyPacket) before
 	//encoded output can be delivered.
 	nvmpictx* nvmpi_create_encoder(nvEncParam* param);
@@ -252,7 +263,9 @@ extern "C" {
 	//OUTPUT-plane buffer is available — caller should drain encoded packets
 	//via get_packet and retry. frame==NULL sends EOS and puts the encoder
 	//into flushing mode. Returns 0 on success, NVMPI_ERR_EAGAIN when
-	//non-blocking and no buffer available, negative on error or if flushing.
+	//non-blocking and no buffer available, -2 if already flushing, -1 if
+	//the encoder is in error or the blocking dequeue failed, or the negative
+	//queue (qBuffer) error code.
 	int nvmpi_encoder_put_frame(nvmpictx* ctx, nvFrame* frame);
 	//get filled packet from encoder
 	//When wait=false: non-blocking, returns -1 immediately if no packet ready.
@@ -285,10 +298,15 @@ extern "C" {
 	//Stops DQ thread, STREAMOFF both planes, drains packet pool, resets
 	//flushing/EOS state, STREAMON, re-queues capture buffers, restarts DQ
 	//thread. Encoding can resume immediately after this call.
+	//Returns 0, or a negative code if a STREAMON, capture-buffer queue or
+	//DQ thread restart step fails.
 	int nvmpi_encoder_flush(nvmpictx* ctx);
 	//close encoder
 	//Stops the dequeue thread and frees the context. Packets still held in
 	//the pools are NOT freed here — drain them first (see FFmpeg wrapper).
+	//Returns 0, or -1 if ctx is NULL or the capture DQ thread did not exit
+	//within its bounded join; in the latter case ctx is deliberately leaked
+	//to avoid a use-after-free.
 	int nvmpi_encoder_close(nvmpictx* ctx);
 
 	//--- DMA-BUF fd passthrough (zero-copy path) ---
