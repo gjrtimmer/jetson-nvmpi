@@ -2,9 +2,9 @@
 #
 # CI pipeline for jetson-nvmpi (libnvmpi, the Jetson V4L2/NvBuffer wrapper).
 #
-# Builder/runtime images are built and published by jetson-ffmpeg (decision
-# D5); this project only consumes them. Same runners, rules and conventions as
-# jetson-ffmpeg.
+# Builder/runtime images are built and published by timmertech/jetson-builder;
+# this project only consumes them, pinned to immutable <tag>-<sha8> tags (see
+# JETSON_BUILDER_SHA). Same runners, rules and conventions as jetson-ffmpeg.
 #
 # Three kinds of pipeline:
 #
@@ -13,13 +13,21 @@
 #     test    - test_api (built by build:jp6) on the Jetson runner, plus an
 #               additive mock-driver job (no tags, no hardware)
 #
-#   Default-branch (main) pipelines: build + test, then dist (version
-#     <ver>-<sha>, no tag gate) and publish (upload:s3 -> snapshots/<sha>/).
+#   Default-branch (main) pipelines: build, then dist (version <ver>-<sha>,
+#     no tag gate) and publish (upload:s3 -> snapshots/<sha>/). The merge
+#     method is fast-forward, so main HEAD is the exact commit the MR pipeline
+#     already tested on the Jetson: test:api:jp6 is skipped on main pushes (it
+#     still runs on MR, tag, schedule and web pipelines).
+#
+#   Docs-only changes: branch pipelines are skipped when no code path changed
+#     (see .code-paths); an MR always gets a pipeline (ci:docs-only) so the
+#     merge gate has something to pass.
 #
 #   Tag pipelines (v<X.Y.Z>): build + test run too, so a release only
 #   happens after the Jetson test passed on that exact commit.
 #     dist    - build REAL libnvmpi against NVIDIA's apt repo libs, package it
-#               (needs test:api:jp6; dist:jp5 also build:jp5)
+#               (needs test:api:jp6, optional so main snapshots still run
+#               without it; dist:jp5 also build:jp5)
 #     publish - upload:s3 -> S3 releases/<ver>/ + changelog (git-cliff)
 #     release - release:gitlab (generic package registry + GitLab Release) and
 #               release:github (GitHub Release + assets), independent jobs
@@ -40,26 +48,54 @@ stages:
 
 # Pipeline deduplication: when a branch has an open MR, only the MR
 # pipeline runs — the branch pipeline is suppressed. Tag pipelines always run.
+#
+# Docs-only skip: `changes:` has no negation, so the code paths are listed
+# positively. A NEW top-level code directory MUST be added to every
+# `paths:` list below (workflow:rules x2 and .code-changes) or changes in it
+# will not trigger a pipeline.
 workflow:
   rules:
     - if: '$CI_COMMIT_TAG'
+    - if: '$CI_PIPELINE_SOURCE =~ /^(schedule|web|pipeline|api|trigger)$/'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
       when: never
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      changes:
+        paths: &code-paths
+          - src/**/*
+          - include/**/*
+          - stubs/**/*
+          - mock/**/*
+          - cmake/**/*
+          - vendor/**/*
+          - scripts/**/*
+          - packaging/**/*
+          - test/**/*
+          - CMakeLists.txt
+          - nvmpi.pc.in
+          - cliff.toml
+          - .gitlab-ci.yml
     - if: '$CI_COMMIT_BRANCH'
+      changes:
+        paths: *code-paths
+        compare_to: 'refs/heads/main'
 
 variables:
   L4T_TAG: "r36.4.0"
   L4T_SOC: "t234"
   L4T_TAG_JP5: "r35.4.1"
   NVMPI_PREFIX: "${CI_PROJECT_DIR}/_nvmpi"
-  # Images live in jetson-ffmpeg's pipeline (D5); paths copied from its .gitlab-ci.yml.
-  BUILDER_IMAGE: "harbor.local/jetson/jetson-ffmpeg-builder:${L4T_TAG}"
-  BUILDER_IMAGE_JP5: "harbor.local/jetson/jetson-ffmpeg-builder-jp5:${L4T_TAG_JP5}"
-  RELEASE_IMAGE: "harbor.local/docker.io/${DOCKERHUB_USERNAME}/jetson-ffmpeg-release-tools:latest"
+  # Images are built by timmertech/jetson-builder. Immutable tags are
+  # <tag>-<sha8> of the jetson-builder commit that built them; bump
+  # JETSON_BUILDER_SHA to adopt new images (cached by if-not-present).
+  JETSON_BUILDER_SHA: "ffd27ba0"
+  BUILDER_IMAGE: "harbor.local/jetson/jetson-ffmpeg-builder:${L4T_TAG}-${JETSON_BUILDER_SHA}"
+  BUILDER_IMAGE_JP5: "harbor.local/jetson/jetson-ffmpeg-builder-jp5:${L4T_TAG_JP5}-${JETSON_BUILDER_SHA}"
+  RUNTIME_IMAGE: "harbor.local/jetson/l4t-jetpack6:${L4T_TAG}-${JETSON_BUILDER_SHA}"
+  RELEASE_IMAGE: "harbor.local/jetson/jetson-ffmpeg-release-tools:latest-${JETSON_BUILDER_SHA}"
 
-# Reusable pipeline rules (build/test jobs carry no rules: workflow:rules
-# already limits pipelines, and they must also run on tags so a release is
+# Reusable pipeline rules (build/test jobs run on tags too, so a release is
 # gated on the Jetson test of that exact commit):
 #   .only-tag   — release work; runs only on v<X.Y.Z> tags
 #   .tag-or-main — dist/publish: release tags and default-branch pipelines
@@ -72,10 +108,31 @@ variables:
     - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/'
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "merge_request_event"'
 
+# build/test jobs: MR pipelines run them only when a code path changed
+# (docs-only MRs get ci:docs-only instead); every other pipeline runs them.
+.code-changes: &code-changes
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        paths: *code-paths
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - when: on_success
+
 default:
   image:
     name: "${BUILDER_IMAGE}"
-    pull_policy: always
+    pull_policy: if-not-present
+
+# Keeps docs-only MR pipelines non-empty so the merge gate (pipeline must
+# succeed) passes. Runs on every MR; code MRs run it beside the real jobs.
+ci:docs-only:
+  stage: build
+  needs: []
+  script:
+    - echo "MR pipeline ok (build/test run only when a code path changed)"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 
 # ---------------------------------------------------------------------------
 # Stage: build — libnvmpi against stubs (compile check, NOT runnable) + the
@@ -83,12 +140,31 @@ default:
 # JP5 (kernel 5.10) catches V4L2 header constants/symbols that exist on JP6
 # (kernel 5.15+) but not JP5; it covers all JP5 releases (5.0.2-5.1.6).
 # ---------------------------------------------------------------------------
+# ccache: launcher active when the builder image ships ccache; cache is per
+# job (build:jp6 / build:jp5 differ), content-hashed compiler check because
+# the image is rebuilt.
 .build: &build
   stage: build
+  <<: *code-changes
+  variables:
+    CCACHE_DIR: "${CI_PROJECT_DIR}/.ccache"
+    CCACHE_COMPILERCHECK: "content"
+    CCACHE_MAXSIZE: "200M"
+    CCACHE_COMPRESS: "1"
+  cache:
+    key: "ccache-${CI_JOB_NAME_SLUG}"
+    paths:
+      - .ccache
   script:
+    - |
+      if command -v ccache >/dev/null; then
+        export CMAKE_C_COMPILER_LAUNCHER=ccache CMAKE_CXX_COMPILER_LAUNCHER=ccache
+        ccache -z
+      fi
     - bash ./scripts/build.sh --stubs --clean --prefix "${NVMPI_PREFIX}" -j"$(nproc)"
     - (cd build && ctest -R bufpool --output-on-failure)
     - cmake --install build
+    - '! command -v ccache >/dev/null || ccache -s'
   artifacts:
     paths:
       - _nvmpi/
@@ -136,9 +212,20 @@ build:jp5:
 test:api:jp6:
   stage: test
   image:
-    name: "harbor.local/jetson/l4t-jetpack6:${L4T_TAG}"
-    pull_policy: always
+    name: "${RUNTIME_IMAGE}"
+    pull_policy: if-not-present
   needs: ["build:jp6"]
+  # Not on default-branch pushes: with merge_method ff main HEAD is the commit
+  # the MR pipeline already tested on the Orin. Tag/schedule/web/MR still run.
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        paths: *code-paths
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - when: on_success
   tags: [jetson, orin-nx]
   resource_group: jetson
   timeout: 10m
@@ -201,6 +288,7 @@ test:api:jp6:
 # ---------------------------------------------------------------------------
 test:mock:jp6:
   stage: test
+  <<: *code-changes
   needs: []
   timeout: 20m
   variables:
@@ -289,14 +377,19 @@ test:mock:jp6:
 
 dist:jp6:
   extends: .dist
-  needs: ["test:api:jp6"]
+  needs:
+    - job: test:api:jp6
+      optional: true
 
 dist:jp5:
   extends: .dist
-  needs: ["build:jp5", "test:api:jp6"]
+  needs:
+    - "build:jp5"
+    - job: test:api:jp6
+      optional: true
   image:
     name: "${BUILDER_IMAGE_JP5}"
-    pull_policy: always
+    pull_policy: if-not-present
   variables:
     JP: "5"
     L4T_TAG: "${L4T_TAG_JP5}"
@@ -315,7 +408,7 @@ upload:s3:
   <<: *tag-or-main
   image:
     name: "${RELEASE_IMAGE}"
-    pull_policy: always
+    pull_policy: if-not-present
   needs: ["dist:jp6", "dist:jp5"]
   variables:
     GIT_DEPTH: "0"   # full history + tags for git-cliff
@@ -344,7 +437,7 @@ release:gitlab:
   <<: *only-tag
   image:
     name: "${RELEASE_IMAGE}"
-    pull_policy: always
+    pull_policy: if-not-present
   needs: ["dist:jp6", "dist:jp5", "upload:s3"]
   script:
     - bash ./scripts/release.sh
@@ -360,7 +453,7 @@ release:github:
   <<: *only-tag
   image:
     name: "${RELEASE_IMAGE}"
-    pull_policy: always
+    pull_policy: if-not-present
   needs: ["dist:jp6", "dist:jp5", "upload:s3"]
   script:
     - bash ./scripts/release-github.sh
@@ -369,7 +462,8 @@ release:github:
 # Stage: downstream — start the jetson-ffmpeg pipeline with this commit as
 # NVMPI_REF. Manual everywhere for now: jetson-ffmpeg does not consume
 # NVMPI_REF yet, so an automatic trigger would burn a full Jetson hw run for
-# nothing. Keep manual until the user decides otherwise.
+# nothing. Keep manual until jetson-ffmpeg consumes NVMPI_REF; then run it
+# automatically only on tag and nightly pipelines, with its fast hw tier.
 # NVMPI_REF = ref name (branch/tag): jetson-ffmpeg's job token can fetch
 # dist:* artifacts by ref (jobs/artifacts/<ref>/download), not by SHA.
 # NVMPI_SHA identifies the exact commit (snapshots/<short-sha>/ on S3).

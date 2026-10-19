@@ -45,3 +45,4 @@ build-real/
 dist/
 NOTES.md
 build-deb/
+.ccache/
