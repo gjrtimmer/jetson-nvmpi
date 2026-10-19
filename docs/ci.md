@@ -116,9 +116,12 @@ on the Orin.
   check. `test/api/leak_check.h` runs `__lsan_do_leak_check()` before each
   `_exit()` in ASan builds (no-op otherwise), so leaks fail the offending case
   without valgrind.
-- `test/tsan.supp` lists the only TSan suppressions, each with its reason: the
-  GCC 11 libtsan false "double lock" on `condition_variable::wait_for`
-  (`pthread_cond_clockwait` is not intercepted), and the benign plain-bool flag
+- GCC 11's libtsan does not intercept `pthread_cond_clockwait`, which makes
+  `condition_variable::wait_for` look like a double lock / data race on every
+  `NVMPI_bufPool` queue. TSan builds with GCC < 12 therefore force-include
+  `cmake/tsan_compat.h`, which switches libstdc++ back to the intercepted
+  `pthread_cond_timedwait` (test builds only).
+- `test/tsan.supp` holds the one remaining suppression: benign plain-bool flag
   reads in NVIDIA's vendored `NvV4l2ElementPlane` DQ thread.
 - Locally: `cmake -S . -B build-asan -DNVMPI_MOCK=ON -DNVMPI_SANITIZER=address`
   (or `thread`), build, `scripts/mock-dev-nodes.sh`, `ctest`.
