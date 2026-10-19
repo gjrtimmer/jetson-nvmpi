@@ -96,6 +96,9 @@ struct mock_ops {
     /* DQBUF found queue qi empty. Fill b->flags if needed (e.g. LAST).
      * Non-zero return = report EAGAIN now instead of waiting. */
     int  (*on_dq_empty)(struct mock_ctx *ctx, int qi, struct v4l2_buffer *b);
+    /* After S_FMT / TRY_FMT normalised f on queue qi: fill what the driver
+     * decides (strides, sizes). Runs with ctx->mu held. */
+    void (*on_fmt)(struct mock_ctx *ctx, int qi, struct v4l2_format *f);
     /* Return 1 when the ioctl was handled (result in *ret / errno). */
     int  (*on_ioctl)(struct mock_ctx *ctx, unsigned long req, void *arg,
                      int *ret);
@@ -130,14 +133,6 @@ struct mock_ctx {
     struct mock_ctx *next;                /* context list (g_lock)         */
 };
 
-/* mmap offset cookie: page-aligned, unique per (queue, buffer, plane) and
- * never 0 so a zero offset is always rejected. */
-static inline uint32_t mock_cookie_of(int qi, uint32_t idx, uint32_t plane)
-{
-    return ((((uint32_t)qi * MOCK_MAX_BUFS + idx) * MOCK_MAX_PLANES) +
-            plane + 1) * MOCK_PAGE;
-}
-
 /* ---- core.c ---------------------------------------------------------- */
 struct mock_ctx *mock_ctx_get(int fd);    /* takes a ref; NULL+EBADF       */
 void mock_ctx_put(struct mock_ctx *ctx);
@@ -158,10 +153,6 @@ int  mock_peek_queued(struct mock_ctx *ctx, int qi);
 /* Model API: complete a QBUF'd buffer (queued -> done) and wake waiters.  */
 int  mock_complete_buf(struct mock_ctx *ctx, int qi, uint32_t index,
                        const uint32_t *bytesused, uint32_t flags);
-/* mmap cookie -> backing memfd and the plane's offset inside it; -1 + errno
- * on a bad cookie. Caller holds a ctx ref (takes ctx->mu itself). */
-int  mock_mmap_lookup(struct mock_ctx *ctx, int64_t offset, size_t length,
-                      int *memfd_out, int64_t *off_out);
 
 /* ---- fmt.c ----------------------------------------------------------- */
 int  mock_do_fmt(struct mock_ctx *ctx, unsigned long req, struct v4l2_format *f);
@@ -175,5 +166,7 @@ void mock_push_event(struct mock_ctx *ctx, uint32_t type, uint32_t u32);
 const struct mock_ops *mock_model_for_node(const char *node);
 /* mock_dec.c: the decoder model (nvdec nodes). */
 extern const struct mock_ops mock_dec_ops;
+/* mock_enc.c: the encoder model (nvenc/msenc nodes). */
+extern const struct mock_ops mock_enc_ops;
 
 #endif /* NVMPI_MOCK_V4L2_H */

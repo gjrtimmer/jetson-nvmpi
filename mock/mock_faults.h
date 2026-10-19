@@ -2,7 +2,7 @@
  * mock_faults.h - fault and delay injection shared by the mock libraries.
  *
  *   NVMPI_MOCK_FAULT = point@N[+][,point@N[+]...]
- *       point  one of: dqbuf qbuf reqbufs streamon expbuf alloc
+ *       point  one of: dqbuf qbuf reqbufs streamon expbuf alloc open
  *       N      1-based call number at which the point fails
  *       +      sticky: call N and every later call fail (default: only N)
  *   NVMPI_MOCK_DELAY_US = microseconds added to every successful DQBUF
@@ -17,6 +17,8 @@
  *   streamon  a STREAMON that passed validation
  *   expbuf    an EXPBUF that passed validation
  *   alloc     an NvBufSurfaceCreate/Allocate call (libnvbufsurface)
+ *   open      a v4l2_open of a /dev node (libnvv4l2): fails with ENODEV, so
+ *             a codec's device creation (NvVideo{Encoder,Decoder}) fails
  *
  * The spec is re-read on every call; changing the variable resets all
  * counters. Parsing is defensive: a malformed or unknown token is reported
@@ -35,6 +37,7 @@ enum mock_fault_pt {
     MFP_STREAMON,
     MFP_EXPBUF,
     MFP_ALLOC,
+    MFP_OPEN,
     MFP_COUNT
 };
 

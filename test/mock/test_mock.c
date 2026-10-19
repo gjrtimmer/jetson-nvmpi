@@ -101,10 +101,8 @@ static void test_queue_basics(void)
     b.length = 1;
     b.m.planes = pl;
     CHECK(v4l2_ioctl(fd, VIDIOC_QUERYBUF, &b) == 0);
-    CHECK(pl[0].length == 4096 && pl[0].m.mem_offset != 0);
-    m = v4l2_mmap(NULL, pl[0].length, PROT_READ | PROT_WRITE, MAP_SHARED, fd,
-                  pl[0].m.mem_offset);
-    CHECK(m != MAP_FAILED);
+    CHECK(pl[0].length == 4096);
+    CHECK(v4l2_mmap(NULL, 4096, PROT_READ, MAP_SHARED, fd, 0) == MAP_FAILED);
     memset(&eb, 0, sizeof(eb));
     eb.type = OUT;
     eb.index = 1;
@@ -119,16 +117,24 @@ static void test_queue_basics(void)
         CHECK(NvBufSurfaceFromFd(d, (void **)&es) != 0);   /* strict */
         close(d);
     }
-    if (m != MAP_FAILED && eb.fd >= 0) {
-        m[0] = 0xA5;
-        m2 = mmap(NULL, 4096, PROT_READ, MAP_SHARED, eb.fd, 0);
-        CHECK(m2 != MAP_FAILED && m2[0] == 0xA5);
-        munmap(m2, 4096);
-        munmap(m, 4096);
+    if (eb.fd >= 0) {
+        /* What NvBuffer::map() does: mmap the EXPBUF fd at mem_offset; two
+         * mappings of the same plane see each other's writes. */
+        m = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, eb.fd,
+                 (off_t)pl[0].m.mem_offset);
+        m2 = mmap(NULL, 4096, PROT_READ, MAP_SHARED, eb.fd,
+                  (off_t)pl[0].m.mem_offset);
+        CHECK(m != MAP_FAILED && m2 != MAP_FAILED);
+        if (m != MAP_FAILED && m2 != MAP_FAILED) {
+            m[0] = 0xA5;
+            CHECK(m2[0] == 0xA5);
+        }
+        if (m != MAP_FAILED)
+            munmap(m, 4096);
+        if (m2 != MAP_FAILED)
+            munmap(m2, 4096);
         close(eb.fd);
     }
-    CHECK(v4l2_mmap(NULL, 4096, PROT_READ, MAP_SHARED, fd, 12345) ==
-          MAP_FAILED);
 
     /* QBUF validation: bad index, double QBUF. */
     CHECK(qbuf(fd, OUT, V4L2_MEMORY_MMAP, 99) < 0 && errno == EINVAL);

@@ -167,6 +167,7 @@ static void fill_buffer(struct v4l2_buffer *b, const struct mock_queue *q,
     const struct mock_buf *mb = &q->bufs[idx];
     uint32_t p;
 
+    (void)qi;
     b->index = idx;
     b->type = q->type;
     b->memory = q->memory;
@@ -181,7 +182,9 @@ static void fill_buffer(struct v4l2_buffer *b, const struct mock_queue *q,
         b->m.planes[p].length = mb->length[p];
         b->m.planes[p].bytesused = mb->bytesused[p];
         if (q->memory == V4L2_MEMORY_MMAP)
-            b->m.planes[p].m.mem_offset = mock_cookie_of(qi, idx, p);
+            /* Offset of the plane inside the buffer's memfd, which EXPBUF
+             * hands out: NvBuffer::map() mmap()s that fd at mem_offset. */
+            b->m.planes[p].m.mem_offset = mb->plane_off[p];
     }
 }
 

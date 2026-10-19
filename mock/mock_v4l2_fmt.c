@@ -51,10 +51,14 @@ int mock_do_fmt(struct mock_ctx *ctx, unsigned long req, struct v4l2_format *f)
         *f = q->fmt;
     } else if (req == VIDIOC_TRY_FMT) {
         normalise_fmt(f);
+        if (ctx->ops && ctx->ops->on_fmt)
+            ctx->ops->on_fmt(ctx, qi, f);
     } else if (q->streaming) {
         ret = EBUSY;                     /* S_FMT while streaming */
     } else {
         normalise_fmt(f);
+        if (ctx->ops && ctx->ops->on_fmt)
+            ctx->ops->on_fmt(ctx, qi, f);
         q->fmt = *f;
     }
     pthread_mutex_unlock(&ctx->mu);
