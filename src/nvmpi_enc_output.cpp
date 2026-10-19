@@ -1,4 +1,5 @@
 #include "nvmpi_enc_internal.h"
+#include "nvmpi_alloc.h"
 
 //Callback run on NvVideoEncoder's capture-plane DQ thread for every
 //dequeued (encoded) buffer. Contract: return true to keep the thread
@@ -139,7 +140,8 @@ int setup_output_dmabuf(nvmpictx *ctx, uint32_t num_buffers )
         cParams.memtag = NvBufSurfaceTag_VIDEO_ENC;
         cParams.memType = NVBUF_MEM_SURFACE_ARRAY;
         // Create output plane fd for DMABUF io-mode
-        ret = NvBufSurf::NvAllocate(&cParams, 1, &fd);
+        /* Checked allocation (NvAllocate dereferences NULL on failure). */
+        ret = nvmpi_alloc_surfaces(&cParams, 1, &fd);
         if(ret < 0)
         {
             NVMPI_LOG(NVMPI_LOG_ERROR,
