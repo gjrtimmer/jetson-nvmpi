@@ -69,7 +69,12 @@ mkdir -p /opt/nvidia/l4t-packages
 touch /opt/nvidia/l4t-packages/.nv-l4t-disable-boot-fw-update-in-preinstall
 
 apt-get update -qq
-apt-get install -y -qq --no-install-recommends ca-certificates wget gcc libc6-dev pkg-config binutils
+# Some CI runners mount their own CA bundle read-only over /etc/ssl, which
+# makes dpkg fail on the openssl/ca-certificates packages: only install
+# ca-certificates when the image has no CA bundle.
+PKGS=(wget gcc libc6-dev pkg-config binutils)
+[ -s /etc/ssl/certs/ca-certificates.crt ] || PKGS+=(ca-certificates)
+apt-get install -y -qq --no-install-recommends "${PKGS[@]}"
 if ! grep -rqs "repo.download.nvidia.com/jetson/${SOC}" /etc/apt/sources.list /etc/apt/sources.list.d/; then
     wget -qO /etc/apt/trusted.gpg.d/jetson-ota-public.asc https://repo.download.nvidia.com/jetson/jetson-ota-public.asc
     {
