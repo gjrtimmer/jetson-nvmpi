@@ -3,6 +3,36 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.0.1 - 2026-10-19
+
+### Bug Fixes
+
+
+**ci**
+
+
+- Allow + in S3 object keys for snapshot debs
+
+
+**deb**
+
+
+- Depend on libjpeg-turbo8, ship shlibs and changelog, strip library
+
+
+### Testing
+
+
+**deb**
+
+
+- Add clean-system install test script for libnvmpi debs
+- Show apt output of the base tool install
+- Skip ca-certificates when the runner mounts a CA bundle
+- Print CA diagnostics when the NVIDIA key fetch fails
+- Use a private CA bundle instead of installing ca-certificates
+- Accept snapshot deb versions in the nvmpi.pc version check
+
 ## 4.0.0 - 2026-10-19
 
 ### Bug Fixes
