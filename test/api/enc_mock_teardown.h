@@ -49,4 +49,37 @@ static int teardown_held_packet(void)
     return 0;
 }
 
+/* #131: drain the pool while one AU is held by the stalled callback and a
+ * second one is queued behind it. The callback finds the pool empty for the
+ * second AU only AFTER the drain started, so the drop is deterministic: it
+ * must be silent (strict mode fails on the ERROR log). */
+static int teardown_pool_empty_drop(void)
+{
+    struct ecfg c = { NV_VIDEO_CodingH264, 0, 0, 0, 0, 0 };
+    nvmpictx *ctx;
+    nvPacket *pk;
+    int freed = 0;
+
+    setenv("NVMPI_MOCK_CTRL_DELAY_US", HELD_DELAY_US, 1);
+    ctx = e_create(&c);
+    REQUIRE(ctx);
+    REQUIRE(e_put(ctx, 1) == 0);
+    REQUIRE(e_put(ctx, 2) == 0);
+    usleep(30 * 1000);                   /* callback stalled on AU 1       */
+    while (nvmpi_encoder_dqEmptyPacket(ctx, &pk) == 0) {
+        free(pk->payload);
+        free(pk);
+        freed++;
+    }
+    usleep(700 * 1000);                  /* AU 2 hits the empty pool       */
+    while (nvmpi_encoder_get_packet(ctx, &pk, false) == 0) {
+        free(pk->payload);
+        free(pk);
+        freed++;
+    }
+    REQUIRE(freed == E_NPKT);            /* AU 1 published, AU 2 discarded */
+    REQUIRE(nvmpi_encoder_close(ctx) == 0);
+    return 0;
+}
+
 #endif /* NVMPI_TEST_ENC_MOCK_TEARDOWN_H */

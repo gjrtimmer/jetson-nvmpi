@@ -116,6 +116,16 @@ struct nvmpi_enc_ctx : nvmpictx
 	std::atomic<int> aus_pending{0};
 	std::atomic<unsigned> aus_dropped{0};
 
+	/* Teardown marker (#131). Set by the first nvmpi_encoder_dqEmptyPacket(),
+	 * a teardown-only call (the jetson-ffmpeg wrapper calls it only from
+	 * nvmpienc_deinitPktPool, the test e_destroy likewise). Once set, a
+	 * pool-empty drop in the DQ callback is the expected discard of an AU the
+	 * caller no longer wants: logged at DEBUG, not counted in aus_dropped.
+	 * Reset by nvmpi_encoder_flush() because flush restarts normal operation
+	 * (STREAMON, pool refilled by the caller); a drop after it is a real
+	 * contract violation again. */
+	std::atomic<bool> draining{false};
+
 	/* Blocking-wait ceiling for nvmpi_encoder_get_packet() when wait=true.
 	 * Mirrors the decoder's wait_timeout_ms (default 500ms). */
 	unsigned int wait_timeout_ms{500};

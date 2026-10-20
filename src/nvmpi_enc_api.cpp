@@ -46,6 +46,9 @@
 int nvmpi_encoder_dqEmptyPacket(nvmpictx* h,nvPacket** packet)
 {
 	nvmpi_enc_ctx* ctx = static_cast<nvmpi_enc_ctx*>(h);
+	/* Teardown-only call: from here on a pool-empty drop is expected (#131).
+	 * Stored before the dequeue so the DQ callback sees it first. */
+	ctx->draining.store(true, std::memory_order_release);
 	nvPacket* pkt = ctx->pktPool->dqEmptyBufSettled(std::chrono::milliseconds(1000));
 	if(!pkt) return -1;
 	*packet = pkt;
@@ -195,6 +198,8 @@ int nvmpi_encoder_flush(nvmpictx* h)
 	ctx->aus_pending.store(0, std::memory_order_seq_cst);
 	ctx->flushing.store(false, std::memory_order_release);
 	ctx->capPlaneGotEOS.store(false, std::memory_order_release);
+	/* Flush restarts normal operation: drops count as errors again (#131). */
+	ctx->draining.store(false, std::memory_order_release);
 
 	/* 5. STREAMON both planes — restart the V4L2 pipeline. */
 	ret = ctx->enc->output_plane.setStreamStatus(true);

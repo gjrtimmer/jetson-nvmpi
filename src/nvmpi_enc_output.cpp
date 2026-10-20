@@ -61,9 +61,18 @@ bool encoder_capture_plane_dq_callback(struct v4l2_buffer *v4l2_buf, NvBuffer * 
 		//smaller than the frames in flight, or if the caller removed packets
 		//(dqEmptyPacket) outside teardown. The capture buffer is re-queued
 		//below like every other one; nothing is leaked.
-		ctx->aus_dropped.fetch_add(1, std::memory_order_relaxed);
-		NVMPI_LOG(NVMPI_LOG_ERROR, "encoder packet pool empty; encoded frame dropped (%u so far); caller must return packets with qEmptyPacket after get_packet; there will be artifacts in output video",
-			ctx->aus_dropped.load(std::memory_order_relaxed));
+		if (ctx->draining.load(std::memory_order_acquire))
+		{
+			//drain-before-close (#131): the caller emptied the pool on
+			//purpose, the AU is discarded either way
+			NVMPI_LOG(NVMPI_LOG_DEBUG, "pool drained for teardown; AU discarded");
+		}
+		else
+		{
+			ctx->aus_dropped.fetch_add(1, std::memory_order_relaxed);
+			NVMPI_LOG(NVMPI_LOG_ERROR, "encoder packet pool empty; encoded frame dropped (%u so far); caller must return packets with qEmptyPacket after get_packet; there will be artifacts in output video",
+				ctx->aus_dropped.load(std::memory_order_relaxed));
+		}
 		ctx->aus_pending.fetch_sub(1, std::memory_order_seq_cst);
 	}
 	else if (buffer->planes[0].bytesused > NVMPI_ENC_CHUNK_SIZE)
