@@ -3,6 +3,17 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.3.2 - 2026-10-20
+
+### Testing
+
+
+**api**
+
+
+- Dump all thread stacks when a mock case times out (#136)
+
+
 ## 4.3.1 - 2026-10-20
 
 ### Bug Fixes
