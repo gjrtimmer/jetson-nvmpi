@@ -3,6 +3,17 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.0.6 - 2026-10-20
+
+### Testing
+
+
+**mock**
+
+
+- Heap AU buffer, frame rate and VUI timing in the encoder (#116)
+
+
 ## 4.0.5 - 2026-10-20
 
 ### Testing
