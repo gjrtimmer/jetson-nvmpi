@@ -5,8 +5,10 @@
  * NVJPG engine; on a mock runner it can create but never decode.
  *
  * It implements exactly the interface libnvmpi calls: createJPEGDecoder,
- * decodeToFd, the destructor, plus decodeToBuffer / disableMjpegDecode so
- * the class links. decodeToBuffer fails: libnvmpi never uses it.
+ * decodeToFd, the destructor, plus decodeToBuffer so the class links
+ * (decodeToBuffer fails: libnvmpi never uses it). disableMjpegDecode is
+ * deliberately absent: libnvmpi never calls it and the R35 (JP5) header
+ * does not declare it, so defining it breaks the JP5 build.
  *
  * decodeToFd models what libnvjpeg does, because libnvmpi's lifetime rules
  * (nvmpi_dec_jpeg_fd.cpp) exist for these properties:
@@ -169,8 +171,4 @@ int NvJPEGDecoder::decodeToBuffer(NvBuffer ** /* buffer */,
                                   uint32_t * /* height */)
 {
 	return -1;
-}
-
-void NvJPEGDecoder::disableMjpegDecode()
-{
 }
