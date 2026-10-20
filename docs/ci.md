@@ -25,7 +25,7 @@ Contents:
 | Kind | Trigger | Jobs | Publishes |
 | --- | --- | --- | --- |
 | Branch / merge request | push to a branch, MR event | `build:jp6`, `build:jp5`, `test:api:stub:jp6`, `test:api:stub:jp5`, `test:api:asan`, `test:api:tsan`, `test:api:hw` (docs-only MR: `ci:docs-only`); plus `dist:*` and `test:deb:*` when a packaging path changed | nothing |
-| Main snapshot | push to the default branch | `build:*`, then `dist:jp6`, `dist:jp5`, `test:deb:jp6`, `test:deb:jp5`, `upload:s3` (no `test:api:hw`) | tarballs to S3 `snapshots/<short-sha>/` |
+| Main snapshot | push to the default branch | `build:*`, then `dist:jp6`, `dist:jp5`, `test:deb:jp6`, `test:deb:jp5`, `upload:s3:snapshot` (no `test:api:hw`) | tarballs to S3 `snapshots/<short-sha>/` |
 | Scheduled / web | schedule, manual web run | full set including `test:api:hw` | snapshot when run on main |
 | Release | tag `vX.Y.Z` | the above, then `dist:*`, `test:deb:*`, `release:test:deb:hw`, `upload:s3`, `release:gitlab`, `release:github` | S3 `releases/<ver>/`, package registry, GitLab Release, GitHub Release |
 | Downstream | manual | `trigger:jetson-ffmpeg` | starts a jetson-ffmpeg pipeline |
@@ -80,7 +80,7 @@ Stages, in order: `build`, `test`, `release-test`, `dist`, `test-deb`, `publish`
 | test-deb | `test:deb:jp6` | Install the `dist:jp6` debs in a clean `ubuntu:22.04` with NVIDIA's r36.4 apt repo and run `scripts/test-deb.sh --jp 6 --lintian`. | any runner, no tags |
 | test-deb | `test:deb:jp5` | Same in `ubuntu:20.04` with r35.4, static checks only (see below). | any runner, no tags |
 | test-deb | `release:test:deb:hw` | Tags only. Install the `dist:jp6` debs on the Orin, build `test_api` against them via `pkg-config`, check `libnvmpi.so.1` resolves from the system path and run it (`scripts/test-deb-hw.sh`). | Jetson runner |
-| publish | `upload:s3` | Upload the tarballs (and, on tags, the changelog) to the S3 bucket. | release-tools image |
+| publish | `upload:s3` (tags), `upload:s3:snapshot` (main) | Upload the tarballs (and, on tags, the changelog) to the S3 bucket. | release-tools image |
 | release | `release:gitlab` | Upload to the GitLab generic package registry and create the GitLab Release. Tags only. | release-tools image |
 | downstream | `trigger:jetson-ffmpeg` | Manual: start a jetson-ffmpeg pipeline for this commit. | trigger |
 
@@ -122,9 +122,11 @@ Details per job:
   path, run `test_api` on the hardware at the default iteration depth, purge.
   Installs `gcc`/`pkg-config` first if the image lacks them. `upload:s3`,
   `release:gitlab` and `release:github` need it on tags (non-optional); on main
-  `upload:s3` has no such need because the job does not exist there.
-- **`upload:s3`** runs with full git history (`GIT_DEPTH: 0`) and passes
-  `NOTES.md` on as an artifact so the changelog is generated only once.
+  `upload:s3:snapshot` has no such need because the job does not exist there.
+- **`upload:s3`** (tags only) runs with full git history (`GIT_DEPTH: 0`) and
+  passes `NOTES.md` on as an artifact so the changelog is generated only once.
+  **`upload:s3:snapshot`** (default branch) shares the hidden `.upload-s3`
+  base, uploads to `snapshots/<short-sha>/` and has no artifacts.
 - **`release:gitlab`** runs `scripts/release.sh`.
 
 ### Stub, sanitizer and hardware jobs
@@ -215,12 +217,12 @@ exact commit. Nothing is published.
 ## Main-branch pipelines and snapshots
 
 A pipeline on the default branch (and not an MR pipeline) runs build and test
-and then `dist:jp6`, `dist:jp5` and `upload:s3`. There is no release gate:
+and then `dist:jp6`, `dist:jp5` and `upload:s3:snapshot`. There is no release gate:
 
 - The package version is `<CMake VERSION>-<short-sha>`, for example
   `3.10.0-1b009ec` (the plain short SHA, no `g` prefix).
   The `-<short-sha>` build metadata marks the archive as a snapshot.
-- `upload:s3` uploads to `snapshots/<short-sha>/jp5|jp6/` (no changelog).
+- `upload:s3:snapshot` uploads to `snapshots/<short-sha>/jp5|jp6/` (no changelog).
 - Snapshots are not GitLab Releases and do not touch the package registry.
 
 Scheduled pipelines on the default branch follow the same path, so a pipeline

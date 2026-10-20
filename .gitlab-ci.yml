@@ -619,29 +619,26 @@ release:test:deb:hw:
 # branch, no changelog). NOTES.md (tags only) is passed to release as an
 # artifact so git-cliff runs only once.
 # ---------------------------------------------------------------------------
-# needs per rule: tags also need the hw deb test; main snapshots have no such job.
-upload:s3:
+.upload-s3:
   stage: publish
-  rules:
-    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/'
-      needs: ["dist:jp6", "dist:jp5", "test:deb:jp6", "test:deb:jp5", "release:test:deb:hw"]
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "merge_request_event"'
-      needs: ["dist:jp6", "dist:jp5", "test:deb:jp6", "test:deb:jp5"]
   image:
     name: "${RELEASE_IMAGE}"
     pull_policy: if-not-present
   variables:
     GIT_DEPTH: "0"   # full history + tags for git-cliff
   script:
+
+# Tags: changelog (NOTES.md artifact for release:gitlab/release:github) +
+# upload; also needs the hw deb test.
+upload:s3:
+  extends: .upload-s3
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/'
+  needs: ["dist:jp6", "dist:jp5", "test:deb:jp6", "test:deb:jp5", "release:test:deb:hw"]
     - curl --version | head -1
-    - |
-      if [ -n "${CI_COMMIT_TAG:-}" ]; then
-        git fetch --tags --force || true
-        bash ./scripts/changelog.sh
-        bash ./scripts/upload-s3.sh "releases/${CI_COMMIT_TAG#v}" NOTES.md
-      else
-        bash ./scripts/upload-s3.sh "snapshots/${CI_COMMIT_SHORT_SHA}"
-      fi
+    - git fetch --tags --force || true
+    - bash ./scripts/changelog.sh
+    - bash ./scripts/upload-s3.sh "releases/${CI_COMMIT_TAG#v}" NOTES.md
   artifacts:
     paths:
       - NOTES.md
@@ -650,6 +647,16 @@ upload:s3:
 # ---------------------------------------------------------------------------
 # Stage: release — generic package registry + GitLab Release. Tag pipelines
 # only, after the S3 upload. Independent of release:github (neither needs the
+# Default branch: snapshot upload only (no changelog, no artifacts).
+upload:s3:snapshot:
+  extends: .upload-s3
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "merge_request_event"'
+  needs: ["dist:jp6", "dist:jp5", "test:deb:jp6", "test:deb:jp5"]
+  script:
+    - curl --version | head -1
+    - bash ./scripts/upload-s3.sh "snapshots/${CI_COMMIT_SHORT_SHA}"
+
 # other, so one failing does not block the other).
 # ---------------------------------------------------------------------------
 release:gitlab:
