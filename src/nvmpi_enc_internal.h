@@ -92,6 +92,15 @@ struct nvmpi_enc_ctx : nvmpictx
 	std::atomic<bool> capPlaneGotEOS{false};
 	std::atomic<bool> flushing{false};
 
+	/* Teardown flag (issue #122). Set by the user thread BEFORE it
+	 * STREAMOFFs the CAPTURE plane in close/flush, read by the DQ callback.
+	 * The vendored NvV4l2ElementPlane DQ thread hands the callback a NULL
+	 * buffer when its blocking dqBuffer() fails; STREAMOFF makes that call
+	 * fail (EINVAL), which is the expected way out of a teardown and not an
+	 * error. The callback uses this flag to tell the two apart. Cleared
+	 * only by nvmpi_encoder_flush() before it restarts the DQ thread. */
+	std::atomic<bool> dq_stopping{false};
+
 	/* Encoder back-pressure (issue #125). aus_pending = frames accepted by
 	 * put_frame whose AU the DQ callback has not yet consumed (published,
 	 * or dropped on an error path). Incremented by the user thread just

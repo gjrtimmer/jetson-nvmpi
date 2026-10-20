@@ -24,7 +24,16 @@ bool encoder_capture_plane_dq_callback(struct v4l2_buffer *v4l2_buf, NvBuffer * 
 
 	if (v4l2_buf == NULL)
 	{
-		NVMPI_LOG(NVMPI_LOG_ERROR, "error while dequeing buffer from output plane");
+		//The DQ thread passes NULL when dqBuffer() fails. During close/flush
+		//that is the STREAMOFF the user thread issued (dq_stopping is set
+		//before it, issue #122): a normal exit, not worth an error line.
+		//Any other failure is a real device error and stays one.
+		if (ctx->dq_stopping.load(std::memory_order_acquire))
+		{
+			NVMPI_LOG(NVMPI_LOG_DEBUG, "capture DQ thread leaving: stream stopped for teardown");
+			return false;
+		}
+		NVMPI_LOG(NVMPI_LOG_ERROR, "error while dequeing buffer from capture plane");
 		return false;
 	}
 

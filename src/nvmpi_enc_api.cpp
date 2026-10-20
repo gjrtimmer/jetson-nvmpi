@@ -167,6 +167,10 @@ int nvmpi_encoder_flush(nvmpictx* h)
 	 *    callbacks on torn-down queues. DQ thread runs in both blocking
 	 *    and non-blocking modes (always started since non-blocking support). */
 	if (ctx->dq_thread_started) {
+		/* Flag first (issue #122): the STREAMOFF below may fail the DQ
+		 * thread's pending dqBuffer(); the callback must treat that as a
+		 * normal exit. Cleared in step 7 once the thread is gone. */
+		ctx->dq_stopping.store(true, std::memory_order_release);
 		ctx->enc->capture_plane.stopDQThread();
 		ctx->enc->capture_plane.waitForDQThread(1000);
 		ctx->dq_thread_started = false;
@@ -226,7 +230,10 @@ int nvmpi_encoder_flush(nvmpictx* h)
 	}
 
 	/* 7. Restart DQ thread — resume capture-plane processing.
-	 *    DQ thread runs in both blocking and non-blocking modes. */
+	 *    DQ thread runs in both blocking and non-blocking modes. The
+	 *    teardown flag is cleared first so a real error after the restart
+	 *    is reported again. */
+	ctx->dq_stopping.store(false, std::memory_order_release);
 	ctx->enc->capture_plane.setDQThreadCallback(encoder_capture_plane_dq_callback);
 	ret = ctx->enc->capture_plane.startDQThread(ctx);
 	if (ret < 0) {
@@ -280,7 +287,11 @@ int nvmpi_enc_stop_dq_thread(nvmpi_enc_ctx* ctx)
 		usleep(10000);
 
 	/* 3. Ask the thread to stop (flag only), 4. STREAMOFF CAPTURE as a
-	 *    best effort wake-up, 5. join: 0 = joined, non-zero = timed out. */
+	 *    best effort wake-up, 5. join: 0 = joined, non-zero = timed out.
+	 *    dq_stopping goes up before the STREAMOFF (issue #122): the
+	 *    DQ thread's blocked dqBuffer() fails when the stream goes off and
+	 *    the callback must read that as a normal exit, not log an error. */
+	ctx->dq_stopping.store(true, std::memory_order_release);
 	ctx->enc->capture_plane.stopDQThread();
 	ctx->enc->capture_plane.setStreamStatus(false);
 	if (ctx->enc->capture_plane.waitForDQThread(1000) != 0)
