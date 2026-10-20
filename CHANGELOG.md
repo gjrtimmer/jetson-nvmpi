@@ -3,6 +3,26 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.2.2 - 2026-10-20
+
+### Bug Fixes
+
+
+**dec**
+
+
+- Refcounted frame-pool generations; rebuild on resolution change (#137)
+
+
+### Testing
+
+
+**api**
+
+
+- Diagnose decoder fd counts against a warmed-up baseline (#137)
+
+
 ## 4.2.1 - 2026-10-20
 
 ### Bug Fixes
