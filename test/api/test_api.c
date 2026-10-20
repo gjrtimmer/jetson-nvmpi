@@ -40,6 +40,10 @@
 #ifndef NVMPI_HAVE_AV1
 #define NVMPI_HAVE_AV1 1
 #endif
+/* Same for AV1 encode (#8): CMake passes 0/1. */
+#ifndef NVMPI_HAVE_AV1_ENC
+#define NVMPI_HAVE_AV1_ENC 1
+#endif
 
 static int tests_run = 0;
 static int tests_passed = 0;
@@ -262,6 +266,7 @@ static int test_encoder_hevc_create_close(void)
 
 #include "jpeg_fd_case.h"
 #include "av1_case.h"
+#include "av1_enc_case.h"
 #include "dec_fd_case.h"
 #include "dec_fd2_case.h"
 
@@ -279,6 +284,7 @@ int main(void)
     fail += RUN_TEST(test_decoder_all_codecs);
     fail += RUN_TEST(test_encoder_hevc_create_close);
     fail += RUN_TEST(test_decoder_av1_frame);
+    fail += RUN_TEST(test_encoder_av1_roundtrip);
     /* Zero-copy lifetime: resolution change + release after close (#137). */
     fail += RUN_TEST(test_decoder_res_change_borrowed);
     /* get_frame_fd2 layout vs the allocator's planeParams (#138). */

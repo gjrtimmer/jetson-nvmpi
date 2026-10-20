@@ -11,6 +11,7 @@
 #include "enc_mock_lowdelay.h"
 #include "enc_mock_codec.h"
 #include "enc_mock_rc.h"
+#include "enc_mock_av1.h"
 
 static const struct tcase k_cases[] = {
     { "blocking_h264", NULL, blocking_h264, 0 },
@@ -38,6 +39,13 @@ static const struct tcase k_cases[] = {
     { "teardown_held_packet", NULL, teardown_held_packet, 0 },
     { "teardown_pool_empty_drop", NULL, teardown_pool_empty_drop, 0 },
     { "vbr_peak_bitrate", NULL, vbr_peak_bitrate, 0 },
+#if NVMPI_HAVE_AV1_ENC
+    { "av1_stream", NULL, av1_stream, 0 },
+    { "av1_force_idr", NULL, av1_force_idr, 0 },
+    { "av1_roundtrip", NULL, av1_roundtrip, 0 },
+#endif
+    /* open@1+: create must fail before the device is touched (see the case) */
+    { "av1_create_gate", "open@1+", av1_create_gate, 0 },
     /* fault matrix: fn == NULL -> fault_case() */
     { "fault_none_control", "dqbuf@9999", NULL, 0 },
     { "fault_open@1", "open@1", NULL, 0 },        /* factory retry recovers */
