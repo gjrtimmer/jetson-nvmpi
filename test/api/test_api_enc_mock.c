@@ -371,11 +371,11 @@ static int run_body(void *arg)
     return t->fn ? t->fn() : fault_case(t);
 }
 
-/* TODO(#120): lenient (strict=0): normal encode cases still log "error while
- * dequeing buffer from output plane" under the mock; go strict once fixed. */
+/* strict=1: a [libnvmpi][E] line in a non-fault case fails the case (issue
+ * #122 removed the teardown error that used to force this lenient). */
 static int run_case(const struct tcase *t)
 {
-    return case_log_run(t->name, t->fault, 0, 1, CASE_TIMEOUT_S, run_body,
+    return case_log_run(t->name, t->fault, 1, 1, CASE_TIMEOUT_S, run_body,
                         (void *)t);
 }
 
