@@ -21,7 +21,10 @@
 #define EW 320u                           /* test picture size             */
 #define EH 240u
 #define E_NPKT 16                         /* packets in the pool           */
-#define E_PKT_SZ (64u * 1024u)            /* payload bytes per packet      */
+/* libnvmpi copies a whole AU into the packet payload and its contract is
+ * NVMPI_ENC_CHUNK_SIZE bytes (nvmpi.h). A mock key frame is I_PCM (#117,
+ * ~115 KB at 320x240), so a smaller buffer overflows. */
+#define E_PKT_SZ NVMPI_ENC_CHUNK_SIZE
 #define E_KEY 1ul                         /* AV_PKT_FLAG_KEY               */
 
 #define REQUIRE(c)                                                        \

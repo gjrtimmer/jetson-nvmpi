@@ -93,6 +93,19 @@ static inline int qcap(struct eh *e, unsigned i)
     return v4l2_ioctl(e->fd, VIDIOC_QBUF, &b);
 }
 
+/* Release an EXPBUF fd. EXPBUF registers a surface for it; destroying that
+ * (which closes the fd) leaves no stale registry entry that a recycled fd
+ * number could alias in the NvBufSurface mock (and leak under LSan). */
+static inline void eh_drop_export(int fd)
+{
+    NvBufSurface *xs = NULL;
+
+    if (NvBufSurfaceFromFd(fd, (void **)&xs) == 0 && xs)
+        (void)NvBufSurfaceDestroy(xs);
+    else
+        close(fd);
+}
+
 /* Open + format both planes + MMAP buffers + STREAMON; controls are set by
  * the caller via `pre` (before REQBUFS, like NvVideoEncoder) when given. */
 static inline int eh_open(struct eh *e, uint32_t codec, uint32_t w, uint32_t h,
@@ -157,7 +170,7 @@ static inline int eh_open(struct eh *e, uint32_t codec, uint32_t w, uint32_t h,
             e->caplen = pl[0].length;
             e->cap[i] = mmap(NULL, pl[0].length, PROT_READ, MAP_SHARED, eb.fd,
                              (off_t)pl[0].m.mem_offset);
-            close(eb.fd);                /* the mapping outlives the fd     */
+            eh_drop_export(eb.fd);       /* the mapping outlives the fd     */
         }
         if (e->cap[i] == MAP_FAILED)
             return -1;
@@ -189,7 +202,7 @@ static inline int eh_open(struct eh *e, uint32_t codec, uint32_t w, uint32_t h,
             if (e->raw[i][p] == MAP_FAILED)
                 return -1;
         }
-        close(eb.fd);
+        eh_drop_export(eb.fd);
     }
     t = OUT;
     if (v4l2_ioctl(e->fd, VIDIOC_STREAMON, &t))
