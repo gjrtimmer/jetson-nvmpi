@@ -364,6 +364,15 @@ release:test:api:hw:
 #                  and SPS/PPS placement, flush, teardown with frames in
 #                  flight, DMABUF input, and the same fault matrix
 #
+# The five ctests run in parallel (ctest -j): they share no state. Each is its
+# own process with its own mock instance; the only shared file is the
+# read-only /dev/v4l2-* placeholder symlinks scripts/mock-dev-nodes.sh makes
+# before ctest starts, and case_log.h captures stderr in per-process
+# tmpfile()s. The ASan job used to be the pipeline's critical path: every
+# forked case ends with an explicit LeakSanitizer check that costs a fixed
+# ~0.6 s on arm64 (ASan's 32-bit allocator walks every region in ForEachChunk,
+# no LSAN_OPTIONS flag changes that), so the suites are serialized CPU time.
+#
 # Forked test children leave through _exit(), which skips LeakSanitizer's
 # atexit check; test/api/leak_check.h runs the check explicitly first, so
 # ASan reports leaks per case without valgrind or a SANITIZER-specific exit.
@@ -417,7 +426,8 @@ release:test:api:hw:
     # itself exited 0 (see scripts/check-test-log.sh).
     - |
       rc=0
-      (cd build-mock && ${CTEST_LAUNCHER:-} ctest --output-on-failure -V) > ctest-output.log 2>&1 || rc=$?
+      echo "cpus: $(nproc), cgroup cpu.max: $(cat /sys/fs/cgroup/cpu.max 2>/dev/null || echo n/a)"
+      (cd build-mock && ${CTEST_LAUNCHER:-} ctest --output-on-failure -V -j"$(nproc)") > ctest-output.log 2>&1 || rc=$?
       cat ctest-output.log
       [ "$rc" -eq 0 ] || exit "$rc"
     - bash ./scripts/check-test-log.sh ctest-output.log
