@@ -3,6 +3,26 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.0.9 - 2026-10-20
+
+### Bug Fixes
+
+
+**enc**
+
+
+- Log a pool-empty drop during teardown drain at debug (#131)
+
+
+### Performance
+
+
+**enc**
+
+
+- Return at once from get_packet(wait) when nothing is in flight (#103)
+
+
 ## 4.0.8 - 2026-10-20
 
 ### Bug Fixes
