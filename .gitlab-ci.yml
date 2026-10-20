@@ -413,11 +413,19 @@ release:test:api:hw:
         grep -F "$l" /tmp/ldd.txt | grep -q "${CI_PROJECT_DIR}/build-mock/mock/" \
           || { echo "$l does not resolve to build-mock/mock"; exit 1; }
       done
-    - (cd build-mock && ${CTEST_LAUNCHER:-} ctest --output-on-failure -V)
+    # Capture the output, then fail on any sanitizer report even when ctest
+    # itself exited 0 (see scripts/check-test-log.sh).
+    - |
+      rc=0
+      (cd build-mock && ${CTEST_LAUNCHER:-} ctest --output-on-failure -V) > ctest-output.log 2>&1 || rc=$?
+      cat ctest-output.log
+      [ "$rc" -eq 0 ] || exit "$rc"
+    - bash ./scripts/check-test-log.sh ctest-output.log
   artifacts:
     when: on_failure
     paths:
       - build-mock/Testing/Temporary/LastTest.log
+      - ctest-output.log
     expire_in: 1 week
 
 test:api:stub:jp6:
@@ -434,7 +442,7 @@ test:api:asan:
   variables:
     NVMPI_SANITIZER: "address"
     BUILD_TYPE: "Debug"
-    ASAN_OPTIONS: "detect_leaks=1:strict_string_checks=1:abort_on_error=0"
+    ASAN_OPTIONS: "detect_leaks=1:strict_string_checks=1:halt_on_error=1:abort_on_error=0"
     UBSAN_OPTIONS: "print_stacktrace=1:halt_on_error=1"
 
 test:api:tsan:

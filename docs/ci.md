@@ -153,6 +153,13 @@ on the Orin.
   `pthread_cond_timedwait` (test builds only).
 - `test/tsan.supp` holds the one remaining suppression: benign plain-bool flag
   reads in NVIDIA's vendored `NvV4l2ElementPlane` DQ thread.
+- Sanitizer reports fail the job even if ctest exits 0: the mock jobs capture
+  the ctest output to `ctest-output.log` and run `scripts/check-test-log.sh`,
+  which fails on `ERROR: AddressSanitizer`, `ERROR: LeakSanitizer`,
+  `runtime error:` (UBSan), `WARNING: ThreadSanitizer` or `SUMMARY: ...Sanitizer`.
+  Reports silenced by `test/tsan.supp` are never printed. Run it locally on any
+  log: `scripts/check-test-log.sh <log>...` (exit 1 on a report, 2 on an
+  unreadable log). The log is kept as an artifact on failure.
 - Locally: `cmake -S . -B build-asan -DNVMPI_MOCK=ON -DNVMPI_SANITIZER=address`
   (or `thread`), build, `scripts/mock-dev-nodes.sh`, `ctest`.
 
