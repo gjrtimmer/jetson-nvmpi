@@ -8,6 +8,7 @@
 
 #include "enc_mock_teardown.h"
 #include "enc_mock_backpressure.h"
+#include "enc_mock_lowdelay.h"
 
 static const struct tcase k_cases[] = {
     { "blocking_h264", NULL, blocking_h264, 0 },
@@ -21,6 +22,10 @@ static const struct tcase k_cases[] = {
     { "nonblock_eagain", NULL, nonblock_eagain, 0 },
     { "nonblock_backpressure", NULL, nonblock_backpressure, 0 },
     { "nonblock_backpressure_latency", NULL, nonblock_backpressure_latency, 0 },
+    { "lowdelay_loop", NULL, lowdelay_loop, 0 },
+    { "lowdelay_idle", NULL, lowdelay_idle, 0 },
+    { "lowdelay_latency", NULL, lowdelay_latency, 0 },
+    { "lowdelay_flush", NULL, lowdelay_flush, 0 },
     { "flush_restart", NULL, flush_restart, 0 },
     { "dmabuf_flow", NULL, dmabuf_flow, 0 },
     { "teardown_in_flight", NULL, teardown_in_flight, 0 },

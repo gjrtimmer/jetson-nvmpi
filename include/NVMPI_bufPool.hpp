@@ -115,6 +115,8 @@ struct NVMPI_bufPool
 	void shutdown();
 	/* Clear shutdown flag — call after flush/restart before reusing the pool. */
 	void reset();
+	/* True between shutdown() and reset(). Lock-free (issue #103). */
+	bool isShutdown() const { return m_shutdown.load(std::memory_order_acquire); }
 
 	/* Safety-net destructor: ensures shutdown is called and warns if either
 	 * queue still holds items — indicates the caller forgot to drain before

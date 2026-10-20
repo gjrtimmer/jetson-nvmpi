@@ -281,8 +281,9 @@ extern "C" {
 	int nvmpi_encoder_put_frame(nvmpictx* ctx, nvFrame* frame);
 	//get filled packet from encoder
 	//When wait=false: non-blocking, returns -1 immediately if no packet ready.
-	//When wait=true: blocks up to wait_timeout_ms using the pool's CV-based
-	//tiered wait. Returns -1 on timeout or shutdown.
+	//When wait=true: returns -1 immediately when no accepted frame is still
+	//in flight; otherwise waits up to wait_timeout_ms for the in-flight AUs.
+	//Returns -1 on timeout or shutdown.
 	//While flushing: blocks until a packet arrives or EOS (-2 = EOS).
 	//On success the caller owns the packet until it re-queues it with
 	//nvmpi_encoder_qEmptyPacket().

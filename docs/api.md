@@ -368,7 +368,7 @@ Dequeues one encoded packet (the pointer is one of the packets you donated).
 | `wait` | Flushing | Behaviour |
 | --- | --- | --- |
 | `false` | no | Non-blocking; `-1` immediately if no packet is ready. |
-| `true` | no | Blocks up to `wait_timeout` ms (default 500); `-1` on timeout or shutdown. |
+| `true` | no | `-1` immediately when no accepted frame is still in flight; otherwise waits up to `wait_timeout` ms (default 500) for the in-flight access units; `-1` on timeout or shutdown. |
 | either | yes (after `put_frame(NULL)`) | Polls until a packet arrives (`0`) or the end-of-stream buffer is seen (`-2`). |
 
 On success the caller owns the packet until it hands it back with

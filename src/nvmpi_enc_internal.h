@@ -14,6 +14,7 @@
 #include <unistd.h>
 #include <memory>
 #include <atomic>
+#include <chrono>
 
 #define MAX_BUFFERS 32
 //Error-check macro for encoder init: logs to stderr and jumps to the
@@ -149,6 +150,43 @@ static inline bool enc_can_admit(nvmpi_enc_ctx* ctx)
 	int pending = ctx->aus_pending.load(std::memory_order_seq_cst);
 	size_t avail = ctx->pktPool->emptyAvailable();
 	return pending < 0 || (size_t)pending < avail;
+}
+
+//Blocking get_packet wait for the not-flushing case (issue #103). Waits up
+//to wait_timeout_ms for a packet, but only while an AU is still in flight:
+//with nothing owed it returns NULL at once instead of burning the whole
+//timeout (a low-delay caller polls after every delivered AU).
+//Ordering: aus_pending is read BEFORE the filled queue is polled. The DQ
+//callback does qFilledBuf -> releaseHold -> aus_pending--, so a reader that
+//sees pending <= 0 is guaranteed that every published packet is already in
+//the queue, and the poll that follows cannot miss one. The reverse order
+//(poll, then load) could poll empty, let the callback publish and
+//decrement, then see 0 and report "nothing in flight" with a packet queued.
+//Slice: the callback's oversize/empty-pool drop paths decrement
+//aus_pending without notifying cv_filledBuf, so a long cv wait could sleep
+//through "nothing left"; waiting in <=5 ms slices re-reads the counter.
+//Runs on the user thread only; takes no lock of its own (the pool locks
+//m_filledBuf internally, never while this reads the atomic).
+static inline nvPacket* enc_wait_packet(nvmpi_enc_ctx* ctx)
+{
+	using Clock = std::chrono::steady_clock;
+	const auto slice = std::chrono::milliseconds(5);
+	const auto deadline = Clock::now() +
+		std::chrono::milliseconds(ctx->wait_timeout_ms);
+
+	for(;;)
+	{
+		int pending = ctx->aus_pending.load(std::memory_order_seq_cst);
+		nvPacket* pkt = ctx->pktPool->dqFilledBuf();
+		if(pkt) return pkt;
+		auto now = Clock::now();
+		if(pending <= 0 || ctx->flushing.load(std::memory_order_acquire) ||
+		   ctx->pktPool->isShutdown() || now >= deadline)
+			return NULL;
+		auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
+		pkt = ctx->pktPool->dqFilledBuf(remaining < slice ? remaining : slice);
+		if(pkt) return pkt;
+	}
 }
 
 //Forward declarations for functions defined across the split encoder files.

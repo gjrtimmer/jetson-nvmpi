@@ -65,8 +65,8 @@ void nvmpi_encoder_qEmptyPacket(nvmpictx* h,nvPacket* packet)
 //Public API: fetch the next encoded packet.
 //While encoding: non-blocking, -1 when nothing is ready (wrapper maps this
 //When wait=false: non-blocking, returns -1 immediately if no packet ready
-//(maps to EAGAIN). When wait=true: blocks up to wait_timeout_ms using the
-//pool's CV-based tiered wait. While flushing: poll every 1ms until either
+//(maps to EAGAIN). When wait=true: -1 at once if no AU is in flight,
+//else waits up to wait_timeout_ms (enc_wait_packet). While flushing: poll every 1ms until either
 //a packet arrives (0) or the DQ callback saw the EOS buffer (-2).
 //On success the caller holds the packet until re-queueing it via
 //nvmpi_encoder_qEmptyPacket().
@@ -76,8 +76,7 @@ int nvmpi_encoder_get_packet(nvmpictx* h, nvPacket** packet, bool wait)
 	nvPacket* pkt;
 
 	if (wait)
-		pkt = ctx->pktPool->dqFilledBuf(
-			std::chrono::milliseconds(ctx->wait_timeout_ms));
+		pkt = enc_wait_packet(ctx); //returns early when nothing is in flight (#103)
 	else
 		pkt = ctx->pktPool->dqFilledBuf();
 
