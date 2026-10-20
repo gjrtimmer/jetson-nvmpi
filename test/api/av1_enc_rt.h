@@ -20,6 +20,19 @@
 #define AV1_RT_GOP 5
 #define AV1_RT_FAIL(m) do { fprintf(stderr, "av1_rt FAIL %s:%d: %s\n", __func__, __LINE__, (m)); rc = 1; goto out; } while (0)
 
+/* Failure diagnostics: what the encoder actually produced (size, first
+ * bytes, OBU counts), so a hardware format mismatch is visible in CI. */
+static void av1_rt_dump(const nvPacket *g, const struct av1_tu *t)
+{
+    size_t i;
+
+    fprintf(stderr, "av1_rt packet size=%lu ok=%d first_td=%d td=%u seq=%u frame=%u bytes:",
+            (unsigned long)g->payload_size, t->ok, t->first_td, t->n_td, t->n_seq, t->n_frame);
+    for (i = 0; i < g->payload_size && i < 48; i++)
+        fprintf(stderr, " %02x", g->payload[i]);
+    fprintf(stderr, "\n");
+}
+
 static void av1_rt_frame(nvFrame *f, unsigned char *y, unsigned char *u,
                          unsigned char *v, int n)
 {
@@ -96,8 +109,10 @@ static int av1_enc_dec_roundtrip(int skip_ok)
         if (!g)
             AV1_RT_FAIL("no packet");
         av1_parse_tu(g->payload, g->payload_size, &t);
-        if (!t.ok || !t.first_td || t.n_frame < 1)
+        if (!t.ok || !t.first_td || t.n_frame < 1) {
+            av1_rt_dump(g, &t);
             AV1_RT_FAIL("packet is not a low-overhead OBU temporal unit");
+        }
         if (g->payload_size >= 4 && !memcmp(g->payload, "DKIF", 4))
             AV1_RT_FAIL("IVF header in packet");
         if (!!(g->flags & 1ul) != (i % AV1_RT_GOP == 0))

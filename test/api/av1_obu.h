@@ -99,8 +99,10 @@ static inline void av1_parse_tu(const uint8_t *p, size_t n, struct av1_tu *t)
             t->n_seq++;
             if (!t->w)
                 (void)av1_seq_dims(p + o, sz, &t->w, &t->h);
-        } else if (type == 6) {
-            /* show_existing_frame (1), frame_type (2): 0 = KEY_FRAME */
+        } else if (type == 6 || type == 3) {
+            /* OBU_FRAME, or OBU_FRAME_HEADER followed by OBU_TILE_GROUPs
+             * (equally valid; an encoder may split them). Both start with
+             * show_existing_frame (1), frame_type (2): 0 = KEY_FRAME */
             if (!t->n_frame && sz > 0)
                 t->key = av1_bits(p + o, sz, 0, 3) == 0;
             t->n_frame++;
