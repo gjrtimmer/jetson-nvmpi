@@ -24,6 +24,7 @@
 #include "nvUtils2NvBuf.h"
 #include "nvmpi_alloc.h"
 #include "nvmpi_log.h"
+#include <errno.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <linux/dma-buf.h>
@@ -156,9 +157,24 @@ int nvmpi_surface_copy_from_dmabuf(int dst_fd, int src_fd,
 	memset(&sync_start, 0, sizeof(sync_start));
 	sync_start.flags = DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ;
 	if (ioctl(src_fd, DMA_BUF_IOCTL_SYNC, &sync_start) < 0) {
-		NVMPI_LOG(NVMPI_LOG_WARN,
-			  "nvmpi_surface_copy_from_dmabuf: DMA_BUF_SYNC_START "
-			  "failed (fd=%d), proceeding without sync", src_fd);
+		/* ENOTTY/EINVAL: the fd does not implement DMA_BUF_IOCTL_SYNC
+		 * (not a dmabuf, e.g. the memfd the mock libs hand out, or a
+		 * kernel without the ioctl). There is no cache to sync, so
+		 * proceeding is correct and not worth a warning on every frame
+		 * (issue #122). Any other errno (EBADF, EPERM, EINTR, ...)
+		 * on a real dmabuf is unexpected and stays a warning. */
+		const int sync_errno = errno;
+		const bool no_sync_support =
+			(sync_errno == ENOTTY || sync_errno == EINVAL);
+		if (no_sync_support)
+			NVMPI_LOG(NVMPI_LOG_DEBUG,
+				  "nvmpi_surface_copy_from_dmabuf: fd=%d has no DMA_BUF sync "
+				  "(errno=%d), proceeding without sync", src_fd, sync_errno);
+		else
+			NVMPI_LOG(NVMPI_LOG_WARN,
+				  "nvmpi_surface_copy_from_dmabuf: DMA_BUF_SYNC_START "
+				  "failed (fd=%d, errno=%d), proceeding without sync",
+				  src_fd, sync_errno);
 	}
 
 	/* mmap the source DMA-BUF for CPU read */
