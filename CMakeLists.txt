@@ -201,6 +201,7 @@ set(NVMPI_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_planes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_pool.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_fd.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_fd_geometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_codec.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_close.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_enc_init.cpp
@@ -355,7 +356,9 @@ if(BUILD_TESTING)
   add_test(NAME jpeg_sof COMMAND test_jpeg_sof)
 
   add_executable(test_api test/api/test_api.c)
-  target_include_directories(test_api PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  # nvbufsurface.h (when present): the fd2 case compares against planeParams (#138).
+  target_include_directories(test_api PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${JETSON_MULTIMEDIA_API_INCLUDE_DIR} ${CUDA_INCLUDE_DIR})
   target_link_libraries(test_api PRIVATE nvmpi Threads::Threads)
   target_compile_definitions(test_api PRIVATE NVMPI_HAVE_AV1=${NVMPI_HAVE_AV1})
   if(NVMPI_MOCK)

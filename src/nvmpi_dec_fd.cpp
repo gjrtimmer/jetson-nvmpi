@@ -3,7 +3,8 @@
  *
  * Owns:
  *   - dec_gen_release()           — give a slot back (requeue or drop).
- *   - nvmpi_decoder_get_frame_fd() — borrow the next frame as a DMA-BUF fd.
+ *   - nvmpi_decoder_get_frame_fd()  — borrow the next frame as a DMA-BUF fd.
+ *   - nvmpi_decoder_get_frame_fd2() — same borrow, with per-plane geometry.
  *
  * Lifetime model (#137, same as the JPEG fd path): the borrow cookie owns one
  * reference to the slot's pool generation. close and resolution change only
@@ -65,29 +66,13 @@ static void dec_fd_release(void *opaque)
 	dec_gen_release(std::move(g), slot);
 }
 
-//Public API: zero-copy variant of nvmpi_decoder_get_frame.
-//Returns the next decoded frame as a borrowed DMA-BUF fd instead of
-//copying pixel data. The fd points to a pitch-linear NV12/YUV420
-//buffer that was VIC-transformed from the decoder's block-linear
-//capture plane — the same buffer that get_frame would memcpy from.
-//
-//The caller receives metadata (dimensions, pitch, timestamp) and a
-//release callback+opaque pair. The fd is valid only until the release
-//callback is invoked; if the caller needs it longer (e.g. to pass to
-//an encoder), it must dup() the fd before calling back.
-//
-//Ownership: the frame buffer is borrowed from its pool generation. Invoking
-//the release callback returns it to the empty queue (or, if the generation
-//was retired by a resolution change or close, frees it). Failure to release
-//starves the pool and stalls decoding. width/height/pitch describe the
-//slot's own generation, so a frame decoded before a resolution change keeps
-//its original geometry.
-int nvmpi_decoder_get_frame_fd(nvmpictx* h,
-	int *dmabuf_fd, int *width, int *height, int *pitch,
-	int64_t *timestamp,
-	nvmpi_frame_release_cb *release, void **opaque, bool wait)
+//Take the next filled slot and turn it into a borrow: the shared front half
+//of get_frame_fd and get_frame_fd2. On success *out_slot / *out_b describe
+//the borrow (generation reference moved slot -> cookie); on failure nothing
+//is held and -1 is returned (no frame, timeout or shutdown).
+static int dec_take_slot(nvmpi_dec_ctx *ctx, bool wait,
+	dec_slot **out_slot, dec_fd_borrow **out_b)
 {
-	nvmpi_dec_ctx* ctx = static_cast<nvmpi_dec_ctx*>(h);
 	dec_slot* slot;
 
 	/* Dequeue a filled frame — same path as get_frame. The slot is ours
@@ -109,9 +94,28 @@ int nvmpi_decoder_get_frame_fd(nvmpictx* h,
 	}
 	b->gen = std::move(slot->self);   //reference moves slot -> cookie
 	b->slot = slot;
+	*out_slot = slot;
+	*out_b = b;
+	return 0;
+}
 
-	/* Expose the underlying DMA-BUF fd and the generation's geometry.
-	 * linesize[0] is the Y plane pitch; for NV12 (2-plane) this is also
+//Public API: zero-copy variant of nvmpi_decoder_get_frame.
+//Returns the next decoded frame as a borrowed DMA-BUF fd instead of
+//copying pixel data. See include/nvmpi.h for the contract; the fd stays
+//valid until the release callback runs, even after nvmpi_decoder_close.
+//width/height/pitch describe the slot's own generation, so a frame decoded
+//before a resolution change keeps its original geometry.
+int nvmpi_decoder_get_frame_fd(nvmpictx* h,
+	int *dmabuf_fd, int *width, int *height, int *pitch,
+	int64_t *timestamp,
+	nvmpi_frame_release_cb *release, void **opaque, bool wait)
+{
+	dec_slot* slot;
+	dec_fd_borrow *b;
+	if (dec_take_slot(static_cast<nvmpi_dec_ctx*>(h), wait, &slot, &b) != 0)
+		return -1;
+
+	/* linesize[0] is the Y plane pitch; for NV12 (2-plane) this is also
 	 * the UV plane pitch (interleaved U/V at half height). */
 	const dec_gen *g = b->gen.get();
 	*dmabuf_fd = slot->fb->dst_dma_fd;
@@ -123,5 +127,42 @@ int nvmpi_decoder_get_frame_fd(nvmpictx* h,
 	*release = dec_fd_release;
 	*opaque = b;
 
+	return 0;
+}
+
+//Public API: get_frame_fd with full per-plane geometry (nvmpi_fd_frame).
+//Validation first, so a bad call never consumes a frame. Fills
+//min(struct_size, sizeof) bytes like the JPEG API and writes the filled size
+//back. Same borrow/release as v1 (dec_take_slot, dec_fd_release).
+int nvmpi_decoder_get_frame_fd2(nvmpictx* h, nvmpi_fd_frame *frame,
+	nvmpi_frame_release_cb *release, void **opaque, bool wait)
+{
+	if (!h || !frame || !release || !opaque ||
+	    frame->struct_size < NVMPI_FD_FRAME_V1_SIZE)
+		return NVMPI_ERR_INVAL;
+
+	dec_slot* slot;
+	dec_fd_borrow *b;
+	if (dec_take_slot(static_cast<nvmpi_dec_ctx*>(h), wait, &slot, &b) != 0)
+		return -1;
+
+	const dec_gen *g = b->gen.get();
+	if (!g->fd_geom_ok) {
+		/* Geometry could not be read for this generation (logged at pool
+		 * init): hand the frame back rather than expose a guessed layout. */
+		dec_fd_release(b);
+		return -1;
+	}
+
+	/* Cached layout + the two per-frame fields (fd, timestamp). */
+	nvmpi_fd_frame fr = g->fd_geom;
+	fr.fd = slot->fb->dst_dma_fd;
+	fr.timestamp = (int64_t)slot->fb->timestamp;
+	size_t n = frame->struct_size < sizeof(fr) ? frame->struct_size : sizeof(fr);
+	fr.struct_size = (uint32_t)n;
+	memcpy(frame, &fr, n);
+
+	*release = dec_fd_release;
+	*opaque = b;
 	return 0;
 }

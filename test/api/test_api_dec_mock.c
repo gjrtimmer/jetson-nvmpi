@@ -275,6 +275,7 @@ static int fault_case(const struct tcase *t)
 #include "dec_mock_latency.h"
 #include "dec_mock_av1.h"
 #include "dec_mock_fd.h"
+#include "dec_mock_fd2.h"
 
 static const struct tcase k_cases[] = {
     { "decode_plain", NULL, decode_plain, 0, 0 },
@@ -292,6 +293,11 @@ static const struct tcase k_cases[] = {
     { "res_change_borrowed", NULL, res_change_borrowed, 0, 0 },
     { "fd_count", NULL, fd_count, 0, 0 },
     { "flush_borrowed", NULL, flush_borrowed, 0, 0 },
+    /* get_frame_fd2 per-plane geometry (#138) */
+    { "fd2_geometry", NULL, fd2_geometry, 0, 0 },
+    { "fd2_args", NULL, fd2_args, 0, 0 },
+    { "fd2_v1_equal", NULL, fd2_v1_equal, 0, 0 },
+    { "fd2_after_close", NULL, fd2_after_close, 0, 0 },
     /* allocation failure during a resolution change with borrows held. The
      * allocator calls are counted per surface: 1-9 capture plane + 10-13
      * pool at the first event, 14-22 capture plane + 23-26 pool at the

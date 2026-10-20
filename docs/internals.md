@@ -38,7 +38,8 @@ src/
   nvmpi_dec_codec.cpp      codingType to V4L2 fourcc mapping
   nvmpi_dec_pool.cpp       destination frame-pool generations (alloc, retire)
   nvmpi_dec_api.cpp        put_packet, get_frame
-  nvmpi_dec_fd.cpp         get_frame_fd, borrow/release
+  nvmpi_dec_fd.cpp         get_frame_fd, get_frame_fd2, borrow/release
+  nvmpi_fd_geometry.cpp    plane geometry of nvmpi_fd_frame (decoder + JPEG)
   nvmpi_dec_close.cpp      flush, close
   nvmpi_dec_capture.cpp    capture thread loop, resolution-change handling
   nvmpi_dec_planes.cpp     CAPTURE-plane alloc/teardown, colour format selection

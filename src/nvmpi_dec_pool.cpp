@@ -201,6 +201,17 @@ void nvmpi_dec_ctx::initFramePool()
 	}
 
 	cacheGeometry(*g);
+	//fd2 layout: all slots share one allocation recipe, so slot 0 stands
+	//for the generation. Output size is the crop/resize target, not the
+	//padded plane size. flags stay 0: VIC destination surfaces are limited
+	//range (no full-range request is made on the transform).
+	if (!g->slots.empty() &&
+	    nvmpi_fd_fill_geometry(out_pixfmt, g->slots[0].fb, &g->fd_geom))
+	{
+		g->fd_geom.width = g->w;
+		g->fd_geom.height = g->h;
+		g->fd_geom_ok = true;
+	}
 
 	//Publish: from here the generation is live. Each queued slot carries a
 	//reference (`self`); retire or a release hands it back.

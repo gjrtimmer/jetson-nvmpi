@@ -4,6 +4,7 @@
  */
 #include "nvmpi_dec_jpeg_internal.h"
 #include "nvmpi_jpeg_sof.h"
+#include "nvmpi_fd_geometry.h"
 
 /* Screen the JPEG header: accept only 3-component baseline (SOF0/SOF1).
  * Logs the reason and returns false otherwise. Untrusted input; the scan
@@ -32,42 +33,15 @@ bool jpegFdCheckSof(const unsigned char *d, unsigned long size,
 }
 
 #ifdef WITH_NVUTILS
-/* Fill the geometry from the buffer's own plane params (never pitch*height). */
+/* Plane layout comes from the shared fill (nvmpi_fd_geometry.cpp); the JPEG
+ * path adds its displayed size and the full-range flag (JFIF is full range). */
 bool jpegFdFillGeometry(nvPixFormat fmt, nvmpi_frame_buffer *fb,
                          uint32_t w, uint32_t h, nvmpi_fd_frame *fr)
 {
-	const NvBufSurfaceParams &sp = fb->dst_dma_surface->surfaceList[0];
-	const NvBufSurfacePlaneParams &pp = sp.planeParams;
-	uint32_t want = (fmt == NV_PIX_NV12) ? 2 : 3;
-
-	/* dataSize can be 0 on some surface types: fall back to the end of the
-	 * last plane (offset + psize). */
-	uint64_t total = sp.dataSize;
-	if (total == 0 && pp.num_planes >= 1 && pp.num_planes <= 3)
-		total = (uint64_t)pp.offset[pp.num_planes - 1] + pp.psize[pp.num_planes - 1];
-	if (pp.num_planes != want || total == 0) {
-		NVMPI_LOG_SUB(NVMPI_LOG_ERROR, "jpeg", "unexpected surface: planes %u (want %u) size %llu",
-		              pp.num_planes, want, (unsigned long long)total);
+	if (!nvmpi_fd_fill_geometry(fmt, fb, fr))
 		return false;
-	}
-	memset(fr, 0, sizeof(*fr));
-	for (uint32_t i = 0; i < want; i++) {
-		/* A pitch below the row size or an offset outside the buffer would
-		 * make the consumer read out of bounds. */
-		if (pp.pitch[i] < pp.width[i] * pp.bytesPerPix[i] || pp.offset[i] >= total) {
-			NVMPI_LOG_SUB(NVMPI_LOG_ERROR, "jpeg", "implausible plane %u geometry", i);
-			return false;
-		}
-		fr->pitch[i] = pp.pitch[i];
-		fr->offset[i] = pp.offset[i];
-	}
-	fr->struct_size = sizeof(*fr);
-	fr->fd = fb->dst_dma_fd;
 	fr->width = w;
 	fr->height = h;
-	fr->format = fmt;
-	fr->num_planes = want;
-	fr->size = total;
 	fr->flags = NVMPI_FD_FRAME_FULL_RANGE;
 	return true;
 }

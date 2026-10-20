@@ -76,7 +76,7 @@ queued. Drain output packets with `nvmpi_encoder_get_packet`, return each with
 `nvmpi.h` -- `#define NVMPI_ERR_INVAL (-22)`
 
 NULL argument, `struct_size` too small, or a handle of the wrong kind
-(`nvmpi_jpeg_decoder_get_frame_fd`). Matches Linux `EINVAL`. The value is part
+(`nvmpi_jpeg_decoder_get_frame_fd`, `nvmpi_decoder_get_frame_fd2`). Matches Linux `EINVAL`. The value is part
 of the frozen 4.1.0 ABI.
 
 ## Enums
@@ -618,6 +618,36 @@ buffer geometry, a timestamp in microseconds, and a `release` callback plus
 
 Returns `0` on success, `-1` on no frame / timeout (also if the small
 bookkeeping allocation fails).
+
+### `nvmpi_decoder_get_frame_fd2`
+
+```c
+int nvmpi_decoder_get_frame_fd2(nvmpictx* ctx, nvmpi_fd_frame* frame,
+    nvmpi_frame_release_cb *release, void **opaque, bool wait);
+```
+
+Same borrow as `nvmpi_decoder_get_frame_fd` (one shared internal path and
+release callback), but returns the per-plane geometry in an `nvmpi_fd_frame`
+(see the JPEG decoder section for the struct). Set `frame->struct_size` to
+`sizeof(nvmpi_fd_frame)` (minimum `NVMPI_FD_FRAME_V1_SIZE`); the library fills
+`min(struct_size, sizeof)` bytes and writes that size back.
+
+| Field | Value |
+| --- | --- |
+| `fd` | Borrowed pitch-linear dmabuf fd, not `dup`'d. |
+| `width`, `height` | Output size of the frame's pool generation (crop or resize target); the planes may be larger. |
+| `format` | The decoder output format: `NV_PIX_NV12` / `NV_PIX_P010` have 2 planes, `NV_PIX_YUV420` has 3. |
+| `num_planes`, `pitch[]`, `offset[]`, `size` | From the allocator's plane parameters (`dataSize`, falling back to the end of the last plane). `offset[1]` is the real plane start (page aligned), never `pitch*height`. |
+| `timestamp` | As in the copying path, microseconds. |
+| `flags` | 0: the VIC destination surfaces are limited range. |
+
+Ownership, release callback and the close and resolution-change guarantees are
+those of `nvmpi_decoder_get_frame_fd`. The v1 call is unchanged, and its
+`pitch` equals `pitch[0]` here.
+
+Returns `0` on success, `-1` on no frame, timeout or shutdown (also if the
+bookkeeping allocation fails), `NVMPI_ERR_INVAL` for NULL arguments or a
+too-small `struct_size` (no frame is consumed).
 
 ### `nvmpi_encoder_put_frame_fd`
 

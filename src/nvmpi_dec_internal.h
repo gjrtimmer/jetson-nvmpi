@@ -5,6 +5,7 @@
 #include "nvUtils2NvBuf.h"
 #include "NVMPI_bufPool.hpp"
 #include "nvmpi_frame_buffer.hpp"
+#include "nvmpi_fd_geometry.h"
 #include <vector>
 #include "nvmpi_log.h"
 #include <thread>
@@ -77,6 +78,11 @@ struct dec_gen {
 	unsigned int linesize[MAX_NUM_PLANES]{};     //stride (pitch) of each plane in bytes
 	unsigned int height[MAX_NUM_PLANES]{};       //number of lines in each plane
 	unsigned int linedatasize[MAX_NUM_PLANES]{}; //usable data size for 1 line
+	//per-plane layout for get_frame_fd2 (pitch/offset/size/num_planes/format/
+	//width/height; fd and timestamp are per frame). Filled once from slot 0
+	//with the cache above; valid only when fd_geom_ok.
+	nvmpi_fd_frame fd_geom{};
+	bool fd_geom_ok{false};
 	~dec_gen();
 };
 

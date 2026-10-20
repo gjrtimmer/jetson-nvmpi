@@ -172,10 +172,11 @@ typedef struct _NVFRAME{
 typedef void (*nvmpi_frame_release_cb)(void *opaque);
 
 //One decoded frame handed out as a borrowed DMA-BUF fd by
-//nvmpi_jpeg_decoder_get_frame_fd. Geometry is per plane and comes from the
+//nvmpi_jpeg_decoder_get_frame_fd or nvmpi_decoder_get_frame_fd2. Geometry is per plane and comes from the
 //allocator, so never derive a plane address as pitch*height: use offset[].
 //width/height are the DISPLAYED size of the JPEG (from its SOF header, e.g.
-//33x17). The planes behind fd may be larger (padding/alignment): always use
+//33x17); for the video decoder they are the output size of the frame's pool
+//generation (crop, or resize target). The planes behind fd may be larger (padding/alignment): always use
 //pitch[]/offset[] (the real surface layout) and size (total bytes of the
 //buffer), never width/height, to address pixels.
 //Caller sets struct_size = sizeof(nvmpi_fd_frame) before the call; fields
@@ -185,13 +186,14 @@ typedef struct {
 	uint32_t struct_size;      //IN: sizeof(nvmpi_fd_frame) of the caller
 	int fd;                    //borrowed pitch-linear dmabuf fd (see ownership)
 	uint32_t width, height;    //displayed JPEG size (planes may be larger)
-	nvPixFormat format;        //NV_PIX_NV12 (2 planes) or NV_PIX_YUV420 (3)
-	uint32_t num_planes;       //2 for NV12, 3 for YUV420
+	nvPixFormat format;        //NV_PIX_NV12 or NV_PIX_P010 (2 planes), NV_PIX_YUV420 (3)
+	uint32_t num_planes;       //2 for NV12/P010, 3 for YUV420
 	uint32_t pitch[3];         //bytes per row of each plane (>= row bytes)
 	uint32_t offset[3];        //byte offset of each plane inside the fd
 	uint64_t size;             //total size of the buffer behind fd in bytes
 	int64_t timestamp;         //pts copied from nvPacket.pts of the input
-	uint32_t flags;            //bit0 (NVMPI_FD_FRAME_FULL_RANGE): full range
+	uint32_t flags;            //bit0 (NVMPI_FD_FRAME_FULL_RANGE): full range;
+	                           //0 = limited (all video decoder frames)
 } nvmpi_fd_frame;
 
 #define NVMPI_FD_FRAME_FULL_RANGE 0x1u
@@ -465,6 +467,34 @@ extern "C" {
 	int nvmpi_decoder_get_frame_fd(nvmpictx* ctx,
 		int *dmabuf_fd, int *width, int *height, int *pitch,
 		int64_t *timestamp,
+		nvmpi_frame_release_cb *release, void **opaque, bool wait);
+
+	//Same borrow as nvmpi_decoder_get_frame_fd, but returns the full
+	//per-plane geometry in an nvmpi_fd_frame (P010 and YUV420 included).
+	//Caller sets frame->struct_size = sizeof(nvmpi_fd_frame) (at least
+	//NVMPI_FD_FRAME_V1_SIZE); the library fills min(struct_size, sizeof) bytes
+	//and writes the filled size back to struct_size.
+	//  fd          borrowed pitch-linear dmabuf fd, NOT dup'd (NvBufSurfaceFromFd
+	//              fails on dup'd fds); never close() it
+	//  width/height output size of the frame's pool generation (the crop or
+	//              resize target, not the padded plane size)
+	//  format      the decoder's output format (NV_PIX_NV12/P010: 2 planes,
+	//              NV_PIX_YUV420: 3 planes)
+	//  pitch[]/offset[]/size  the real surface layout from the allocator:
+	//              plane i starts at offset[i] (page aligned, NOT pitch*height)
+	//  timestamp   as in the copying path, microseconds
+	//  flags       0: the VIC destination surfaces are limited range
+	//Ownership is the one of nvmpi_decoder_get_frame_fd: the fd is valid until
+	//*release(*opaque) runs, which must happen exactly once, from any thread,
+	//also after nvmpi_decoder_close or a resolution change (the buffer then
+	//stays fully valid until that last release; close never blocks on
+	//borrows). dup() the fd to keep it longer. Frames decoded before a
+	//resolution change keep their original geometry.
+	//wait: as in nvmpi_decoder_get_frame_fd.
+	//Returns 0 on success; -1 when no frame is ready (non-blocking), on
+	//timeout or shutdown; NVMPI_ERR_INVAL for NULL arguments or a struct_size
+	//below NVMPI_FD_FRAME_V1_SIZE (no frame is consumed then).
+	int nvmpi_decoder_get_frame_fd2(nvmpictx* ctx, nvmpi_fd_frame* frame,
 		nvmpi_frame_release_cb *release, void **opaque, bool wait);
 
 	//Submit one raw frame to the encoder via DMA-BUF fd (zero-copy
