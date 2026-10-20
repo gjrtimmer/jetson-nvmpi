@@ -12,7 +12,11 @@
 #ifndef NVMPI_TEST_ENC_MOCK_RC_H
 #define NVMPI_TEST_ENC_MOCK_RC_H
 
-#include <dlfcn.h>
+/* Exported by the mock libnvv4l2 (a startup dependency of libnvmpi); weak
+ * so the test still links against the stubs, where it resolves to NULL.
+ * Same pattern as NvBufSurfaceFromFd in jpeg_fd_case.h; no dlsym, which
+ * needs -ldl on the JP5 (glibc 2.31) image. */
+extern int mock_enc_last_peak_bitrate(uint32_t *out) __attribute__((weak));
 
 #define RC_BITRATE 2000000u
 
@@ -20,15 +24,12 @@
  * the mock device received (-1 on any failure). */
 static long vbr_peak_for(unsigned peak)
 {
-    typedef int (*peak_fn)(uint32_t *);
-    peak_fn get = (peak_fn)dlsym(dlopen(NULL, RTLD_NOW),
-                                "mock_enc_last_peak_bitrate");
     struct ecfg c = { NV_VIDEO_CodingH264, 0, 0, 0, 0, 0 };
     nvEncParam p;
     nvmpictx *ctx;
     uint32_t got = 0;
 
-    REQUIRE(get);
+    REQUIRE(mock_enc_last_peak_bitrate);
     memset(&p, 0, sizeof(p));
     p.width = EW;
     p.height = EH;
@@ -46,7 +47,7 @@ static long vbr_peak_for(unsigned peak)
     p.wait_timeout = 1000;
     ctx = nvmpi_create_encoder(&p);
     REQUIRE(ctx);
-    REQUIRE(get(&got) == 0);
+    REQUIRE(mock_enc_last_peak_bitrate(&got) == 0);
     e_destroy(ctx, NULL);
     return (long)got;
 }
