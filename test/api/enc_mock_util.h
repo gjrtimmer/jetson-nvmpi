@@ -27,6 +27,24 @@
 #define E_PKT_SZ NVMPI_ENC_CHUNK_SIZE
 #define E_KEY 1ul                         /* AV_PKT_FLAG_KEY               */
 
+/* determinism: encoder create/destroy dominates a run (threads, pools), and
+ * TSan/ASan multiply that cost (#142: 12-15 s of the 30 s case alarm in CI
+ * with 40 runs). Release builds keep the 40 runs that catch rare races; a
+ * sanitized build does 10 - it still compares 10 full encodes byte for byte,
+ * and the sanitizer itself is what looks for the races. */
+#if defined(__SANITIZE_THREAD__) || defined(__SANITIZE_ADDRESS__)
+#define NVMPI_TEST_SANITIZED 1
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer) || __has_feature(address_sanitizer)
+#define NVMPI_TEST_SANITIZED 1
+#endif
+#endif
+#ifdef NVMPI_TEST_SANITIZED
+#define DET_RUNS 10
+#else
+#define DET_RUNS 40
+#endif
+
 #define REQUIRE(c)                                                        \
     do {                                                                  \
         if (!(c)) {                                                       \

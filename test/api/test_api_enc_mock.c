@@ -98,7 +98,6 @@ static int pipelined(void)
  * The first AU must carry SPS+PPS (the extradata scan reads it), every
  * packet must be well-formed Annex-B (see check_au), and none may be lost. */
 #define DET_FRAMES 30
-#define DET_RUNS 40
 
 static int det_run(uint64_t *hash)
 {
