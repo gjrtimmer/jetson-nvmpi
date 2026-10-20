@@ -3,6 +3,27 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.2.1 - 2026-10-20
+
+### Bug Fixes
+
+
+**jpeg**
+
+
+- Crop, not scale, the padded decode in fd mode (#135)
+
+
+### Testing
+
+
+**mock**
+
+
+- NvJPEGDecoder model and JPEG fd mock suite (#128)
+- Drop disableMjpegDecode from the JPEG decoder mock (#128)
+
+
 ## 4.2.0 - 2026-10-20
 
 ### Bug Fixes
