@@ -205,6 +205,7 @@ set(NVMPI_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_codec.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_close.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_enc_init.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_enc_params.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_enc_input.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_enc_input_fd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_enc_api.cpp

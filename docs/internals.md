@@ -46,6 +46,7 @@ src/
   nvmpi_dec_internal.h     decoder context struct, macros
   nvmpi_timing.h           NVMPI_TIMING phase timer (create/close latency)
   nvmpi_enc_init.cpp       nvmpi_create_encoder (device open, format, planes)
+  nvmpi_enc_params.cpp     nvEncParam translation (profile/level/preset maps), H.264/HEVC controls
   nvmpi_enc_input.cpp      put_frame (memory copy), frame copy helper
   nvmpi_enc_input_fd.cpp   put_frame_fd (DMA-BUF)
   nvmpi_enc_api.cpp        packet pool ops, get_packet, force_idr, set_bitrate, flush, close

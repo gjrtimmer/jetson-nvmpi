@@ -163,7 +163,7 @@ internally.
 | `codingType` | `nvCodingType` | `NV_VIDEO_CodingH264` or `NV_VIDEO_CodingHEVC`. |
 | `max_perf` | `int` | Non-zero: lift the NVENC clock governor (max clocks). |
 | `poc_type` | `unsigned int` | H.264 picture order count type (0 default, 2 low-latency). |
-| `wait_timeout` | `unsigned int` | Blocking-wait timeout in ms. 0 = 500 ms; non-zero values are clamped to 100..5000 ms (`src/nvmpi_enc_init.cpp:78-82`). |
+| `wait_timeout` | `unsigned int` | Blocking-wait timeout in ms. 0 = 500 ms; non-zero values are clamped to 100..5000 ms (`src/nvmpi_enc_params.cpp`). |
 | `enable_cabac` | `char` | Non-zero: CABAC entropy coding (H.264 only; default CAVLC). |
 | `insert_aud` | `char` | Non-zero: insert Access Unit Delimiter NAL units. |
 | `use_dmabuf` | `int` | Non-zero: OUTPUT plane uses `V4L2_MEMORY_DMABUF`, enabling `nvmpi_encoder_put_frame_fd()`. |

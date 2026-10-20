@@ -210,3 +210,11 @@ int copyFrameToNvBuf(nvFrame* frame, NvBuffer& buffer);
 //nvmpi_enc_stop_dq_thread: defined in nvmpi_enc_api.cpp; stops and joins the
 //capture DQ thread safely (see definition). Returns 0 ok, -1 join timed out.
 int nvmpi_enc_stop_dq_thread(nvmpi_enc_ctx* ctx);
+//nvmpi_enc_translate_params / nvmpi_enc_apply_gop_profile_ctrls /
+//nvmpi_enc_apply_stream_ctrls: defined in nvmpi_enc_params.cpp; called from
+//nvmpi_create_encoder(). translate fills the scalar ctx fields and V4L2 enums
+//from nvEncParam; the apply_* helpers program the H.264/HEVC V4L2 controls and
+//return 0, or -1 after logging (caller then runs its create cleanup).
+void nvmpi_enc_translate_params(nvmpi_enc_ctx* ctx, const nvEncParam* param);
+int nvmpi_enc_apply_gop_profile_ctrls(nvmpi_enc_ctx* ctx, const nvEncParam* param);
+int nvmpi_enc_apply_stream_ctrls(nvmpi_enc_ctx* ctx, const nvEncParam* param);
