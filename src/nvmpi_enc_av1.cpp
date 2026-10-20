@@ -8,7 +8,8 @@
  *     encode controls (CMake probe NVMPI_HAVE_AV1_ENC);
  *   - request validation (8-bit 4:2:0 only);
  *   - nvEncParam fields that make no sense for AV1 are neutralized;
- *   - the AV1 headers-with-frame control (no IVF wrapper).
+ *   - the AV1 headers-with-frame control (no IVF wrapper), and stripping
+ *     the IVF framing the R36 driver emits regardless of that control.
  *
  * Output contract (no libnvmpi API change): one low-overhead-format OBU
  * temporal unit per packet (temporal delimiter, sequence header on key
@@ -74,8 +75,10 @@ void nvmpi_enc_av1_translate(nvmpi_enc_ctx* ctx)
  * and before setupPlane() (V4L2 REQBUFS), which is where the driver reads
  * it. HEADERS_WITH_FRAME = 0 selects raw OBU output; the default on some
  * driver versions is IVF framing (a "DKIF" file header plus a per-frame
- * header), which no packet consumer expects. Returns 0, or -1 after
- * logging (the caller cleans up). */
+ * header), which no packet consumer expects. On the Orin (L4T R36.4) the
+ * driver accepts the control and still emits IVF, so the capture path also
+ * strips it (nvmpi_enc_av1_ivf_skip); the control stays set for drivers
+ * that honour it. Returns 0, or -1 after logging (the caller cleans up). */
 int nvmpi_enc_av1_apply_ctrls(nvmpi_enc_ctx* ctx)
 {
 #if defined(NVMPI_HAVE_AV1_ENC) && NVMPI_HAVE_AV1_ENC
@@ -98,4 +101,34 @@ int nvmpi_enc_av1_apply_ctrls(nvmpi_enc_ctx* ctx)
 	(void)ctx;
 #endif
 	return 0;
+}
+
+/* Bytes of IVF framing at the start of an AV1 capture buffer, 0 when there
+ * is none (or the session is not AV1). Seen on the Orin (pipeline 57361):
+ * the first buffer starts with the 32-byte "DKIF" file header, and every
+ * buffer carries the 12-byte IVF frame header (le32 frame size, le64 pts)
+ * before the OBUs. Stateless and bounds-checked: the file header is taken
+ * only with its own header-length field = 32, the frame header only when its
+ * size field equals exactly the bytes that follow it, which raw OBU data
+ * (a temporal delimiter 12 00 first) never matches. */
+size_t nvmpi_enc_av1_ivf_skip(const nvmpi_enc_ctx* ctx, const unsigned char* p, size_t n)
+{
+#if defined(NVMPI_HAVE_AV1_ENC) && NVMPI_HAVE_AV1_ENC
+	size_t off = 0;
+
+	if (ctx->encoder_pixfmt != V4L2_PIX_FMT_AV1 || !p)
+		return 0;
+	if (n >= 32 && memcmp(p, "DKIF", 4) == 0 && (p[6] | (p[7] << 8)) == 32)
+		off = 32;
+	if (n - off >= 12) {
+		const unsigned char* f = p + off;
+		size_t fsz = (size_t)f[0] | (size_t)f[1] << 8 | (size_t)f[2] << 16 | (size_t)f[3] << 24;
+		if (fsz == n - off - 12)
+			off += 12;
+	}
+	return off;
+#else
+	(void)ctx; (void)p; (void)n;
+	return 0;
+#endif
 }

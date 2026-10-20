@@ -228,3 +228,4 @@ uint32_t nvmpi_enc_av1_pixfmt(void);
 bool nvmpi_enc_av1_check(const nvEncParam* param);
 void nvmpi_enc_av1_translate(nvmpi_enc_ctx* ctx);
 int nvmpi_enc_av1_apply_ctrls(nvmpi_enc_ctx* ctx);
+size_t nvmpi_enc_av1_ivf_skip(const nvmpi_enc_ctx* ctx, const unsigned char* p, size_t n);

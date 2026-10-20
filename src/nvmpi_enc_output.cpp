@@ -91,8 +91,11 @@ bool encoder_capture_plane_dq_callback(struct v4l2_buffer *v4l2_buf, NvBuffer * 
 		pkt->pts = (v4l2_buf->timestamp.tv_usec % 1000000) + (v4l2_buf->timestamp.tv_sec * 1000000UL);
 		//AV_PKT_FLAG_KEY 0x0001. if current packet is keyframe then enc_metadata.KeyFrame should be 0x1, so it should be OK to just assign value
 		pkt->flags = enc_metadata.KeyFrame;
-		pkt->payload_size = buffer->planes[0].bytesused;
-		memcpy(pkt->payload, buffer->planes[0].data, pkt->payload_size);
+		//AV1: drop the IVF framing the driver may add (#8); 0 for H.264/HEVC.
+		//skip <= bytesused by construction (bounds-checked in the helper)
+		size_t skip = nvmpi_enc_av1_ivf_skip(ctx, buffer->planes[0].data, buffer->planes[0].bytesused);
+		pkt->payload_size = buffer->planes[0].bytesused - skip;
+		memcpy(pkt->payload, buffer->planes[0].data + skip, pkt->payload_size);
 
 		//publish first, release after: a settled drain that sees held == 0
 		//must find the packet in the filled queue
