@@ -34,7 +34,7 @@ nvmpi_mock_lib(nvv4l2_mock nvv4l2 libv4l2.so.0
 	mock_v4l2_fmt.c mock_v4l2_models.c mock_faults.c
 	mock_dec.c mock_dec_ctl.c mock_dec_nal.c
 	mock_enc.c mock_enc_ctl.c mock_enc_nal.c mock_enc_h264.c mock_enc_pic.c
-	mock_enc_hevc.c)
+	mock_enc_hevc.c mock_enc_hevc_slice.c mock_enc_cabac.c)
 add_custom_command(TARGET nvv4l2_mock POST_BUILD
 	COMMAND ${CMAKE_COMMAND} -E create_symlink libnvv4l2.so
 		"${MOCK_OUT}/libv4l2.so.0")
@@ -60,10 +60,13 @@ if(BUILD_TESTING)
 		${CMAKE_SOURCE_DIR}/test/mock/test_mock_fault.c
 		${CMAKE_SOURCE_DIR}/test/mock/test_mock_enc.c
 		${CMAKE_SOURCE_DIR}/test/mock/test_mock_hevc.c
+		${CMAKE_SOURCE_DIR}/test/mock/test_mock_hevc_slice.c
 		${CMAKE_SOURCE_DIR}/test/mock/test_mock_vui.c
 		${CMAKE_SOURCE_DIR}/test/mock/test_mock_h264.c
 		${CMAKE_SOURCE_DIR}/test/mock/test_mock_xform.c)
-	target_include_directories(test_mock PRIVATE ${MOCK_INCLUDE_DIRS})
+	# mock/: the CABAC tables, shared with the test's decoder.
+	target_include_directories(test_mock PRIVATE ${MOCK_INCLUDE_DIRS}
+		${CMAKE_CURRENT_SOURCE_DIR})
 	target_link_libraries(test_mock PRIVATE
 		nvv4l2_mock nvbufsurface_mock nvbufsurftransform_mock Threads::Threads)
 endif()

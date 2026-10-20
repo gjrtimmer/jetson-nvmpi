@@ -293,6 +293,7 @@ int main(void)
     test_fault_injection();
     test_encoder_model();
     test_encoder_hevc_params();
+    test_encoder_hevc_slices();
     test_encoder_vui();
     test_encoder_h264();
     if (mock_fails) {

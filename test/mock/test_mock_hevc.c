@@ -2,8 +2,9 @@
  * test_mock_hevc.c - the HEVC parameter sets of the mock encoder (#108,
  * mock/mock_enc_hevc.c). The first access unit of an HEVC stream is read
  * back through the driver interface and VPS/SPS/PPS are parsed with a
- * minimal reader: profile, level, coded size, conformance window, plus the
- * first bytes of the slice. Part of the test_mock executable.
+ * minimal reader: profile, level, coded size, conformance window, PCM
+ * fields, plus the first bytes of the slice (the slice data is checked in
+ * test_mock_hevc_slice.c). Part of the test_mock executable.
  */
 #include "bit_read.h"
 #include "mock_enc_harness.h"
@@ -63,6 +64,18 @@ static void check_size(uint32_t w, uint32_t h, unsigned level_idc)
         CHECK(get_bits(&r, 1) == 0);
     }
     CHECK(get_ue(&r) == 0 && get_ue(&r) == 0);   /* 8-bit luma and chroma   */
+    CHECK(get_ue(&r) == 4);                   /* log2_max_poc_lsb_minus4    */
+    CHECK(get_bits(&r, 1) == 1 && get_ue(&r) == 1 && get_ue(&r) == 0 &&
+          get_ue(&r) == 0);                   /* sub-layer ordering         */
+    CHECK(get_ue(&r) == 0 && get_ue(&r) == 1);   /* CB 8..16 (CTB 16)       */
+    CHECK(get_ue(&r) == 0 && get_ue(&r) == 2);   /* TB 4..16                */
+    CHECK(get_ue(&r) == 0 && get_ue(&r) == 0);   /* hierarchy depths        */
+    CHECK(get_bits(&r, 3) == 0);              /* no scaling list, AMP, SAO  */
+    CHECK(get_bits(&r, 1) == 1);              /* pcm_enabled_flag           */
+    CHECK(get_bits(&r, 4) == 7 && get_bits(&r, 4) == 7);   /* 8-bit PCM     */
+    CHECK(get_ue(&r) == 0 && get_ue(&r) == 0);   /* PCM CB size 8 only      */
+    CHECK(get_bits(&r, 1) == 1);              /* pcm_loop_filter_disabled   */
+    CHECK(get_ue(&r) == 0);                   /* num_short_term_ref_pic_sets */
     CHECK(r.pos < sn * 8);                    /* no read past the payload   */
 
     r = (struct br){ p, pn, 0 };              /* PPS                        */

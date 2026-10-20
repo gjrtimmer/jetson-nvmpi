@@ -46,6 +46,8 @@ void test_fault_injection(void);
 void test_encoder_model(void);
 /* test_mock_hevc.c: HEVC VPS/SPS/PPS of the encoder model. */
 void test_encoder_hevc_params(void);
+/* test_mock_hevc_slice.c: decodable HEVC slices (PCM key frames, skip P). */
+void test_encoder_hevc_slices(void);
 /* test_mock_vui.c: S_PARM frame rate, VUI timing_info, AU size bound. */
 void test_encoder_vui(void);
 /* test_mock_h264.c: decodable H.264 slices (I_PCM, P skip) of the encoder. */

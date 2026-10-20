@@ -20,11 +20,11 @@
  *                    through, KEYFRAME/PFRAME flags set. H.264 is decodable
  *                    (#117): key frames are I_PCM macroblocks carrying the
  *                    OUTPUT picture (mock_enc_pic.c), P frames are all
- *                    skip; HEVC slices stay canned (#118). The slice RBSP is
- *                    built in a heap scratch buffer sized from the picture
- *                    (enc_scratch_size) and the NAL units are written
- *                    straight into the mapped CAPTURE buffer; an AU that
- *                    does not fit its length, or a picture above
+ *                    skip; HEVC likewise with PCM CUs and CABAC (#118). The
+ *                    slice RBSP is built in a heap scratch buffer sized from
+ *                    the picture (enc_scratch_size) and the NAL units are
+ *                    written straight into the mapped CAPTURE buffer; an AU
+ *                    that does not fit its length, or a picture above
  *                    MOCK_ENC_MAX_PIXELS, completes with V4L2_BUF_FLAG_ERROR.
  *   GOP              Frame 0, a forced IDR (FORCE_FRAME_TYPE), every
  *                    IDR_INTERVAL frames: IDR. Every GOP_SIZE frames: key
@@ -83,10 +83,9 @@ static void enc_on_open(struct mock_ctx *ctx)
  * bytesperline (aligned to 32 like the hardware's pitch, so stride != width
  * is exercised) and sizeimage = bytesperline * plane height. NvV4l2Element
  * reads both back after S_FMT; a zero stride would make every frame empty. */
-/* Bytes the RBSP scratch buffer needs for a w x h picture: an I_PCM key
- * frame (#117) takes MOCK_ENC_MB_MAX bytes per macroblock of the picture
- * rounded up to whole macroblocks, plus header room (derivation in
- * mock_enc.h). 0 = refuse (above the pixel bound; also keeps the product
+/* Bytes the RBSP scratch buffer needs for a w x h picture: a PCM key frame
+ * (#117, #118) takes MOCK_ENC_MB_MAX bytes per 16x16 unit of the picture
+ * rounded up to whole units, plus header room (derivation in mock_enc.h). 0 = refuse (above the pixel bound; also keeps the product
  * far from size_t overflow). */
 static size_t enc_scratch_size(uint32_t w, uint32_t h)
 {
@@ -257,9 +256,8 @@ static void encode_frame(struct mock_ctx *ctx, struct enc_model *m, int oi, int 
         au.tpf_num = out->tpf.numerator;
         au.tpf_den = out->tpf.denominator;
     }
-    /* The OUTPUT frame supplies the H.264 PCM samples (HEVC slices are
-     * canned until #118 and ignore it). Mapped here; unmapped right after
-     * the AU is written. Unreadable input becomes a pattern, never fails. */
+    /* The OUTPUT frame supplies the PCM samples of key frames. Mapped here;
+     * unmapped right after the AU is written. Unreadable input becomes a pattern, never fails. */
     mock_enc_pic_map(out, oi, au.seq, &pic);
     au.pic = &pic;
     n = write_au(ctx, m, ci, &au);

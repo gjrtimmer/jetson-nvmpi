@@ -5,18 +5,18 @@
  * VPS/SPS/PPS are REAL, spec-conformant syntax (H.265 7.3.2): Main profile,
  * 8-bit 4:2:0, the encoder's actual picture size, so FFmpeg can build hvcC
  * (mp4/mkv) and RTP sprop-* from them. The slice NAL starts with a real
- * slice_segment_header() matching those sets; the slice DATA after it is
- * still canned and not decodable (#118).
+ * slice_segment_header() matching those sets, followed by decodable CABAC
+ * slice data (#118, mock_enc_hevc_slice.c).
  *
- * Coding tools are minimal: CTB 16, min CB 8, no AMP/SAO/PCM/scaling lists,
- * no long-term refs, no temporal MVP, no tiles. VUI is absent unless the
+ * Coding tools are minimal: CTB 16, min CB 8, PCM 8x8 (8-bit, loop filter
+ * off) for key frames, no AMP/SAO/scaling lists, no long-term refs, no
+ * temporal MVP, no tiles. VUI is absent unless the
  * INSERT_VUI control is set (#116): then timing_info only.
  */
 #include "mock_enc.h"
 #include "mock_enc_bits.h"
 
 #define PS_MAX 64u          /* rbsp scratch; the largest set is ~25 bytes  */
-#define HDR_MAX 24u         /* slice header scratch                        */
 
 /* Level from luma picture size (H.265 Table A.8, MaxLumaPs). Returns
  * general_level_idc = 30 * level. */
@@ -140,7 +140,12 @@ static size_t hevc_sps(uint8_t *out, size_t room, uint32_t w, uint32_t h,
     put_bits(&bw, 0, 1);               /* scaling_list_enabled_flag        */
     put_bits(&bw, 0, 1);               /* amp_enabled_flag                 */
     put_bits(&bw, 0, 1);               /* sample_adaptive_offset_enabled   */
-    put_bits(&bw, 0, 1);               /* pcm_enabled_flag                 */
+    put_bits(&bw, 1, 1);               /* pcm_enabled_flag                 */
+    put_bits(&bw, 7, 4);               /* pcm_sample_bit_depth_luma_minus1 */
+    put_bits(&bw, 7, 4);               /* pcm_sample_bit_depth_chroma_minus1 */
+    put_ue(&bw, 0);                    /* log2_min_pcm_luma_cb_size_minus3: 8 */
+    put_ue(&bw, 0);                    /* log2_diff_max_min_pcm: 8x8 only  */
+    put_bits(&bw, 1, 1);               /* pcm_loop_filter_disabled_flag    */
     put_ue(&bw, 0);                    /* num_short_term_ref_pic_sets      */
     put_bits(&bw, 0, 1);               /* long_term_ref_pics_present_flag  */
     put_bits(&bw, 0, 1);               /* sps_temporal_mvp_enabled_flag    */
@@ -209,24 +214,33 @@ size_t mock_enc_hevc_params(uint8_t *out, size_t room, uint32_t w, uint32_t h,
 }
 
 /* One slice NAL: slice_segment_header() for the sets above, byte alignment,
- * then the canned body. nal_type: 19 IDR_W_RADL, 21 CRA, 1 TRAIL_R. */
-size_t mock_enc_hevc_slice(uint8_t *out, size_t room, unsigned nal_type,
-                           uint32_t poc, const uint8_t *body, size_t blen)
+ * then the CABAC slice data (mock_enc_hevc_slice.c). The RBSP is built in the
+ * caller's scratch (bit writer ORs into it, so the region this picture can
+ * use is zeroed first); the NAL, with emulation prevention, goes into out.
+ * nal_type: 19 IDR_W_RADL, 21 CRA (periodic I frame), 1 TRAIL_R (P). */
+size_t mock_enc_hevc_slice(const struct mock_enc_au *au, uint8_t *out,
+                           size_t room, uint8_t *rbsp, size_t rbsp_cap)
 {
-    uint8_t rbsp[HDR_MAX + MOCK_ENC_SLICE_MAX] = { 0 };
-    struct bw bw = { rbsp, sizeof(rbsp), 0, false };
+    unsigned nal_type = au->idr ? 19 : au->key ? 21 : 1;
+    uint32_t ctbs = ((au->width + 15) / 16) * ((au->height + 15) / 16);
+    /* Bytes of rbsp this picture can use (see MOCK_ENC_MB_MAX in
+     * mock_enc.h); a P slice is a few bits per CTB. */
+    size_t want = (size_t)ctbs * (au->key ? MOCK_ENC_MB_MAX : MOCK_ENC_P_CTB_MAX) +
+                  MOCK_ENC_AU_HEADROOM;
+    struct bw bw = { rbsp, want, 0, false };
     uint8_t hdr[2] = { (uint8_t)(nal_type << 1), 0x01 };
     bool irap = nal_type >= 16 && nal_type <= 23, idr = nal_type == 19;
 
-    if (blen > MOCK_ENC_SLICE_MAX)
+    if (want > rbsp_cap || !au->pic)
         return 0;
+    memset(rbsp, 0, want);
     put_bits(&bw, 1, 1);               /* first_slice_segment_in_pic_flag  */
     if (irap)
         put_bits(&bw, 0, 1);           /* no_output_of_prior_pics_flag     */
     put_ue(&bw, 0);                    /* slice_pic_parameter_set_id       */
     put_ue(&bw, nal_type == 1 ? 1 : 2);/* slice_type: P (1) or I (2)       */
     if (!idr) {
-        put_bits(&bw, poc & 0xff, 8);  /* slice_pic_order_cnt_lsb          */
+        put_bits(&bw, au->poc & 0xff, 8);  /* slice_pic_order_cnt_lsb      */
         put_bits(&bw, 0, 1);           /* short_term_ref_pic_set_sps_flag  */
         if (nal_type == 1) {
             put_ue(&bw, 1);            /* num_negative_pics                */
@@ -240,14 +254,11 @@ size_t mock_enc_hevc_slice(uint8_t *out, size_t room, unsigned nal_type,
     }
     if (nal_type == 1) {
         put_bits(&bw, 0, 1);           /* num_ref_idx_active_override_flag */
-        put_ue(&bw, 0);                /* five_minus_max_num_merge_cand    */
+        /* MaxNumMergeCand = 1: merge_idx is then not coded in skipped CUs. */
+        put_ue(&bw, 4);                /* five_minus_max_num_merge_cand    */
     }
     put_se(&bw, 0);                    /* slice_qp_delta                   */
     put_trailing(&bw);                 /* byte_alignment()                 */
-    /* Header larger than HDR_MAX cannot happen with the fields above; the
-     * check keeps the body from being appended to a runaway header. */
-    if (bw.over || (bw.bits >> 3) > HDR_MAX)
-        return 0;
-    put_bytes(&bw, body, blen);        /* byte aligned: one memcpy         */
+    mock_enc_hevc_slice_data(&bw, au);
     return bw_bytes(&bw) ? put_nal(out, room, hdr, 2, rbsp, bw_bytes(&bw)) : 0;
 }

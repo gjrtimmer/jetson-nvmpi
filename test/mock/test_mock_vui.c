@@ -77,7 +77,12 @@ static int hevc_vui(const uint8_t *rbsp, size_t n, uint32_t *tick,
     (void)get_bits(&r, 1);                    /* sub_layer_ordering_info    */
     for (i = 0; i < 3 + 4 + 2; i++)           /* dpb, cb/tb sizes, depths   */
         (void)get_ue(&r);
-    (void)get_bits(&r, 4);                    /* scaling, amp, sao, pcm     */
+    if (get_bits(&r, 4) & 1) {                /* scaling, amp, sao, pcm     */
+        (void)get_bits(&r, 8);                /* PCM bit depths (#118)      */
+        (void)get_ue(&r);                     /* PCM CB sizes               */
+        (void)get_ue(&r);
+        (void)get_bits(&r, 1);                /* pcm_loop_filter_disabled   */
+    }
     (void)get_ue(&r);                         /* num_short_term_ref_pic_sets */
     (void)get_bits(&r, 3);                    /* long term, tmvp, strong    */
     if (!get_bits(&r, 1))                     /* vui_parameters_present     */
@@ -199,8 +204,8 @@ static void test_size_bound(void)
     /* 1080p builds its AU through the heap scratch buffer (3.1 MB). */
     fl = one_frame(1920, 1080, EH_CAPSZ, &b);
     CHECK(fl >= 0 && !(fl & V4L2_BUF_FLAG_ERROR) && b > 64);
-    /* Just inside / outside the 6.9 MP bound. */
-    fl = one_frame(2600, 2600, EH_CAPSZ, &b);
+    /* Just inside / outside the 6.5 MP bound. */
+    fl = one_frame(2540, 2540, EH_CAPSZ, &b);
     CHECK(fl >= 0 && !(fl & V4L2_BUF_FLAG_ERROR) && b > 64);
     fl = one_frame(2700, 2700, EH_CAPSZ, &b);
     CHECK(fl >= 0 && (fl & V4L2_BUF_FLAG_ERROR) && b == 1);
