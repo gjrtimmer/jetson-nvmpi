@@ -39,6 +39,9 @@
 #               NVIDIA apt repo and check they load/link (scripts/test-deb.sh);
 #               upload:s3 and both release jobs need them. dist + test-deb also
 #               run on MRs that touch packaging paths (.pkg-paths) and on main.
+#               Tags also run release:test:deb:hw (scripts/test-deb-hw.sh): the
+#               installed JP6 debs + test_api built via pkg-config, on the
+#               Orin; upload:s3 and both release jobs need it too (tags only).
 #     publish - upload:s3 -> S3 releases/<ver>/ + changelog (git-cliff)
 #     release - release:gitlab (generic package registry + GitLab Release) and
 #               release:github (GitHub Release + assets), independent jobs
@@ -52,7 +55,8 @@
 #          (the weekly schedule sets NVMPI_TEST_ITER=50 itself)
 # Tag pipelines force full; web/schedule/api runs may choose it.
 #
-# Runner tag convention: only test:api needs real hardware (jetson + orin-nx);
+# Runner tag convention: only the hw jobs (test:api:hw, release:test:*:hw) need
+# real hardware (jetson + orin-nx);
 # everything else has NO tags (any runner, K3s). release runs in the release-tools image.
 
 stages:
@@ -588,6 +592,26 @@ test:deb:jp5:
     JP: "5"
 
 # ---------------------------------------------------------------------------
+# release:test:deb:hw — tags only: the INSTALLED release debs on the real Orin
+# (test:deb:* has no hardware, test:api:hw tests a stub-linked build tree).
+# Installs libnvmpi1 + libnvmpi-dev from the dist:jp6 artifacts, builds test_api
+# against them via pkg-config only and checks libnvmpi resolves from the system
+# path before running it (scripts/test-deb-hw.sh). Extends test:api:hw for the
+# image, runner tags, resource_group and env; the default iteration depth
+# (~25s) is enough here, the soak is release:test:api:hw. upload:s3,
+# release:gitlab and release:github need it (non-optional on tags).
+# ---------------------------------------------------------------------------
+release:test:deb:hw:
+  extends: test:api:hw
+  stage: test-deb
+  needs: ["dist:jp6"]
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/'
+  timeout: 10m
+  script:
+    - bash ./scripts/test-deb-hw.sh --debdir dist
+
+# ---------------------------------------------------------------------------
 # Stage: publish — archives (+ changelog on tags) to S3 (NL MinIO) via curl SigV4 (no mc). Runs in
 # the release-tools image (built by jetson-ffmpeg). Needs project CI/CD
 # variables S3_HOST, S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET.
@@ -595,13 +619,17 @@ test:deb:jp5:
 # branch, no changelog). NOTES.md (tags only) is passed to release as an
 # artifact so git-cliff runs only once.
 # ---------------------------------------------------------------------------
+# needs per rule: tags also need the hw deb test; main snapshots have no such job.
 upload:s3:
   stage: publish
-  <<: *tag-or-main
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/'
+      needs: ["dist:jp6", "dist:jp5", "test:deb:jp6", "test:deb:jp5", "release:test:deb:hw"]
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "merge_request_event"'
+      needs: ["dist:jp6", "dist:jp5", "test:deb:jp6", "test:deb:jp5"]
   image:
     name: "${RELEASE_IMAGE}"
     pull_policy: if-not-present
-  needs: ["dist:jp6", "dist:jp5", "test:deb:jp6", "test:deb:jp5"]
   variables:
     GIT_DEPTH: "0"   # full history + tags for git-cliff
   script:
@@ -630,7 +658,7 @@ release:gitlab:
   image:
     name: "${RELEASE_IMAGE}"
     pull_policy: if-not-present
-  needs: ["dist:jp6", "dist:jp5", "test:deb:jp6", "test:deb:jp5", "upload:s3"]
+  needs: ["dist:jp6", "dist:jp5", "test:deb:jp6", "test:deb:jp5", "release:test:deb:hw", "upload:s3"]
   script:
     - bash ./scripts/release.sh
 
@@ -646,7 +674,7 @@ release:github:
   image:
     name: "${RELEASE_IMAGE}"
     pull_policy: if-not-present
-  needs: ["dist:jp6", "dist:jp5", "test:deb:jp6", "test:deb:jp5", "upload:s3"]
+  needs: ["dist:jp6", "dist:jp5", "test:deb:jp6", "test:deb:jp5", "release:test:deb:hw", "upload:s3"]
   script:
     - bash ./scripts/release-github.sh
 
