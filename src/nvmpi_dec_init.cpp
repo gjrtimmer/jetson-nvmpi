@@ -25,6 +25,7 @@
  *   nvmpi_dec_capture.cpp — capture-thread loop and resolution-change
  *                           handling.
  *   nvmpi_dec_planes.cpp  — CAPTURE-plane allocation/teardown helpers.
+ *   nvmpi_dec_codec.cpp   — codingType to V4L2 fourcc mapping.
  *   nvmpi_dec_pool.cpp    — deinitFramePool()/initFramePool().
  *   nvmpi_dec_close.cpp   — flush and close.
  */
@@ -142,6 +143,12 @@ nvmpictx* nvmpi_create_decoder(nvDecParam* param)
 	int ret;
 	log_level = LOG_LEVEL_INFO;
 
+	//map the API codec enum to the V4L2 compressed pixel format fourcc;
+	//unsupported values fail here, before any device is opened
+	unsigned int decoder_pixfmt = nvmpi_dec_codec_pixfmt(param->codingType);
+	if (!decoder_pixfmt)
+		return NULL;
+
 #ifndef WITH_NVUTILS
 	//P010 (10-bit) output uses the NvBufSurface NV12_10LE color formats, which
 	//exist only in the NvUtils API (JetPack 5+). The legacy nvbuf_utils build
@@ -254,31 +261,8 @@ nvmpictx* nvmpi_create_decoder(nvDecParam* param)
 	else if(param->chunk_size != 0)
 		NVMPI_LOG(NVMPI_LOG_WARN, "chunk_size %u out of range [65536, 67108864]; using default %u", param->chunk_size, ctx->chunk_size);
 
-	//map the API codec enum to the V4L2 compressed pixel format fourcc
-	switch(param->codingType)
-	{
-		case NV_VIDEO_CodingH264:
-			ctx->decoder_pixfmt=V4L2_PIX_FMT_H264;
-			break;
-		case NV_VIDEO_CodingHEVC:
-			ctx->decoder_pixfmt=V4L2_PIX_FMT_H265;
-			break;
-		case NV_VIDEO_CodingMPEG4:
-			ctx->decoder_pixfmt=V4L2_PIX_FMT_MPEG4;
-			break;
-		case NV_VIDEO_CodingMPEG2:
-			ctx->decoder_pixfmt=V4L2_PIX_FMT_MPEG2;
-			break;
-		case NV_VIDEO_CodingVP8:
-			ctx->decoder_pixfmt=V4L2_PIX_FMT_VP8;
-			break;
-		case NV_VIDEO_CodingVP9:
-			ctx->decoder_pixfmt=V4L2_PIX_FMT_VP9;
-			break;
-		default:
-			ctx->decoder_pixfmt=V4L2_PIX_FMT_H264;
-			break;
-	}
+	//codec -> fourcc was resolved and validated at the top of this function
+	ctx->decoder_pixfmt=decoder_pixfmt;
 
 	//OUTPUT plane: compressed input, buffers sized ctx->chunk_size
 	ret=ctx->dec->setOutputPlaneFormat(ctx->decoder_pixfmt, ctx->chunk_size);

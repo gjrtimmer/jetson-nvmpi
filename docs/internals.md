@@ -35,6 +35,7 @@ include/
   nvUtils2NvBuf.h          compile-time shim: legacy nvbuf_utils names -> NvBufSurface
 src/
   nvmpi_dec_init.cpp       nvmpi_create_decoder, VIC parameters
+  nvmpi_dec_codec.cpp      codingType to V4L2 fourcc mapping
   nvmpi_dec_pool.cpp       destination frame-pool alloc/free
   nvmpi_dec_api.cpp        put_packet, get_frame(_fd)
   nvmpi_dec_close.cpp      flush, close

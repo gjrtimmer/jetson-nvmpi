@@ -111,13 +111,19 @@ selects NV12 input. The header comment on `nvEncParam::pixFormat`
 | `NV_VIDEO_CodingVP9` | VP9 | yes | no |
 | `NV_VIDEO_CodingHEVC` | H.265 / HEVC | yes | yes |
 | `NV_VIDEO_CodingMJPEG` | MJPEG | via the [JPEG decoder](#jpeg-decoder) only | via the [JPEG encoder](#jpeg-encoder) only |
+| `NV_VIDEO_CodingAV1` | AV1 | yes, JetPack 6 only (needs `V4L2_PIX_FMT_AV1`) | no |
 
 `nvmpi_create_decoder` maps `NV_VIDEO_CodingH264`, `HEVC`, `MPEG4`, `MPEG2`,
-`VP8` and `VP9` to the matching V4L2 format; any other value (including
-`NV_VIDEO_CodingMJPEG` and `NV_VIDEO_CodingUnused`) falls through to H.264
-(`src/nvmpi_dec_init.cpp`, switch on `codingType`). Use the dedicated JPEG API
-for MJPEG. The video encoder supports only `NV_VIDEO_CodingH264` and
-`NV_VIDEO_CodingHEVC`.
+`VP8`, `VP9` and `AV1` to the matching V4L2 format
+(`src/nvmpi_dec_codec.cpp`). Any other value (including
+`NV_VIDEO_CodingMJPEG` and `NV_VIDEO_CodingUnused`) is logged and makes the
+call return `NULL`; it no longer falls back to H.264. Use the dedicated JPEG
+API for MJPEG. `NV_VIDEO_CodingAV1` was appended last, so existing enum values
+are unchanged. AV1 needs `V4L2_PIX_FMT_AV1` in the L4T headers (JetPack 6);
+a build without it returns `NULL` with "AV1 decode not supported by this L4T
+build". Feed one temporal unit (low-overhead OBU format, starting with the
+temporal delimiter) per `nvmpi_decoder_put_packet` call. The video encoder
+supports only `NV_VIDEO_CodingH264` and `NV_VIDEO_CodingHEVC`.
 
 ## Structures
 

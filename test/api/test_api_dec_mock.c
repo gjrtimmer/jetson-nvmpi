@@ -273,11 +273,13 @@ static int fault_case(const struct tcase *t)
 }
 
 #include "dec_mock_latency.h"
+#include "dec_mock_av1.h"
 
 static const struct tcase k_cases[] = {
     { "decode_plain", NULL, decode_plain, 0, 0 },
     { "decode_hint", NULL, decode_hint, 0, 0 },
     { "decode_batched", NULL, decode_batched, 0, 0 },
+    { "av1", "dqbuf@9999", av1_case, 0, 0 },   /* decode + reject; expected [E] logs */
     { "resolution_change", NULL, resolution_change, 0, 0 },
     { "teardown_undrained", NULL, teardown_undrained, 0, 0 },
     { "teardown_no_data", NULL, teardown_no_data, 0, 0 },

@@ -36,6 +36,11 @@
 #include <sys/wait.h>
 #include <signal.h>
 
+/* CMake defines NVMPI_HAVE_AV1 (also in av1_fixture.h); assume yes otherwise. */
+#ifndef NVMPI_HAVE_AV1
+#define NVMPI_HAVE_AV1 1
+#endif
+
 static int tests_run = 0;
 static int tests_passed = 0;
 static int tests_skipped = 0;
@@ -219,6 +224,9 @@ static int test_decoder_all_codecs(void)
         NV_VIDEO_CodingH264, NV_VIDEO_CodingHEVC,
         NV_VIDEO_CodingMPEG2, NV_VIDEO_CodingMPEG4,
         NV_VIDEO_CodingVP8, NV_VIDEO_CodingVP9,
+#if NVMPI_HAVE_AV1   /* 0: L4T headers lack V4L2_PIX_FMT_AV1, create must return NULL */
+        NV_VIDEO_CodingAV1,
+#endif
     };
     int n = (int)(sizeof(codecs) / sizeof(codecs[0]));
 
@@ -227,7 +235,9 @@ static int test_decoder_all_codecs(void)
         dec_param_init(&param, codecs[i]);
 
         nvmpictx *ctx = nvmpi_create_decoder(&param);
-        if (!ctx) return 77;
+        /* AV1 is a feature of this library, not an optional device quirk:
+         * on real hardware (strict) a NULL create is a failure. */
+        if (!ctx) return (strict_mode && codecs[i] == NV_VIDEO_CodingAV1) ? 1 : 77;
         nvmpi_decoder_close(ctx);
     }
     return 0;
@@ -251,6 +261,7 @@ static int test_encoder_hevc_create_close(void)
 }
 
 #include "jpeg_fd_case.h"
+#include "av1_case.h"
 
 int main(void)
 {
@@ -265,6 +276,7 @@ int main(void)
     fail += RUN_TEST(test_encoder_rapid_lifecycle);
     fail += RUN_TEST(test_decoder_all_codecs);
     fail += RUN_TEST(test_encoder_hevc_create_close);
+    fail += RUN_TEST(test_decoder_av1_frame);
     /* JPEG DMA-BUF output: real NVJPG only, SKIP on stubs/mock. */
     fail += RUN_TEST(test_jpeg_fd_nv12);
     fail += RUN_TEST(test_jpeg_fd_yuv420);

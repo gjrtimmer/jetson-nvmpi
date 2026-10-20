@@ -136,6 +136,8 @@ struct nvmpi_dec_ctx : nvmpictx
 };
 
 //Forward declarations
+//codingType -> V4L2 compressed fourcc; 0 (after logging) when unsupported
+unsigned int nvmpi_dec_codec_pixfmt(nvCodingType codec);
 NvBufferColorFormat getNvColorFormatFromV4l2Format(v4l2_format &format, bool want_10bit);
 void dec_capture_loop_fcn(void *arg);
 void respondToResolutionEvent(v4l2_format &format, v4l2_crop &crop, nvmpi_dec_ctx* ctx);

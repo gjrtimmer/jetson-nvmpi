@@ -200,6 +200,7 @@ set(NVMPI_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_capture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_planes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_pool.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_codec.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_close.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_enc_init.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_enc_input.cpp
@@ -234,6 +235,32 @@ else ()
 endif()
 
 set(NVMPI_SRC ${NVMPI_SRC} ${JETSON_MULTIMEDIA_API_SRC})
+
+# AV1 decode needs V4L2_PIX_FMT_AV1 from the L4T headers (R36 has it; R35 is
+# unverified). Probe the include dirs the library really uses; the library
+# gates on the macro itself, the tests get NVMPI_HAVE_AV1 so they can expect
+# either behaviour. NVMPI_FORCE_NO_AV1 is test-only: it makes the library
+# treat the fourcc as missing so ctest exercises the no-AV1 path on an R36 box.
+option(NVMPI_FORCE_NO_AV1 "Test only: build as if V4L2_PIX_FMT_AV1 were missing (AV1 decode create returns NULL)." OFF)
+include(CheckCXXSourceCompiles)
+set(CMAKE_REQUIRED_INCLUDES ${NVMPI_INCLUDE_DIRS})
+check_cxx_source_compiles("
+#include <linux/videodev2.h>
+#include \"v4l2_nv_extensions.h\"
+#ifndef V4L2_PIX_FMT_AV1
+#error no AV1 fourcc
+#endif
+int main() { return 0; }" NVMPI_HEADERS_HAVE_AV1)
+unset(CMAKE_REQUIRED_INCLUDES)
+if(NVMPI_HEADERS_HAVE_AV1 AND NOT NVMPI_FORCE_NO_AV1)
+	set(NVMPI_HAVE_AV1 1)
+else()
+	set(NVMPI_HAVE_AV1 0)
+endif()
+if(NVMPI_FORCE_NO_AV1)
+	add_definitions(-DNVMPI_NO_AV1)
+endif()
+message(STATUS "AV1 decode: NVMPI_HAVE_AV1=${NVMPI_HAVE_AV1} (headers define V4L2_PIX_FMT_AV1: ${NVMPI_HEADERS_HAVE_AV1}, NVMPI_FORCE_NO_AV1=${NVMPI_FORCE_NO_AV1})")
 
 # Tegra's custom libjpeg.so.8 exports jpeg_set_hardware_acceleration_parameters_{enc,dec}
 # which NvJpegEncoder.cpp / NvJpegDecoder.cpp call. System libjpeg lacks these symbols;
@@ -322,6 +349,7 @@ if(BUILD_TESTING)
   add_executable(test_api test/api/test_api.c)
   target_include_directories(test_api PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_link_libraries(test_api PRIVATE nvmpi Threads::Threads)
+  target_compile_definitions(test_api PRIVATE NVMPI_HAVE_AV1=${NVMPI_HAVE_AV1})
   if(NVMPI_MOCK)
     # LD_LIBRARY_PATH order: mock libs first (real sonames), then the build
     # dir (libnvmpi.so), then stubs/ only for libs the mock does not provide
@@ -333,6 +361,7 @@ if(BUILD_TESTING)
     add_executable(test_api_dec_mock test/api/test_api_dec_mock.c)
     target_include_directories(test_api_dec_mock PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_link_libraries(test_api_dec_mock PRIVATE nvmpi Threads::Threads)
+    target_compile_definitions(test_api_dec_mock PRIVATE NVMPI_HAVE_AV1=${NVMPI_HAVE_AV1})
     # Decoder suite in 2 shards (NVMPI_TEST_SHARD=k/n, see case_log.h).
     set(NVMPI_DEC_SHARDS 2)
     math(EXPR NVMPI_DEC_LAST "${NVMPI_DEC_SHARDS} - 1")
@@ -356,8 +385,13 @@ if(BUILD_TESTING)
         ENVIRONMENT "LD_LIBRARY_PATH=${NVMPI_MOCK_LD};NVMPI_TEST_SHARD=${k}/${NVMPI_ENC_SHARDS}"
         TIMEOUT 300)
     endforeach()
-    set_tests_properties(mock_selftest api_mock PROPERTIES
+    set_tests_properties(mock_selftest PROPERTIES
       ENVIRONMENT "LD_LIBRARY_PATH=${NVMPI_MOCK_LD}"
+      TIMEOUT 300)
+    # test_api's AV1 hardware case checks a 64x64 frame; the mock has no AV1
+    # header parser, so it takes the stream size from the environment.
+    set_tests_properties(api_mock PROPERTIES
+      ENVIRONMENT "LD_LIBRARY_PATH=${NVMPI_MOCK_LD};NVMPI_MOCK_WIDTH=64;NVMPI_MOCK_HEIGHT=64"
       TIMEOUT 300)
   else()
     add_test(NAME api COMMAND test_api)
