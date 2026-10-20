@@ -3,6 +3,17 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.4.1 - 2026-10-20
+
+### Testing
+
+
+**api**
+
+
+- Scale enc determinism runs down under sanitizers (#142)
+
+
 ## 4.4.0 - 2026-10-20
 
 ### Bug Fixes
