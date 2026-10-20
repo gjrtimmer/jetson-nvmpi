@@ -293,6 +293,7 @@ int main(void)
     test_fault_injection();
     test_encoder_model();
     test_encoder_hevc_params();
+    test_encoder_vui();
     if (mock_fails) {
         fprintf(stderr, "test_mock: %d check(s) failed\n", mock_fails);
         return 1;

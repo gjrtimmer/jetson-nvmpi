@@ -13,6 +13,8 @@
  *   FORCE_FRAME_TYPE (MFC51)       forceIDR(): next queued frame is an IDR
  *   INSERT_SPS_PPS_AT_IDR BASE+535 setInsertSpsPpsAtIdrEnabled()
  *   METADATA            BASE+536   getMetadata(): KeyFrame of a CAPTURE buffer
+ *   INSERT_VUI          BASE+546   setInsertVuiEnabled(): SPS gets VUI
+ *                                  timing_info from the S_PARM frame rate
  *
  * Runs with ctx->mu held (mock_ops.on_ioctl contract); nothing blocks.
  */
@@ -25,6 +27,7 @@
 #define MOCK_CID_IDR_INTERVAL      (V4L2_CID_MPEG_BASE + 514)
 #define MOCK_CID_SPS_PPS_AT_IDR    (V4L2_CID_MPEG_BASE + 535)
 #define MOCK_CID_ENC_METADATA      (V4L2_CID_MPEG_BASE + 536)
+#define MOCK_CID_INSERT_VUI        (V4L2_CID_MPEG_BASE + 546)
 
 /* ABI twins of the NVIDIA structs (v4l2_nv_extensions.h): the metadata
  * pointer block of v4l2_ctrl_video_metadata, and the first fields of
@@ -91,6 +94,9 @@ int mock_enc_ioctl(struct mock_ctx *ctx, unsigned long req, void *arg, int *ret)
             break;
         case MOCK_CID_SPS_PPS_AT_IDR:
             m->headers_at_idr = k->value != 0;
+            break;
+        case MOCK_CID_INSERT_VUI:
+            m->insert_vui = k->value != 0;
             break;
         case V4L2_CID_MPEG_MFC51_VIDEO_FORCE_FRAME_TYPE:
             m->force_idr = true;         /* consumed by the next frame     */

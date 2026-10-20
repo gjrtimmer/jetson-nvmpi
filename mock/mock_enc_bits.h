@@ -43,6 +43,30 @@ static inline void put_se(struct bw *w, int32_t v)    /* Exp-Golomb se(v)  */
     put_ue(w, v > 0 ? 2 * (uint32_t)v - 1 : 2 * (uint32_t)(-(int64_t)v));
 }
 
+/* Append n whole bytes. Byte aligned (the common case: slice data follows
+ * byte_alignment()) this is one memcpy; otherwise bit by bit. Bounds as for
+ * put_bits: what does not fit is dropped and flagged in over. */
+static inline void put_bytes(struct bw *w, const uint8_t *p, size_t n)
+{
+    size_t i;
+
+    if (w->over)
+        return;
+    if (!(w->bits & 7)) {
+        size_t at = w->bits >> 3;
+
+        if (at > w->cap || n > w->cap - at) {
+            w->over = true;
+            return;
+        }
+        memcpy(w->b + at, p, n);       /* buffer is zeroed: plain copy    */
+        w->bits += n * 8;
+        return;
+    }
+    for (i = 0; i < n && !w->over; i++)
+        put_bits(w, p[i], 8);
+}
+
 /* rbsp_trailing_bits / byte_alignment: a 1 bit, then zeros to the byte end. */
 static inline void put_trailing(struct bw *w)
 {

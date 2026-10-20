@@ -12,9 +12,14 @@
 
 struct mock_ctx;
 
-/* Largest access unit the builder emits: SPS+PPS(+VPS)+one slice. Far below
- * any CAPTURE buffer libnvmpi requests (NVMPI_ENC_CHUNK_SIZE = 10 MiB). */
-#define MOCK_ENC_AU_MAX 1024u
+/* An AU is built in a heap scratch buffer sized from the picture (see
+ * enc_scratch_size() in mock_enc.c): a raw-sample (PCM) key frame needs about
+ * 1.5 bytes per pixel (#110) plus headers. Pictures above MOCK_ENC_MAX_PIXELS
+ * would need more than the 10 MiB CAPTURE buffer libnvmpi requests
+ * (NVMPI_ENC_CHUNK_SIZE), so they are refused: every frame completes with
+ * V4L2_BUF_FLAG_ERROR instead of being truncated. */
+#define MOCK_ENC_MAX_PIXELS 6900000u
+#define MOCK_ENC_AU_HEADROOM 4096u    /* SPS/PPS/VPS + slice header bytes  */
 #define MOCK_ENC_MAX_DIM 8192u        /* same bound as the decoder model   */
 #define MOCK_ENC_SLICE_MAX 96u        /* canned slice data bytes (IDR)     */
 #define MOCK_ENC_MAX_LATENCY 32u      /* NVMPI_MOCK_ENC_LATENCY bound      */
@@ -32,6 +37,10 @@ struct enc_model {
     uint32_t latency;              /* OUTPUT buffers kept before returning   */
     uint32_t held;                 /* consumed OUTPUT buffers not returned   */
     uint32_t seq;                  /* AU payload counter (content varies)    */
+    bool     insert_vui;           /* INSERT_VUI: SPS carries timing_info    */
+    uint8_t *scratch;              /* AU build buffer, calloc'd in on_fmt,
+                                    * freed in enc_on_close/on_fmt resize    */
+    size_t   scratch_cap;          /* bytes in scratch; 0 = picture refused  */
     uint8_t  key[32];              /* KeyFrame flag per CAPTURE buffer       */
 };
 
@@ -44,6 +53,8 @@ struct mock_enc_au {
     bool     headers;              /* prepend SPS+PPS (+VPS for HEVC)        */
     uint32_t seq;                  /* varies slice bytes frame to frame      */
     uint32_t poc;                  /* frames since the last IDR (HEVC POC)   */
+    uint32_t tpf_num, tpf_den;     /* timeperframe; VUI emitted when both
+                                    * are non-zero (INSERT_VUI on)           */
 };
 
 /* Render the access unit as Annex-B into out (cap bytes). Returns the size,
@@ -52,8 +63,11 @@ size_t mock_enc_build_au(const struct mock_enc_au *au, uint8_t *out, size_t cap)
 
 /* mock_enc_hevc.c: real HEVC VPS+SPS+PPS for a w x h picture, and one slice
  * NAL (nal_type 19/21/1) with a real slice header followed by blen canned
- * body bytes. Both return the bytes written, 0 when room is too small. */
-size_t mock_enc_hevc_params(uint8_t *out, size_t room, uint32_t w, uint32_t h);
+ * body bytes. Both return the bytes written, 0 when room is too small.
+ * tpf_num/tpf_den (timeperframe) non-zero add VUI timing_info to the SPS:
+ * vui_num_units_in_tick = tpf_num, vui_time_scale = tpf_den. */
+size_t mock_enc_hevc_params(uint8_t *out, size_t room, uint32_t w, uint32_t h,
+                            uint32_t tpf_num, uint32_t tpf_den);
 size_t mock_enc_hevc_slice(uint8_t *out, size_t room, unsigned nal_type,
                            uint32_t poc, const uint8_t *body, size_t blen);
 

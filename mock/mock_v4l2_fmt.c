@@ -110,10 +110,23 @@ int mock_do_crop(struct mock_ctx *ctx, unsigned long req, void *arg)
                 s->r = *crop_rect(&ctx->q[qi]);
         }
         break;
-    default:                             /* S_PARM / G_PARM: echo back */
+    default:                             /* S_PARM / G_PARM            */
         qi = mock_qidx(sp->type);
-        if (req == VIDIOC_G_PARM && qi >= 0)
-            memset(&sp->parm, 0, sizeof(sp->parm));
+        if (qi < 0)
+            break;
+        /* parm.output and parm.capture share the timeperframe offset. A
+         * zero numerator or denominator means "driver picks": keep the
+         * stored value. The model builds 2 * time_scale (H.264 VUI) in 32
+         * bits, so a denominator above INT32_MAX is refused likewise. */
+        if (req == VIDIOC_S_PARM) {
+            struct v4l2_fract t = sp->parm.output.timeperframe;
+
+            if (t.numerator && t.denominator && t.denominator <= INT32_MAX)
+                ctx->q[qi].tpf = t;
+        }
+        memset(&sp->parm, 0, sizeof(sp->parm));
+        sp->parm.output.capability = V4L2_CAP_TIMEPERFRAME;
+        sp->parm.output.timeperframe = ctx->q[qi].tpf;
         break;
     }
     pthread_mutex_unlock(&ctx->mu);

@@ -74,6 +74,8 @@ struct mock_queue {
     uint32_t sequence;                    /* next DQ sequence number       */
     struct v4l2_format fmt;
     struct v4l2_rect   crop;
+    struct v4l2_fract  tpf;               /* S_PARM timeperframe (30 fps by
+                                           * default); G_PARM reads it back */
     struct mock_buf    bufs[MOCK_MAX_BUFS];
     struct mock_fifo   queued;            /* QBUF'd, not yet processed     */
     struct mock_fifo   done;              /* ready for DQBUF               */

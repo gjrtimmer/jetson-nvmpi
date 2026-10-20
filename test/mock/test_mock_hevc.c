@@ -5,61 +5,8 @@
  * minimal reader: profile, level, coded size, conformance window, plus the
  * first bytes of the slice. Part of the test_mock executable.
  */
+#include "bit_read.h"
 #include "mock_enc_harness.h"
-
-struct br { const uint8_t *b; size_t n, pos; };   /* MSB-first bit reader */
-
-static uint32_t get_bits(struct br *r, unsigned n)
-{
-    uint32_t v = 0;
-
-    while (n--) {
-        size_t byte = r->pos >> 3;
-
-        v = v << 1 | (byte < r->n ? (r->b[byte] >> (7 - (r->pos & 7)) & 1u) : 0u);
-        r->pos++;
-    }
-    return v;
-}
-
-static uint32_t get_ue(struct br *r)
-{
-    unsigned z = 0;
-
-    while (z < 31 && !get_bits(r, 1))
-        z++;
-    return (1u << z) - 1 + get_bits(r, z);
-}
-
-/* Payload of the first NAL of `type` in the AU, emulation prevention bytes
- * removed, NAL header skipped; returns the length, 0 when absent. The NAL
- * ends at the next 00 00 00/01, so an unescaped look-alike would truncate it
- * and fail the parse. */
-static size_t nal_rbsp(const uint8_t *p, size_t n, unsigned type, uint8_t *out,
-                       size_t max)
-{
-    size_t i, s, e, o = 0;
-    unsigned zeros = 0;
-
-    for (s = 0; s + 4 < n; s++)
-        if (!p[s] && !p[s + 1] && p[s + 2] == 1 && (p[s + 3] >> 1) == type)
-            break;
-    if (s + 4 >= n)
-        return 0;
-    s += 5;                                   /* start code + 2-byte header */
-    for (e = s; e + 2 < n && !(!p[e] && !p[e + 1] && p[e + 2] <= 1); e++)
-        ;
-    e = e + 2 < n ? e : n;
-    for (i = s; i < e && o < max; i++) {
-        if (zeros >= 2 && p[i] == 3) {        /* emulation prevention byte  */
-            zeros = 0;
-            continue;
-        }
-        zeros = p[i] == 0 ? zeros + 1 : 0;
-        out[o++] = p[i];
-    }
-    return o;
-}
 
 static void check_ptl(struct br *r, unsigned level_idc)
 {
@@ -87,9 +34,9 @@ static void check_size(uint32_t w, uint32_t h, unsigned level_idc)
     CHECK(eh_frame(&e, 1) == 0);
     CHECK(eh_get(&e, ty, 8, &cnt, &bytes, NULL, &idx) >= 0 && bytes > 0);
     au = e.cap[idx];
-    vn = nal_rbsp(au, bytes, 32, v, sizeof(v));
-    sn = nal_rbsp(au, bytes, 33, s, sizeof(s));
-    pn = nal_rbsp(au, bytes, 34, p, sizeof(p));
+    vn = nal_rbsp(au, bytes, 1, 32, v, sizeof(v));
+    sn = nal_rbsp(au, bytes, 1, 33, s, sizeof(s));
+    pn = nal_rbsp(au, bytes, 1, 34, p, sizeof(p));
     CHECK(vn && sn && pn);
 
     r = (struct br){ v, vn, 0 };              /* VPS                        */
@@ -136,5 +83,6 @@ void test_encoder_hevc_params(void)
     check_size(320, 240, 60);                 /* level 2, no window         */
     check_size(642, 362, 63);                 /* window 3 / 3, level 2.1    */
     check_size(1920, 1080, 120);              /* level 4                    */
-    check_size(3840, 2160, 153);              /* level 5.1                  */
+    /* Level 5.1; 4K (8.3 MP) is above MOCK_ENC_MAX_PIXELS and errors (#116). */
+    check_size(2560, 1440, 153);
 }

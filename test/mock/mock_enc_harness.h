@@ -24,9 +24,11 @@
 #define CID_IDR_INTERVAL    (V4L2_CID_MPEG_BASE + 514)
 #define CID_SPS_PPS_AT_IDR  (V4L2_CID_MPEG_BASE + 535)
 #define CID_ENC_METADATA    (V4L2_CID_MPEG_BASE + 536)
+#define CID_INSERT_VUI      (V4L2_CID_MPEG_BASE + 546)
 struct video_metadata { void *a, *b, *enc, *mv; uint32_t index; };
 
 static int g_oflags;                     /* extra v4l2_open flags (O_NONBLOCK) */
+static uint32_t g_capsz = EH_CAPSZ;      /* CAPTURE sizeimage asked for      */
 
 struct eh {
     int fd;
@@ -101,7 +103,7 @@ static inline int eh_open(struct eh *e, uint32_t codec, uint32_t w, uint32_t h,
     f.fmt.pix_mp.width = w;
     f.fmt.pix_mp.height = h;
     f.fmt.pix_mp.num_planes = 1;
-    f.fmt.pix_mp.plane_fmt[0].sizeimage = EH_CAPSZ;
+    f.fmt.pix_mp.plane_fmt[0].sizeimage = g_capsz;
     if (v4l2_ioctl(e->fd, VIDIOC_S_FMT, &f))
         return -1;
     memset(&f, 0, sizeof(f));

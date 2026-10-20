@@ -17,12 +17,18 @@
  *   CAPTURE (AUs)    One canned Annex-B access unit per frame (H.264 or HEVC
  *                    from the CAPTURE pixelformat, picture size from the
  *                    OUTPUT format; mock_enc_nal.c), the input timestamp
- *                    copied through, KEYFRAME/PFRAME flags set.
+ *                    copied through, KEYFRAME/PFRAME flags set. The AU is
+ *                    built in a heap scratch buffer sized from the picture
+ *                    (enc_scratch_size) and copied into the mapped buffer;
+ *                    one that does not fit its length, or a picture above
+ *                    MOCK_ENC_MAX_PIXELS, completes with V4L2_BUF_FLAG_ERROR.
  *   GOP              Frame 0, a forced IDR (FORCE_FRAME_TYPE), every
  *                    IDR_INTERVAL frames: IDR. Every GOP_SIZE frames: key
  *                    frame (periodic I). SPS/PPS (+VPS) lead the first IDR
  *                    always and later IDRs only with INSERT_SPS_PPS_AT_IDR
  *                    (the extradata extraction path reads the first AU).
+ *                    INSERT_VUI adds timing_info (frame rate from S_PARM on
+ *                    the OUTPUT queue, default 30) to every emitted SPS.
  *   EOS              An OUTPUT buffer with bytesused 0 returns every held
  *                    buffer, then yields an empty CAPTURE buffer (bytesused 0,
  *                    V4L2_BUF_FLAG_LAST) - libnvmpi's capture callback treats
@@ -73,6 +79,40 @@ static void enc_on_open(struct mock_ctx *ctx)
  * bytesperline (aligned to 32 like the hardware's pitch, so stride != width
  * is exercised) and sizeimage = bytesperline * plane height. NvV4l2Element
  * reads both back after S_FMT; a zero stride would make every frame empty. */
+/* Bytes the scratch buffer needs for a w x h picture: ~1.5 bytes per pixel
+ * (a PCM key frame, #110) plus header room. 0 = refuse (above the pixel
+ * bound; also keeps the product far from size_t overflow). */
+static size_t enc_scratch_size(uint32_t w, uint32_t h)
+{
+    uint64_t px = (uint64_t)w * h;
+
+    if (px > MOCK_ENC_MAX_PIXELS)
+        return 0;
+    return (size_t)(px + px / 2) + MOCK_ENC_AU_HEADROOM;
+}
+
+/* (Re)size the AU scratch buffer for the OUTPUT picture. The buffer is
+ * only replaced when the size changes, never while an AU is being built
+ * (every hook runs under ctx->mu). A failed calloc leaves scratch_cap 0, so
+ * frames error out instead of dereferencing NULL. */
+static void enc_set_scratch(struct enc_model *m, uint32_t w, uint32_t h)
+{
+    size_t want = enc_scratch_size(w, h);
+
+    if (want == m->scratch_cap)
+        return;
+    free(m->scratch);              /* old buffer: single owner is the model */
+    m->scratch = NULL;
+    m->scratch_cap = 0;
+    if (!want)
+        return;
+    /* Allocated here; freed in enc_on_close() or on the next resize.
+     * Zeroed so stale heap never reaches a CAPTURE buffer by accident. */
+    m->scratch = calloc(1, want);
+    if (m->scratch)
+        m->scratch_cap = want;
+}
+
 static void enc_on_fmt(struct mock_ctx *ctx, int qi, struct v4l2_format *f)
 {
     struct v4l2_pix_format_mplane *pix = &f->fmt.pix_mp;
@@ -87,10 +127,11 @@ static void enc_on_fmt(struct mock_ctx *ctx, int qi, struct v4l2_format *f)
     size_t i;
     uint32_t p;
 
-    (void)ctx;
     if (qi != MOCK_Q_OUTPUT || pix->width == 0 || pix->height == 0 ||
         pix->width > MOCK_ENC_MAX_DIM || pix->height > MOCK_ENC_MAX_DIM)
         return;
+    if (ctx->model)
+        enc_set_scratch(ctx->model, pix->width, pix->height);
     for (i = 0; i < sizeof(k) / sizeof(k[0]); i++) {
         if (k[i].fcc != pix->pixelformat)
             continue;
@@ -109,8 +150,14 @@ static void enc_on_fmt(struct mock_ctx *ctx, int qi, struct v4l2_format *f)
 static void enc_on_close(struct mock_ctx *ctx)
 {
     if (ctx->model) {
-        memset(ctx->model, 0, sizeof(struct enc_model));
-        free(ctx->model);          /* single deallocation point             */
+        struct enc_model *m = ctx->model;
+
+        if (m->scratch) {          /* AU bytes: zero before release     */
+            memset(m->scratch, 0, m->scratch_cap);
+            free(m->scratch);      /* single deallocation point         */
+        }
+        memset(m, 0, sizeof(*m));
+        free(m);          /* single deallocation point             */
         ctx->model = NULL;
     }
 }
@@ -143,24 +190,35 @@ static void enc_release(struct mock_ctx *ctx, struct enc_model *m, uint32_t keep
 }
 
 /* Render one AU into CAPTURE buffer ci. Returns bytes written; 0 = failure
- * (CAPTURE not MMAP, mapping failed, unsupported format). */
-static size_t write_au(struct mock_ctx *ctx, int ci, const struct mock_enc_au *au)
+ * (picture refused, AU larger than the buffer, CAPTURE not MMAP, mapping
+ * failed, unsupported format): the caller flags the buffer with ERROR. */
+static size_t write_au(struct mock_ctx *ctx, struct enc_model *m, int ci,
+                       const struct mock_enc_au *au)
 {
     struct mock_queue *cap = &ctx->q[MOCK_Q_CAPTURE];
     struct mock_buf *cb = &cap->bufs[ci];
-    uint8_t tmp[MOCK_ENC_AU_MAX];
-    size_t n = mock_enc_build_au(au, tmp, sizeof(tmp)), off;
+    size_t room, n, off;
     void *p;
 
-    if (!n || n > cb->length[0] || cap->memory != V4L2_MEMORY_MMAP ||
-        cb->memfd < 0)
+    if (!m->scratch || cap->memory != V4L2_MEMORY_MMAP || cb->memfd < 0) {
+        MOCK_ERR("encoder: no AU buffer (picture refused or CAPTURE not MMAP)");
         return 0;
+    }
+    /* The builder stops at the smaller of scratch and the CAPTURE buffer,
+     * so an AU is never truncated: it either fits whole or is refused. */
+    room = m->scratch_cap < cb->length[0] ? m->scratch_cap : cb->length[0];
+    n = mock_enc_build_au(au, m->scratch, room);
+    if (!n) {
+        MOCK_ERR("encoder: AU does not fit %zu bytes (capture buffer %u)", room,
+                 cb->length[0]);
+        return 0;
+    }
     /* The plane offset inside the memfd is page aligned (queue.c). */
     off = cb->plane_off[0];
     p = mmap(NULL, n, PROT_WRITE, MAP_SHARED, cb->memfd, (off_t)off);
     if (p == MAP_FAILED)
         return 0;
-    memcpy(p, tmp, n);
+    memcpy(p, m->scratch, n);
     munmap(p, n);
     return n;
 }
@@ -188,7 +246,11 @@ static void encode_frame(struct mock_ctx *ctx, struct enc_model *m, int oi, int 
     au.headers = idr && (m->frames == 0 || m->headers_at_idr);
     au.seq = m->seq++;
     au.poc = idr ? 0 : m->since_idr;     /* since_idr counts the last IDR */
-    n = write_au(ctx, ci, &au);
+    if (m->insert_vui) {                 /* timeperframe from S_PARM      */
+        au.tpf_num = out->tpf.numerator;
+        au.tpf_den = out->tpf.denominator;
+    }
+    n = write_au(ctx, m, ci, &au);
     flags = n ? 0 : V4L2_BUF_FLAG_ERROR;
     flags |= key ? V4L2_BUF_FLAG_KEYFRAME : V4L2_BUF_FLAG_PFRAME;
     used[0] = n ? (uint32_t)n : 1;       /* never 0: 0 means EOS to libnvmpi */

@@ -129,6 +129,8 @@ MOCK_EXPORT int v4l2_open(const char *file, int oflag, ...)
             ? V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE
             : V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
         ctx->q[i].fmt.type = ctx->q[i].type;
+        ctx->q[i].tpf.numerator = 1;          /* default 30 fps            */
+        ctx->q[i].tpf.denominator = 30;
         ctx->q[i].n_planes = 1;
         for (b = 0; b < MOCK_MAX_BUFS; b++) {
             ctx->q[i].bufs[b].memfd = -1;

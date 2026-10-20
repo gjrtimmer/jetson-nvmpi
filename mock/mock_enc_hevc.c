@@ -9,7 +9,8 @@
  * still canned and not decodable (#110).
  *
  * Coding tools are minimal: CTB 16, min CB 8, no AMP/SAO/PCM/scaling lists,
- * no long-term refs, no temporal MVP, no tiles, VUI absent (#110).
+ * no long-term refs, no temporal MVP, no tiles. VUI is absent unless the
+ * INSERT_VUI control is set (#116): then timing_info only.
  */
 #include "mock_enc.h"
 #include "mock_enc_bits.h"
@@ -75,8 +76,29 @@ static size_t hevc_vps(uint8_t *out, size_t room, unsigned lvl)
     return bw_bytes(&bw) ? put_nal(out, room, hdr, 2, rbsp, bw_bytes(&bw)) : 0;
 }
 
+/* vui_parameters() with only timing_info set (E.2.1): every optional block
+ * absent, tick = tpf_num, scale = tpf_den, so the frame rate is
+ * scale / tick (HEVC counts one tick per frame, unlike H.264's field ticks). */
+static void put_vui(struct bw *bw, uint32_t tick, uint32_t scale)
+{
+    put_bits(bw, 0, 1);                /* aspect_ratio_info_present_flag   */
+    put_bits(bw, 0, 1);                /* overscan_info_present_flag       */
+    put_bits(bw, 0, 1);                /* video_signal_type_present_flag   */
+    put_bits(bw, 0, 1);                /* chroma_loc_info_present_flag     */
+    put_bits(bw, 0, 1);                /* neutral_chroma_indication_flag   */
+    put_bits(bw, 0, 1);                /* field_seq_flag                   */
+    put_bits(bw, 0, 1);                /* frame_field_info_present_flag    */
+    put_bits(bw, 0, 1);                /* default_display_window_flag      */
+    put_bits(bw, 1, 1);                /* vui_timing_info_present_flag     */
+    put_bits(bw, tick, 32);            /* vui_num_units_in_tick            */
+    put_bits(bw, scale, 32);           /* vui_time_scale                   */
+    put_bits(bw, 0, 1);                /* vui_poc_proportional_to_timing   */
+    put_bits(bw, 0, 1);                /* vui_hrd_parameters_present_flag  */
+    put_bits(bw, 0, 1);                /* bitstream_restriction_flag       */
+}
+
 static size_t hevc_sps(uint8_t *out, size_t room, uint32_t w, uint32_t h,
-                       unsigned lvl)
+                       unsigned lvl, uint32_t tick, uint32_t scale)
 {
     uint8_t rbsp[PS_MAX] = { 0 };
     struct bw bw = { rbsp, sizeof(rbsp), 0, false };
@@ -123,7 +145,9 @@ static size_t hevc_sps(uint8_t *out, size_t room, uint32_t w, uint32_t h,
     put_bits(&bw, 0, 1);               /* long_term_ref_pics_present_flag  */
     put_bits(&bw, 0, 1);               /* sps_temporal_mvp_enabled_flag    */
     put_bits(&bw, 0, 1);               /* strong_intra_smoothing_enabled   */
-    put_bits(&bw, 0, 1);               /* vui_parameters_present_flag      */
+    put_bits(&bw, scale && tick, 1);   /* vui_parameters_present_flag      */
+    if (scale && tick)
+        put_vui(&bw, tick, scale);
     put_bits(&bw, 0, 1);               /* sps_extension_present_flag       */
     put_trailing(&bw);
     return bw_bytes(&bw) ? put_nal(out, room, hdr, 2, rbsp, bw_bytes(&bw)) : 0;
@@ -167,7 +191,8 @@ static size_t hevc_pps(uint8_t *out, size_t room)
     return bw_bytes(&bw) ? put_nal(out, room, hdr, 2, rbsp, bw_bytes(&bw)) : 0;
 }
 
-size_t mock_enc_hevc_params(uint8_t *out, size_t room, uint32_t w, uint32_t h)
+size_t mock_enc_hevc_params(uint8_t *out, size_t room, uint32_t w, uint32_t h,
+                            uint32_t tpf_num, uint32_t tpf_den)
 {
     unsigned lvl = hevc_level_idc(w, h);
     size_t o = 0, n;
@@ -175,7 +200,7 @@ size_t mock_enc_hevc_params(uint8_t *out, size_t room, uint32_t w, uint32_t h)
     if (!(n = hevc_vps(out, room, lvl)))
         return 0;
     o += n;
-    if (!(n = hevc_sps(out + o, room - o, w, h, lvl)))
+    if (!(n = hevc_sps(out + o, room - o, w, h, lvl, tpf_num, tpf_den)))
         return 0;
     o += n;
     if (!(n = hevc_pps(out + o, room - o)))
@@ -189,10 +214,9 @@ size_t mock_enc_hevc_slice(uint8_t *out, size_t room, unsigned nal_type,
                            uint32_t poc, const uint8_t *body, size_t blen)
 {
     uint8_t rbsp[HDR_MAX + MOCK_ENC_SLICE_MAX] = { 0 };
-    struct bw bw = { rbsp, HDR_MAX, 0, false };
+    struct bw bw = { rbsp, sizeof(rbsp), 0, false };
     uint8_t hdr[2] = { (uint8_t)(nal_type << 1), 0x01 };
     bool irap = nal_type >= 16 && nal_type <= 23, idr = nal_type == 19;
-    size_t hl;
 
     if (blen > MOCK_ENC_SLICE_MAX)
         return 0;
@@ -220,9 +244,10 @@ size_t mock_enc_hevc_slice(uint8_t *out, size_t room, unsigned nal_type,
     }
     put_se(&bw, 0);                    /* slice_qp_delta                   */
     put_trailing(&bw);                 /* byte_alignment()                 */
-    hl = bw_bytes(&bw);
-    if (!hl)
+    /* Header larger than HDR_MAX cannot happen with the fields above; the
+     * check keeps the body from being appended to a runaway header. */
+    if (bw.over || (bw.bits >> 3) > HDR_MAX)
         return 0;
-    memcpy(rbsp + hl, body, blen);
-    return put_nal(out, room, hdr, 2, rbsp, hl + blen);
+    put_bytes(&bw, body, blen);        /* byte aligned: one memcpy         */
+    return bw_bytes(&bw) ? put_nal(out, room, hdr, 2, rbsp, bw_bytes(&bw)) : 0;
 }

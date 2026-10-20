@@ -39,9 +39,10 @@ static size_t slice_body(uint8_t *dst, size_t n, uint32_t seq)
 
 /* H.264 SPS: baseline, level 4.0, picture size w x h (rounded up to whole
  * macroblocks and cropped back), same layout as the decoder tests' fixture. */
-static size_t h264_sps(uint8_t *out, size_t room, uint32_t w, uint32_t h)
+static size_t h264_sps(uint8_t *out, size_t room, uint32_t w, uint32_t h,
+                       uint32_t tpf_num, uint32_t tpf_den)
 {
-    uint8_t rbsp[32] = { 0 };
+    uint8_t rbsp[48] = { 0 };
     struct bw bw = { rbsp, sizeof(rbsp), 0, false };
     uint32_t cw = (w + 15) / 16 * 16, ch = (h + 15) / 16 * 16;
     const uint8_t hdr = 0x67;
@@ -67,6 +68,26 @@ static size_t h264_sps(uint8_t *out, size_t room, uint32_t w, uint32_t h)
     } else {
         put_bits(&bw, 0, 1);
     }
+    if (tpf_num && tpf_den) {
+        /* vui_parameters() with timing_info only (E.1.1). H.264 counts
+         * one tick per FIELD, so time_scale is 2 * fps: a decoder reads
+         * the frame rate as time_scale / (2 * num_units_in_tick). */
+        put_bits(&bw, 1, 1);           /* vui_parameters_present_flag      */
+        put_bits(&bw, 0, 1);           /* aspect_ratio_info_present_flag   */
+        put_bits(&bw, 0, 1);           /* overscan_info_present_flag       */
+        put_bits(&bw, 0, 1);           /* video_signal_type_present_flag   */
+        put_bits(&bw, 0, 1);           /* chroma_loc_info_present_flag     */
+        put_bits(&bw, 1, 1);           /* timing_info_present_flag         */
+        put_bits(&bw, tpf_num, 32);    /* num_units_in_tick                */
+        put_bits(&bw, 2 * tpf_den, 32);/* time_scale (S_PARM caps den)     */
+        put_bits(&bw, 1, 1);           /* fixed_frame_rate_flag            */
+        put_bits(&bw, 0, 1);           /* nal_hrd_parameters_present_flag  */
+        put_bits(&bw, 0, 1);           /* vcl_hrd_parameters_present_flag  */
+        put_bits(&bw, 0, 1);           /* pic_struct_present_flag          */
+        put_bits(&bw, 0, 1);           /* bitstream_restriction_flag       */
+    } else {
+        put_bits(&bw, 0, 1);           /* vui_parameters_present_flag      */
+    }
     put_trailing(&bw);                 /* rbsp_stop_one_bit + alignment    */
     return bw_bytes(&bw) ? put_nal(out, room, &hdr, 1, rbsp, bw_bytes(&bw)) : 0;
 }
@@ -84,7 +105,8 @@ size_t mock_enc_build_au(const struct mock_enc_au *au, uint8_t *out, size_t cap)
 
     if (au->pixfmt == V4L2_PIX_FMT_H264) {
         if (au->headers) {
-            if (!(n = h264_sps(out, cap, au->width, au->height)))
+            if (!(n = h264_sps(out, cap, au->width, au->height,
+                                     au->tpf_num, au->tpf_den)))
                 return 0;
             o = n;
             if (!(n = put_nal(out + o, cap - o, &pps264, 1, pps_body, 3)))
@@ -98,7 +120,8 @@ size_t mock_enc_build_au(const struct mock_enc_au *au, uint8_t *out, size_t cap)
     }
     if (au->pixfmt == PIX_H265 || au->pixfmt == V4L2_PIX_FMT_HEVC) {
         if (au->headers) {
-            if (!(o = mock_enc_hevc_params(out, cap, au->width, au->height)))
+            if (!(o = mock_enc_hevc_params(out, cap, au->width, au->height,
+                                              au->tpf_num, au->tpf_den)))
                 return 0;
         }
         /* IDR_W_RADL 19, CRA 21 (periodic I frame), TRAIL_R 1. */
