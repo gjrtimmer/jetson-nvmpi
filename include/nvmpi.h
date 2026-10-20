@@ -45,8 +45,11 @@
 typedef struct nvmpictx nvmpictx;
 
 //Raw (uncompressed) pixel layouts. Used for decoder output and encoder
-//input. NV_PIX_P010 is 10-bit 4:2:0 semi-planar (matches FFmpeg P010LE) and
-//is decode-only, HEVC Main10 only, and requires the NvUtils buffer API.
+//input. NV_PIX_P010 is 10-bit 4:2:0 semi-planar (matches FFmpeg P010LE:
+//16-bit little-endian samples, 10 significant bits in the high bits, one
+//Y plane plus one interleaved CbCr plane). Decode: HEVC Main10 only and
+//requires the NvUtils buffer API. Encode: HEVC only (implies Main10; H.264
+//and AV1 reject it at create time).
 typedef enum {
 	NV_PIX_NV12,
 	NV_PIX_YUV420,
@@ -75,6 +78,11 @@ typedef struct _NVSIZE{
 	unsigned int height;
 }nvSize;
 
+//nvEncParam.profile values for HEVC (FFmpeg FF_PROFILE_HEVC_MAIN / _MAIN_10).
+//Any other value selects Main. Not an ABI change: the field keeps its type.
+#define NVMPI_HEVC_PROFILE_MAIN   1
+#define NVMPI_HEVC_PROFILE_MAIN10 2
+
 //Encoder creation parameters, filled in by the caller (the FFmpeg wrapper
 //maps AVCodecContext fields / AVOptions onto these) and consumed once by
 //nvmpi_create_encoder(). Numeric profile/level values follow FFmpeg's
@@ -83,7 +91,9 @@ typedef struct _NVSIZE{
 typedef struct _NVENCPARAM{
 	unsigned int width;
 	unsigned int height;
-	unsigned int profile;          //FFmpeg-style H.264 profile id (66/77/100)
+	unsigned int profile;          //H.264: FFmpeg-style profile id (66/77/100). HEVC:
+	                               //NVMPI_HEVC_PROFILE_MAIN (1, default) or _MAIN10 (2);
+	                               //Main10 needs pixFormat NV_PIX_P010 and P010 implies it
 	unsigned int level;            //H.264 level_idc style value (e.g. 41 = 4.1)
 	unsigned int bitrate;          //target bitrate in bit/s
 	unsigned int peak_bitrate;     //peak bitrate for VBR mode (0 = derive from bitrate)
@@ -91,7 +101,9 @@ typedef struct _NVENCPARAM{
 	char mode_vbr;                 //non-zero: VBR rate control instead of CBR
 	char insert_spspps_idr;        //non-zero: repeat SPS/PPS at every IDR frame
 	char insert_vui;               //non-zero: embed VUI timing_info (fps) in the bitstream
-	nvPixFormat pixFormat;         //raw input layout: NV_PIX_YUV420 (default) or NV_PIX_NV12
+	nvPixFormat pixFormat;         //raw input layout: NV_PIX_YUV420 (default), NV_PIX_NV12, or
+	                               //NV_PIX_P010 (HEVC only, 10-bit Main10; create returns NULL
+	                               //for H.264/AV1, or when profile is Main10 without P010)
 	unsigned int iframe_interval;  //I-frame period in frames
 	unsigned int idr_interval;     //IDR period in frames
 	unsigned int fps_n;            //framerate numerator

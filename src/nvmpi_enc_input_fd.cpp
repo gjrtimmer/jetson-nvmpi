@@ -118,7 +118,10 @@ int nvmpi_encoder_put_frame_fd(nvmpictx* h,
 			cParams.width = ctx->width;
 			cParams.height = ctx->height;
 			cParams.layout = NVBUF_LAYOUT_PITCH;
-			cParams.colorFormat = NVBUF_COLOR_FORMAT_NV12;
+			/* 10-bit input (HEVC Main10, P010M OUTPUT plane) needs a
+			 * 16-bit-per-sample surface; 8-bit encoders keep NV12. */
+			cParams.colorFormat = (ctx->raw_pixfmt == V4L2_PIX_FMT_P010M) ?
+				NVBUF_COLOR_FORMAT_NV12_10LE : NVBUF_COLOR_FORMAT_NV12;
 			cParams.memtag = NvBufSurfaceTag_VIDEO_ENC;
 			cParams.memType = NVBUF_MEM_SURFACE_ARRAY;
 
@@ -199,6 +202,19 @@ int nvmpi_encoder_put_frame_fd(nvmpictx* h,
 				}
 				NvBufSurfaceSyncForCpu(src_surf, 0, -1);
 
+				/* The raw memcpy below assumes source and destination
+				 * use the same sample size: a 10-bit surface (2 bytes per
+				 * sample) into an 8-bit encoder, or the reverse, would
+				 * copy garbage with a valid-looking layout. Refuse it. */
+				if (src_surf->surfaceList[0].planeParams.bytesPerPix[0] !=
+				    (ctx->raw_pixfmt == V4L2_PIX_FMT_P010M ? 2u : 1u)) {
+					NVMPI_LOG(NVMPI_LOG_ERROR,
+						  "put_frame_fd: source surface sample size does not "
+						  "match the encoder input format");
+					NvBufSurfaceUnMap(src_surf, 0, -1);
+					return -1;
+				}
+
 				/* Copy plane-by-plane to handle stride diffs.
 				 * Destination mapped by mapOutputBuffers during
 				 * lazy alloc — nvBuffer->planes[j].data valid. */
@@ -213,6 +229,10 @@ int nvmpi_encoder_put_frame_fd(nvmpictx* h,
 						src_surf->surfaceList[0].planeParams.height[j];
 					unsigned int dst_stride =
 						nvBuffer->planes[j].fmt.stride;
+					/* Never write more rows than the destination plane
+					 * has (a taller source surface would overflow it). */
+					if (src_height > nvBuffer->planes[j].fmt.height)
+						src_height = nvBuffer->planes[j].fmt.height;
 					unsigned int copy_w =
 						src_pitch < dst_stride ? src_pitch : dst_stride;
 
@@ -258,6 +278,7 @@ int nvmpi_encoder_put_frame_fd(nvmpictx* h,
 			v4l2_buf.m.planes[0].m.fd = dmabuf_fd;
 			v4l2_buf.m.planes[0].bytesused = 1;
 			if (ctx->raw_pixfmt == V4L2_PIX_FMT_NV12M ||
+			    ctx->raw_pixfmt == V4L2_PIX_FMT_P010M ||
 			    ctx->raw_pixfmt == V4L2_PIX_FMT_YUV420M) {
 				v4l2_buf.m.planes[1].m.fd = dmabuf_fd;
 				v4l2_buf.m.planes[1].bytesused = 1;

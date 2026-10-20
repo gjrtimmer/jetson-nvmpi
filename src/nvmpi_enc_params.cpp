@@ -19,6 +19,40 @@
 		return -1;                                       \
 	}
 
+//Validate the raw input format against the codec/profile before anything
+//is allocated or any device is opened (same stage as the codec gate in
+//nvmpi_create_encoder). Returns true when the request is valid.
+//  - P010 (16-bit samples) is only encodable as HEVC Main10; H.264 has no
+//    10-bit path on the Tegra encoder, and AV1 is rejected in
+//    nvmpi_enc_av1_check(). Silently encoding it as 8-bit would misread
+//    every sample, so it is refused.
+//  - Main10 needs P010M input: the driver cannot take 8-bit NV12M/YUV420M
+//    into a 10-bit profile and this layer does not convert samples.
+//  - P010 through the external DMA-BUF path needs an NvUtils 10-bit surface
+//    (NVBUF_COLOR_FORMAT_NV12_10LE); legacy nvbuf_utils builds cannot do it.
+bool nvmpi_enc_check_input(const nvEncParam* param)
+{
+	bool p010 = (param->pixFormat == NV_PIX_P010);
+	bool main10 = (param->codingType == NV_VIDEO_CodingHEVC &&
+	               param->profile == NVMPI_HEVC_PROFILE_MAIN10);
+
+	if (p010 && param->codingType != NV_VIDEO_CodingHEVC) {
+		NVMPI_LOG(NVMPI_LOG_ERROR, "P010 (10-bit) encode input is supported for HEVC only (not H.264 or AV1)");
+		return false;
+	}
+	if (main10 && !p010) {
+		NVMPI_LOG(NVMPI_LOG_ERROR, "HEVC Main10 requires NV_PIX_P010 input");
+		return false;
+	}
+#ifndef WITH_NVUTILS
+	if (p010 && param->use_dmabuf) {
+		NVMPI_LOG(NVMPI_LOG_ERROR, "P010 DMA-BUF encode input requires the NvUtils buffer API (JetPack 5+)");
+		return false;
+	}
+#endif
+	return true;
+}
+
 //Copy/translate the scalar nvEncParam settings into ctx. No allocation and
 //no device access; pktPool, output_plane_fd and encoder_pixfmt stay with the
 //caller (nvmpi_create_encoder).
@@ -82,6 +116,16 @@ void nvmpi_enc_translate_params(nvmpi_enc_ctx* ctx, const nvEncParam* param)
 			ctx->profile=V4L2_MPEG_VIDEO_H264_PROFILE_MAIN;
 			break;
 	}
+
+	//HEVC profile: the switch above yields an H.264 enum (MAIN = 2), which
+	//is a different value space: 2 is MAINSTILLPICTURE in the H.265 enum.
+	//Map explicitly: Main10 when P010 input is used (10-bit samples cannot
+	//be coded as Main; P010 wins over an explicit Main request) or when
+	//NVMPI_HEVC_PROFILE_MAIN10 is requested (nvmpi_enc_check_input() has
+	//already rejected that without P010); Main otherwise.
+	if(param->codingType==NV_VIDEO_CodingHEVC)
+		ctx->profile=(param->pixFormat==NV_PIX_P010 || param->profile==NVMPI_HEVC_PROFILE_MAIN10) ?
+			V4L2_MPEG_VIDEO_H265_PROFILE_MAIN10 : V4L2_MPEG_VIDEO_H265_PROFILE_MAIN;
 
 	//Level mapping: level_idc style values (10*level, e.g. 41 = 4.1) to
 	//V4L2 enums. Both H.264 and HEVC share the same level_idc convention

@@ -31,22 +31,81 @@
  */
 #include "nvmpi_enc_internal.h"
 
+//Bytes per row actually copied for one plane. bytesperpixel comes from the
+//negotiated NvBuffer format: 1 for 8-bit Y/U/V, 2 for 8-bit interleaved
+//CbCr and for 16-bit P010 Y, 4 for P010 interleaved CbCr (two 16-bit
+//samples). Kept in size_t: uint32 * uint32 could wrap for hostile sizes.
+static inline size_t enc_row_bytes(const NvBuffer::NvBufferPlane &plane)
+{
+	return (size_t)plane.fmt.bytesperpixel * (size_t)plane.fmt.width;
+}
+
+//Check, before anything is copied, that the caller's frame can fill the
+//OUTPUT-plane buffer without reading or writing out of bounds. Runs on
+//untrusted caller input (linesize/payload come from the application).
+//Source side: every plane needs a payload pointer and a linesize of at
+//least one copied row (the copy reads row_bytes per row, so a smaller
+//stride would read into the next row's tail, or past the plane for the
+//last row). The source plane size is not passed in nvFrame reliably
+//(payload_size may be 0), so it cannot be bounds-checked beyond that.
+//Destination side: a copied row must fit the negotiated stride and the
+//whole plane (stride * height) must fit the buffer length reported by the
+//driver (length 0 = not reported, e.g. a not-yet-mapped buffer: skipped).
+//The CPU mapping (plane.data) is checked in copyFrameToNvBuf, not here: in
+//the DMA OUTPUT-plane variant it only exists after the buffer was mapped.
+//Returns 0 when valid, -1 (after logging) otherwise.
+static int enc_check_frame(const nvFrame *frame, const NvBuffer &buffer)
+{
+	for (uint32_t i = 0; i < buffer.n_planes && i < 3; i++)
+	{
+		const NvBuffer::NvBufferPlane &plane = buffer.planes[i];
+		size_t row = enc_row_bytes(plane);
+
+		if (!frame->payload[i])
+		{
+			NVMPI_LOG(NVMPI_LOG_ERROR, "put_frame: plane %u has no payload", i);
+			return -1;
+		}
+		if (frame->linesize[i] < row)
+		{
+			NVMPI_LOG(NVMPI_LOG_ERROR, "put_frame: plane %u linesize %u < %zu bytes per row "
+			          "(wrong pixel format for this encoder?)", i, frame->linesize[i], row);
+			return -1;
+		}
+		if (row > plane.fmt.stride ||
+		    (plane.length && (uint64_t)plane.fmt.stride * plane.fmt.height > plane.length))
+		{
+			NVMPI_LOG(NVMPI_LOG_ERROR, "put_frame: plane %u exceeds the OUTPUT buffer", i);
+			return -1;
+		}
+	}
+	return 0;
+}
+
 //Copy the caller's raw frame planes into a V4L2 OUTPUT-plane NvBuffer.
 //Line-by-line memcpy because the caller's linesize and the hw buffer's
 //stride generally differ; sets bytesused per plane so the driver knows the
 //payload extent. The source frame is untouched (caller keeps ownership).
+//Plane geometry is bytesperpixel * width per row, so P010M (2 and 4 bytes
+//per sample/pair) copies 16-bit samples unchanged. The frame is validated
+//first (enc_check_frame), so nothing is written on a bad frame; returns -1
+//then, 0 on success.
 int copyFrameToNvBuf(nvFrame* frame, NvBuffer& buffer)
 {
 	uint32_t i, j;
 	char *dataDst;
 	char *dataSrc;
+	if (enc_check_frame(frame, buffer) < 0)
+		return -1;
 	for (i = 0; i < buffer.n_planes; i++)
 	{
 		NvBuffer::NvBufferPlane &plane = buffer.planes[i];
 		unsigned int &frameLineSize = frame->linesize[i];
-		size_t copySz = plane.fmt.bytesperpixel * plane.fmt.width;
+		size_t copySz = enc_row_bytes(plane);
 		dataDst = (char *) plane.data;
 		dataSrc = (char *) frame->payload[i];
+		if (!dataDst)
+			return -1;       /* buffer not CPU-mapped: nothing to copy into */
 		plane.bytesused = 0;
 		for (j = 0; j < plane.fmt.height; j++)
 		{
@@ -84,6 +143,12 @@ int nvmpi_encoder_put_frame(nvmpictx* h,nvFrame* frame)
 
 	if(ctx->enc->isInError())
 		return -1;
+
+	/* Validate the frame geometry BEFORE a buffer is taken: a rejected frame
+	 * must not consume an OUTPUT slot (it would never be queued back). All
+	 * OUTPUT buffers share one format, so buffer 0 stands for every slot. */
+	if(frame && enc_check_frame(frame, *ctx->enc->output_plane.getNthBuffer(0)) < 0)
+		return NVMPI_ERR_INVAL;
 
 	/* Non-blocking back-pressure (issue #125): refuse a frame whose AU
 	 * could find no packet. Checked before any OUTPUT buffer is taken, so

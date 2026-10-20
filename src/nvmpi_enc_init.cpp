@@ -62,6 +62,9 @@ nvmpictx* nvmpi_create_encoder(nvEncParam* param)
 		NVMPI_LOG(NVMPI_LOG_ERROR, "Unsupported encoder codingType %d (H.264, HEVC and AV1 only)", (int)param->codingType);
 		return NULL;
 	}
+	/* P010 / Main10 vs codec (AV1 already rejected P010 above). */
+	if(!nvmpi_enc_check_input(param))
+		return NULL;
 	nvmpi_enc_ctx *ctx=new nvmpi_enc_ctx;
 	ctx->encoder_pixfmt=pixfmt;
 	/* Scalar nvEncParam -> ctx translation (profile/level/preset maps). */

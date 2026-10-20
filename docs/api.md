@@ -90,7 +90,7 @@ encoder input.
 | --- | --- |
 | `NV_PIX_NV12` | 8-bit 4:2:0 semi-planar: Y plane plus interleaved UV (2 planes). |
 | `NV_PIX_YUV420` | 8-bit 4:2:0 planar: separate Y, U, V planes (3 planes). |
-| `NV_PIX_P010` | 10-bit 4:2:0 semi-planar (matches FFmpeg `P010LE`). Decode only, HEVC Main10 only, requires the NvUtils buffer API (JetPack 5 and later). |
+| `NV_PIX_P010` | 10-bit 4:2:0 semi-planar (matches FFmpeg `P010LE`). Decode: HEVC Main10 only, requires the NvUtils buffer API (JetPack 5 and later). Encode: HEVC only, implies Main10 (see `nvEncParam`); H.264 and AV1 reject it. |
 
 Note: `NV_PIX_NV12` is enum value 0, and the encoder selects the NV12 input
 format whenever `pixFormat == NV_PIX_NV12`, so a zero-initialised `nvEncParam`
@@ -142,7 +142,7 @@ internally.
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `width`, `height` | `unsigned int` | Frame size in pixels (required). |
-| `profile` | `unsigned int` | FFmpeg-style H.264 profile id (66 baseline, 77 main, 100 high). |
+| `profile` | `unsigned int` | H.264: FFmpeg-style profile id (66 baseline, 77 main, 100 high). HEVC: `NVMPI_HEVC_PROFILE_MAIN` (1, default) or `NVMPI_HEVC_PROFILE_MAIN10` (2); Main10 requires `NV_PIX_P010`. |
 | `level` | `unsigned int` | H.264 `level_idc` style value (41 = level 4.1). |
 | `bitrate` | `unsigned int` | Target bitrate in bit/s. |
 | `peak_bitrate` | `unsigned int` | Peak bitrate for VBR; 0 derives it from `bitrate`. |
@@ -150,7 +150,7 @@ internally.
 | `mode_vbr` | `char` | Non-zero: VBR rate control instead of CBR. |
 | `insert_spspps_idr` | `char` | Non-zero (the code tests `== 1`): repeat SPS/PPS at every IDR frame. |
 | `insert_vui` | `char` | Non-zero: embed VUI timing info (fps) in the bitstream. |
-| `pixFormat` | `nvPixFormat` | Raw input layout: `NV_PIX_YUV420` or `NV_PIX_NV12`. |
+| `pixFormat` | `nvPixFormat` | Raw input layout: `NV_PIX_YUV420`, `NV_PIX_NV12`, or `NV_PIX_P010` (HEVC only; 16-bit little-endian samples, Y plane + interleaved CbCr plane, `linesize` in bytes; implies Main10). `nvmpi_create_encoder()` returns NULL for P010 with H.264 or AV1, and for Main10 without P010. |
 | `iframe_interval` | `unsigned int` | I-frame period in frames. |
 | `idr_interval` | `unsigned int` | IDR period in frames. |
 | `fps_n`, `fps_d` | `unsigned int` | Framerate numerator / denominator. |
