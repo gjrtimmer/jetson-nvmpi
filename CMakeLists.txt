@@ -211,6 +211,7 @@ set(NVMPI_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_jpeg_ctx.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_jpeg_fd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_jpeg_fd_util.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_jpeg_sof.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_enc_jpeg.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_surface.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_vic.cpp)
@@ -312,6 +313,11 @@ if(BUILD_TESTING)
   target_include_directories(test_bufpool PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_link_libraries(test_bufpool PRIVATE Threads::Threads)
   add_test(NAME bufpool COMMAND test_bufpool)
+
+  # Host-only parser test: compiles the scanner directly, no libnvmpi/hardware.
+  add_executable(test_jpeg_sof test/unit/test_jpeg_sof.cpp src/nvmpi_jpeg_sof.cpp)
+  target_include_directories(test_jpeg_sof PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  add_test(NAME jpeg_sof COMMAND test_jpeg_sof)
 
   add_executable(test_api test/api/test_api.c)
   target_include_directories(test_api PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)

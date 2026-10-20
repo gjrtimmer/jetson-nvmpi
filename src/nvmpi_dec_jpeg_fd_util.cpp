@@ -3,46 +3,30 @@
  * JPEG header screening and per-buffer plane geometry (NvUtils builds).
  */
 #include "nvmpi_dec_jpeg_internal.h"
+#include "nvmpi_jpeg_sof.h"
 
-
-/* Marker walk: accept only 3-component baseline (SOF0/SOF1). Returns true
- * when ok; logs the reason otherwise. Untrusted input: every read is bounds
- * checked against size. */
+/* Screen the JPEG header: accept only 3-component baseline (SOF0/SOF1).
+ * Logs the reason and returns false otherwise. Untrusted input; the scan
+ * itself is bounds-checked (nvmpi_jpeg_sof.cpp). */
 bool jpegFdCheckSof(const unsigned char *d, unsigned long size)
 {
-	unsigned long pos = 0;
-	while (pos + 1 < size) {
-		if (d[pos] != 0xFF) { pos++; continue; }
-		while (pos + 1 < size && d[pos + 1] == 0xFF) pos++;
-		if (pos + 1 >= size) break;
-		unsigned char m = d[pos + 1];
-		pos += 2;
-		if (m == 0xC2) {
-			NVMPI_LOG_SUB(NVMPI_LOG_ERROR, "jpeg", "progressive JPEG not supported by hardware decoder (SOF2)");
-			return false;
-		}
-		if (m >= 0xC0 && m <= 0xCF && m != 0xC4 && m != 0xC8 && m != 0xCC) {
-			if (m > 0xC1) {
-				NVMPI_LOG_SUB(NVMPI_LOG_ERROR, "jpeg", "unsupported JPEG process (SOF%u)", m - 0xC0);
-				return false;
-			}
-			if (pos + 6 >= size) break;
-			unsigned nf = d[pos + 5];   /* len(2) P(1) Y(2) X(2) then Nf */
-			if (nf != 3) {
-				NVMPI_LOG_SUB(NVMPI_LOG_ERROR, "jpeg", "%u-component JPEG not supported in DMA-BUF mode (grayscale/CMYK rejected)", nf);
-				return false;
-			}
-			return true;
-		}
-		if (m == 0xDA) break;
-		if (m != 0x00 && m != 0x01 && !(m >= 0xD0 && m <= 0xD9)) {
-			if (pos + 1 >= size) break;
-			unsigned len = (d[pos] << 8) | d[pos + 1];
-			if (len < 2) break;
-			pos += len;
-		}
+	unsigned nf = 0;
+	switch (nvmpi_jpeg_scan_sof(d, size, &nf, NULL, NULL)) {
+	case NVMPI_SOF_OK:
+		return true;
+	case NVMPI_SOF_PROGRESSIVE:
+		NVMPI_LOG_SUB(NVMPI_LOG_ERROR, "jpeg", "progressive JPEG not supported by hardware decoder (SOF2)");
+		break;
+	case NVMPI_SOF_UNSUPPORTED:
+		NVMPI_LOG_SUB(NVMPI_LOG_ERROR, "jpeg", "unsupported JPEG process (not SOF0/SOF1)");
+		break;
+	case NVMPI_SOF_COMPONENTS:
+		NVMPI_LOG_SUB(NVMPI_LOG_ERROR, "jpeg", "%u-component JPEG not supported in DMA-BUF mode (grayscale/CMYK rejected)", nf);
+		break;
+	default:
+		NVMPI_LOG_SUB(NVMPI_LOG_ERROR, "jpeg", "no SOF marker found (truncated or malformed JPEG)");
+		break;
 	}
-	NVMPI_LOG_SUB(NVMPI_LOG_ERROR, "jpeg", "no SOF marker found");
 	return false;
 }
 
