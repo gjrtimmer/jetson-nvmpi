@@ -3,6 +3,36 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.3.1 - 2026-10-20
+
+### Bug Fixes
+
+
+**enc**
+
+
+- Honour nvEncParam.peak_bitrate in VBR mode (#141)
+
+
+### Refactor
+
+
+**enc**
+
+
+- Split encoder parameter translation out of nvmpi_enc_init.cpp (#140)
+
+
+### Testing
+
+
+**api**
+
+
+- Check the VBR peak bitrate the encoder programs (#141)
+- Read mock peak bitrate via weak symbol
+
+
 ## 4.3.0 - 2026-10-20
 
 ### Features
