@@ -12,7 +12,7 @@
  *
  * This file owns the device-open, format-negotiation, and plane/stream
  * setup sequence. Frame submission (nvmpi_encoder_put_frame[_fd]) lives in
- * nvmpi_enc_input.cpp; packet retrieval and control API (get_packet,
+ * nvmpi_enc_input.cpp / nvmpi_enc_input_fd.cpp; packet retrieval and control API (get_packet,
  * force_idr, set_bitrate, flush, close) live in nvmpi_enc_api.cpp.
  *
  * Companion files:

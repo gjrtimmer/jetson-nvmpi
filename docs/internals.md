@@ -40,7 +40,8 @@ src/
   nvmpi_dec_planes.cpp     CAPTURE-plane alloc/teardown, colour format selection
   nvmpi_dec_internal.h     decoder context struct, macros
   nvmpi_enc_init.cpp       nvmpi_create_encoder (device open, format, planes)
-  nvmpi_enc_input.cpp      put_frame, put_frame_fd, frame copy helper
+  nvmpi_enc_input.cpp      put_frame (memory copy), frame copy helper
+  nvmpi_enc_input_fd.cpp   put_frame_fd (DMA-BUF)
   nvmpi_enc_api.cpp        packet pool ops, get_packet, force_idr, set_bitrate, flush, close
   nvmpi_enc_output.cpp     capture-plane DQ callback, OUTPUT-plane DMA setup
   nvmpi_enc_internal.h     encoder context struct, macros

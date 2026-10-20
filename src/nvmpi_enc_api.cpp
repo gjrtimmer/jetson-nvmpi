@@ -29,8 +29,8 @@
  *                           and forward declarations.
  *   nvmpi_enc_init.cpp    — nvmpi_create_encoder() (device open, format
  *                           negotiation, plane/stream setup).
- *   nvmpi_enc_input.cpp   — copyFrameToNvBuf(), nvmpi_encoder_put_frame(),
- *                           nvmpi_encoder_put_frame_fd() (frame submission).
+ *   nvmpi_enc_input.cpp   — copyFrameToNvBuf(), nvmpi_encoder_put_frame().
+ *   nvmpi_enc_input_fd.cpp — nvmpi_encoder_put_frame_fd() (DMA-BUF).
  *   nvmpi_enc_output.cpp  — encoder_capture_plane_dq_callback and
  *                           setup_output_dmabuf (OUTPUT-plane DMA path).
  */
