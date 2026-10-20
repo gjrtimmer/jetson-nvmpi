@@ -3,6 +3,48 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.4.0 - 2026-10-20
+
+### Bug Fixes
+
+
+**enc**
+
+
+- Strip IVF framing from AV1 packets (#8)
+
+
+### Features
+
+
+**enc**
+
+
+- AV1 hardware encode (#8)
+
+
+**mock**
+
+
+- AV1 encoder model (#8)
+
+
+### Testing
+
+
+**api**
+
+
+- AV1 encode cases (#8)
+- Accept split AV1 frame OBUs, dump bad packets
+
+
+**mock**
+
+
+- Emit driver IVF framing for AV1
+
+
 ## 4.3.2 - 2026-10-20
 
 ### Testing
