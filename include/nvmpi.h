@@ -172,13 +172,17 @@ typedef void (*nvmpi_frame_release_cb)(void *opaque);
 //One decoded frame handed out as a borrowed DMA-BUF fd by
 //nvmpi_jpeg_decoder_get_frame_fd. Geometry is per plane and comes from the
 //allocator, so never derive a plane address as pitch*height: use offset[].
+//width/height are the DISPLAYED size of the JPEG (from its SOF header, e.g.
+//33x17). The planes behind fd may be larger (padding/alignment): always use
+//pitch[]/offset[] (the real surface layout) and size (total bytes of the
+//buffer), never width/height, to address pixels.
 //Caller sets struct_size = sizeof(nvmpi_fd_frame) before the call; fields
 //are only ever appended, so an older caller keeps working against a newer
 //library (the library fills at most struct_size bytes).
 typedef struct {
 	uint32_t struct_size;      //IN: sizeof(nvmpi_fd_frame) of the caller
 	int fd;                    //borrowed pitch-linear dmabuf fd (see ownership)
-	uint32_t width, height;    //visible size of the decoded picture
+	uint32_t width, height;    //displayed JPEG size (planes may be larger)
 	nvPixFormat format;        //NV_PIX_NV12 (2 planes) or NV_PIX_YUV420 (3)
 	uint32_t num_planes;       //2 for NV12, 3 for YUV420
 	uint32_t pitch[3];         //bytes per row of each plane (>= row bytes)

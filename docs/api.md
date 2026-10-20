@@ -512,7 +512,9 @@ a new pool; frames of the old size stay valid.
 `sizeof` before the call, minimum `NVMPI_FD_FRAME_V1_SIZE`), `fd`, `width`,
 `height`, `format`, `num_planes` (2 or 3), `pitch[3]`, `offset[3]`, `size`,
 `timestamp` (the packet `pts`), `flags` (bit0 full range). Plane addresses are
-`offset[i]`, never `pitch*height`.
+`offset[i]`, never `pitch*height`. `width`/`height` are the displayed JPEG
+size from the SOF header; the planes may be larger, so address pixels only
+through `pitch[]`/`offset[]` and `size` (total buffer bytes).
 
 Ownership and threads:
 

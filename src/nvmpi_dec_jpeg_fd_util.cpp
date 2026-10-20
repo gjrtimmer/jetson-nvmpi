@@ -8,10 +8,11 @@
 /* Screen the JPEG header: accept only 3-component baseline (SOF0/SOF1).
  * Logs the reason and returns false otherwise. Untrusted input; the scan
  * itself is bounds-checked (nvmpi_jpeg_sof.cpp). */
-bool jpegFdCheckSof(const unsigned char *d, unsigned long size)
+bool jpegFdCheckSof(const unsigned char *d, unsigned long size,
+                    unsigned *width, unsigned *height)
 {
 	unsigned nf = 0;
-	switch (nvmpi_jpeg_scan_sof(d, size, &nf, NULL, NULL)) {
+	switch (nvmpi_jpeg_scan_sof(d, size, &nf, width, height)) {
 	case NVMPI_SOF_OK:
 		return true;
 	case NVMPI_SOF_PROGRESSIVE:
@@ -39,15 +40,21 @@ bool jpegFdFillGeometry(nvPixFormat fmt, nvmpi_frame_buffer *fb,
 	const NvBufSurfacePlaneParams &pp = sp.planeParams;
 	uint32_t want = (fmt == NV_PIX_NV12) ? 2 : 3;
 
-	if (pp.num_planes != want || sp.dataSize == 0) {
-		NVMPI_LOG_SUB(NVMPI_LOG_ERROR, "jpeg", "unexpected plane count %u", pp.num_planes);
+	/* dataSize can be 0 on some surface types: fall back to the end of the
+	 * last plane (offset + psize). */
+	uint64_t total = sp.dataSize;
+	if (total == 0 && pp.num_planes >= 1 && pp.num_planes <= 3)
+		total = (uint64_t)pp.offset[pp.num_planes - 1] + pp.psize[pp.num_planes - 1];
+	if (pp.num_planes != want || total == 0) {
+		NVMPI_LOG_SUB(NVMPI_LOG_ERROR, "jpeg", "unexpected surface: planes %u (want %u) size %llu",
+		              pp.num_planes, want, (unsigned long long)total);
 		return false;
 	}
 	memset(fr, 0, sizeof(*fr));
 	for (uint32_t i = 0; i < want; i++) {
 		/* A pitch below the row size or an offset outside the buffer would
 		 * make the consumer read out of bounds. */
-		if (pp.pitch[i] < pp.width[i] * pp.bytesPerPix[i] || pp.offset[i] >= sp.dataSize) {
+		if (pp.pitch[i] < pp.width[i] * pp.bytesPerPix[i] || pp.offset[i] >= total) {
 			NVMPI_LOG_SUB(NVMPI_LOG_ERROR, "jpeg", "implausible plane %u geometry", i);
 			return false;
 		}
@@ -60,7 +67,7 @@ bool jpegFdFillGeometry(nvPixFormat fmt, nvmpi_frame_buffer *fb,
 	fr->height = h;
 	fr->format = fmt;
 	fr->num_planes = want;
-	fr->size = sp.dataSize;
+	fr->size = total;
 	fr->flags = NVMPI_FD_FRAME_FULL_RANGE;
 	return true;
 }

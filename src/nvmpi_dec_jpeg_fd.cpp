@@ -180,8 +180,16 @@ int jpegFdPutPacket(nvmpictx_jpeg *ctx, nvPacket *packet)
 	int idx = -1;
 	bool have = false;
 
-	if (!jpegFdCheckSof(packet->payload, packet->payload_size))
+	/* Displayed picture size from the SOF header: decodeToFd reports the
+	 * decoder's (possibly aligned/padded) size, which must not leak into
+	 * nvmpi_fd_frame.width/height. */
+	unsigned sofw = 0, sofh = 0;
+	if (!jpegFdCheckSof(packet->payload, packet->payload_size, &sofw, &sofh))
 		return -1;
+	if (sofw == 0 || sofh == 0 || sofw > NVJPEG_MAX_DIM || sofh > NVJPEG_MAX_DIM) {
+		NVMPI_LOG_SUB(NVMPI_LOG_ERROR, "jpeg", "JPEG dimensions %ux%u out of range", sofw, sofh);
+		return -1;
+	}
 
 	/* Reserve the output buffer BEFORE decoding so EAGAIN never costs a
 	 * decode. The very first frame has no pool yet (size unknown). */
@@ -205,6 +213,15 @@ int jpegFdPutPacket(nvmpictx_jpeg *ctx, nvPacket *packet)
 		NVMPI_LOG_SUB(NVMPI_LOG_ERROR, "jpeg", "decoded dimensions %ux%u out of range", w, h);
 		goto fail;
 	}
+	/* The decoder output must cover the displayed size; it may be larger
+	 * (padding). From here on w/h are the DISPLAYED size: pool surfaces,
+	 * VIC crop rect and the reported frame size. */
+	if (w < sofw || h < sofh) {
+		NVMPI_LOG_SUB(NVMPI_LOG_ERROR, "jpeg", "decoded size %ux%u smaller than SOF %ux%u", w, h, sofw, sofh);
+		goto fail;
+	}
+	w = sofw;
+	h = sofh;
 
 	if (!st->gen || w != st->width || h != st->height) {
 		/* New generation; the reserved buffer (if any) goes back first so
