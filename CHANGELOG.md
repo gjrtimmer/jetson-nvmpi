@@ -3,6 +3,69 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.0.8 - 2026-10-20
+
+### Bug Fixes
+
+
+**enc**
+
+
+- No error log when close/flush stops the capture DQ thread (#122)
+
+
+**surface**
+
+
+- Log missing DMA_BUF sync at debug level (#122)
+
+
+### CI
+
+
+**test**
+
+
+- Run the mock ctests in parallel (#123)
+
+
+### Documentation
+
+
+**ci**
+
+
+- Describe the sharded mock ctests (#130)
+
+
+### Performance
+
+
+**dec**
+
+
+- Close a never-fed decoder in ~50 ms instead of ~1 s (#105)
+
+
+### Refactor
+
+
+**dec**
+
+
+- Move close/flush and the frame pool into own files (#105)
+
+
+### Testing
+
+
+**api**
+
+
+- Run encoder mock cases strict (#122)
+- Shard the encoder mock suite (#130)
+
+
 ## 4.0.7 - 2026-10-20
 
 ### Bug Fixes
