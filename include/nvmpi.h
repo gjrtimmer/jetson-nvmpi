@@ -276,8 +276,12 @@ extern "C" {
 	//nvmpi_encoder_qEmptyPacket().
 	int nvmpi_encoder_get_packet(nvmpictx* ctx, nvPacket** packet, bool wait);
 	//get empty packet with allocated buffer from encoder packet pool
-	//Non-blocking; returns -1 when the empty pool is exhausted. Used by the
-	//wrapper to drain/teardown the pool.
+	//Returns -1 when the empty pool is exhausted and the encoder is not
+	//filling a packet. May block briefly (capped at 1 s, normally one
+	//packet copy) while the encoder finishes a packet it already took.
+	//Used by the wrapper to drain/teardown the pool: drain this queue until
+	//-1 BEFORE get_packet(), since the in-flight packet ends up filled, and
+	//do not call nvmpi_encoder_qEmptyPacket() during the drain.
 	int nvmpi_encoder_dqEmptyPacket(nvmpictx* ctx, nvPacket** packet);
 	//add empty packet with allocated buffer  to  encoder packet pool
 	//Hands a caller-allocated packet (payload buffer included) to the pool;
@@ -303,7 +307,8 @@ extern "C" {
 	int nvmpi_encoder_flush(nvmpictx* ctx);
 	//close encoder
 	//Stops the dequeue thread and frees the context. Packets still held in
-	//the pools are NOT freed here — drain them first (see FFmpeg wrapper).
+	//the pools are NOT freed here — drain them first: dqEmptyPacket until
+	//-1, then get_packet until empty (see FFmpeg wrapper).
 	//Returns 0, or -1 if ctx is NULL or the capture DQ thread did not exit
 	//within its bounded join; in the latter case ctx is deliberately leaked
 	//to avoid a use-after-free.

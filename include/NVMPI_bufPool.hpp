@@ -21,8 +21,16 @@
  *     them to return NULL immediately.
  *   - reset(): clears the shutdown flag for flush/restart cycles.
  *
+ * Held items (encoder teardown, issue #121): an item the producer has
+ * taken from the empty queue but not yet published to the filled queue (or
+ * returned to the empty queue) is in neither queue. dqEmptyBufHold() /
+ * releaseHold() bracket that window and dqEmptyBufSettled(timeout) lets a
+ * drain wait for it, so the drain cannot miss the in-flight item. Used by
+ * the encoder only; the decoder pool never holds.
+ *
  * Thread safety: m_emptyBuf guards the empty queue; m_filledBuf guards
- * the filled queue AND the condition variable. Never hold both locks
+ * the filled queue AND the condition variable. m_emptyBuf also guards
+ * `held`. Never hold both locks
  * simultaneously. m_shutdown is atomic and may be read without holding
  * any lock; it is written under m_filledBuf to ensure the CV wakeup
  * is visible to waiters.
@@ -66,6 +74,11 @@ struct NVMPI_bufPool
 	std::queue<T> emptyBuf;
 	std::queue<T> filledBuf;
 
+	/* Number of items taken with dqEmptyBufHold() and not yet released.
+	 * Guarded by m_emptyBuf (the same lock as the empty queue, so "queue
+	 * empty && held == 0" is one atomic observation). */
+	size_t held = 0;
+
 	/* Non-blocking: returns NULL immediately if queue is empty. */
 	T dqEmptyBuf();
 	/* Blocking: waits up to timeout for an empty buffer. Returns NULL on
@@ -75,6 +88,18 @@ struct NVMPI_bufPool
 	T dqEmptyBuf(std::chrono::milliseconds timeout);
 	void qEmptyBuf(T buf);
 	T peekEmptyBuf();
+
+	/* Producer side: like dqEmptyBuf(), but a returned item is counted as
+	 * held until releaseHold(). Call releaseHold() exactly once per non-NULL
+	 * return, AFTER the item was published (qFilledBuf) or returned
+	 * (qEmptyBuf), so a settled drain never sees it in neither place. */
+	T dqEmptyBufHold();
+	void releaseHold();
+	/* Drain side: dqEmptyBuf() that waits while the queue is empty but an
+	 * item is held. Returns an item, or NULL once the queue is empty and
+	 * nothing is held (settled), on timeout, or after shutdown(). Woken by
+	 * releaseHold()/qEmptyBuf(); never blocks when nothing is held. */
+	T dqEmptyBufSettled(std::chrono::milliseconds timeout);
 
 	/* Non-blocking: returns NULL immediately if queue is empty. */
 	T dqFilledBuf();
@@ -164,6 +189,74 @@ T NVMPI_bufPool<T>::dqEmptyBuf(std::chrono::milliseconds timeout)
 		/* Wait for min(remaining, 100ms) — caps shutdown latency. */
 		auto wait_time = std::min(remaining, GRANULARITY);
 		cv_emptyBuf.wait_for(lock, wait_time);
+	}
+}
+
+/* Non-blocking dequeue that marks the item held (see header comment).
+ * held++ happens under the same lock as the pop, so a settled drain can
+ * never observe "queue empty, held == 0" while the item is in flight. */
+template<typename T>
+T NVMPI_bufPool<T>::dqEmptyBufHold()
+{
+	T buf = NULL;
+	std::lock_guard<std::mutex> lock(m_emptyBuf);
+	if(!emptyBuf.empty())
+	{
+		buf = emptyBuf.front();
+		emptyBuf.pop();
+		held++;
+	}
+	return buf;
+}
+
+/* End of the held window. Must run after the item was queued somewhere
+ * (filled or empty). notify_all: a settled drain waits on the CV for
+ * either condition and there may be more than one waiter. Only m_emptyBuf
+ * is held (never together with m_filledBuf). */
+template<typename T>
+void NVMPI_bufPool<T>::releaseHold()
+{
+	{
+		std::lock_guard<std::mutex> lock(m_emptyBuf);
+		if (held > 0)
+			held--;
+	}
+	cv_emptyBuf.notify_all();
+}
+
+/* Blocking dequeue for drains: waits only while the empty queue is empty
+ * AND an item is held, i.e. while a packet is in flight in the producer.
+ * In steady state (queue non-empty, or nothing held) it returns at once.
+ * Ends on releaseHold()/qEmptyBuf() notification, so the wait is bounded by
+ * the producer's take-to-publish window; `timeout` is only a backstop
+ * (100ms ticks re-check shutdown, like dqEmptyBuf(timeout)). */
+template<typename T>
+T NVMPI_bufPool<T>::dqEmptyBufSettled(std::chrono::milliseconds timeout)
+{
+	using Clock = std::chrono::steady_clock;
+	constexpr auto GRANULARITY = std::chrono::milliseconds(100);
+	auto deadline = Clock::now() + timeout;
+
+	std::unique_lock<std::mutex> lock(m_emptyBuf);
+	while (true)
+	{
+		if (!emptyBuf.empty())
+		{
+			T buf = emptyBuf.front();
+			emptyBuf.pop();
+			return buf;
+		}
+		/* Empty and nothing in flight: settled, nothing more to take. */
+		if (held == 0)
+			return NULL;
+		if (m_shutdown.load(std::memory_order_acquire))
+			return NULL;
+
+		auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+			deadline - Clock::now());
+		if (remaining <= std::chrono::milliseconds(0))
+			return NULL;
+		cv_emptyBuf.wait_for(lock, std::min(remaining, GRANULARITY));
 	}
 }
 

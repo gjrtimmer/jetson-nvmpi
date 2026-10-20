@@ -4,12 +4,16 @@
 //Callback run on NvVideoEncoder's capture-plane DQ thread for every
 //dequeued (encoded) buffer. Contract: return true to keep the thread
 //running, false to stop it (EOS or fatal error).
-//Steps: detect the zero-byte EOS buffer; fetch encode metadata (keyframe
-//flag); take an "empty" nvPacket from the pool and memcpy the bitstream
-//into it, then publish it "filled" for nvmpi_encoder_get_packet(); finally
-//re-queue the V4L2 buffer so the encoder can reuse it. If the pool is
-//empty the encoded data is DROPPED (warning printed) — the FFmpeg wrapper
-//sizes the pool via the packet_pool_size option to avoid this.
+//Steps: detect the zero-byte EOS buffer; take an "empty" nvPacket from the
+//pool (marked HELD), fetch encode metadata (keyframe flag) and memcpy the
+//bitstream into the packet, then publish it "filled" for
+//nvmpi_encoder_get_packet(); release the hold; finally re-queue the V4L2
+//buffer so the encoder can reuse it. If the pool is empty the encoded data
+//is DROPPED (warning printed) — the FFmpeg wrapper sizes the pool via the
+//packet_pool_size option to avoid this.
+//Held window (issue #121): between the take and the publish the packet is
+//in neither pool queue. The hold lets nvmpi_encoder_dqEmptyPacket() (the
+//teardown drain) wait for it instead of closing while it is in flight.
 bool encoder_capture_plane_dq_callback(struct v4l2_buffer *v4l2_buf, NvBuffer * buffer, NvBuffer * shared_buffer __attribute__((unused)), void *arg)
 {
 	nvmpi_enc_ctx *ctx = (nvmpi_enc_ctx*)arg;
@@ -27,12 +31,16 @@ bool encoder_capture_plane_dq_callback(struct v4l2_buffer *v4l2_buf, NvBuffer * 
 		return false;
 	}
 
+	//nvPacket.payload --> AVPacket->data
+	//nvPacket.privData --> AVPacket
+	//Allocated by the caller (FFmpeg wrapper), never by libnvmpi. Held until
+	//releaseHold() below; m_emptyBuf guards the held count. The metadata
+	//ioctl runs after the take so the whole in-flight window is covered.
+	nvPacket* pkt = ctx->pktPool->dqEmptyBufHold();
+
 	v4l2_ctrl_videoenc_outputbuf_metadata enc_metadata;
 	ctx->enc->getMetadata(v4l2_buf->index, enc_metadata);
 
-	//nvPacket.payload --> AVPacket->data
-	//nvPacket.privData --> AVPacket
-	nvPacket* pkt = ctx->pktPool->dqEmptyBuf();
 	if(!pkt)
 	{
 		//TODO wait for user to read buffer. make send_frame return AVERROR(EAGAIN) until avcodec_receive_packet() is called
@@ -45,6 +53,8 @@ bool encoder_capture_plane_dq_callback(struct v4l2_buffer *v4l2_buf, NvBuffer * 
 		NVMPI_LOG(NVMPI_LOG_ERROR, "encoded frame (%u bytes) exceeds packet buffer (%u); frame dropped; there will be artifacts in output video",
 			buffer->planes[0].bytesused, (unsigned)(NVMPI_ENC_CHUNK_SIZE));
 		ctx->pktPool->qEmptyBuf(pkt);
+		//publish-then-release: the packet is back in the empty queue first
+		ctx->pktPool->releaseHold();
 	}
 	else
 	{
@@ -54,7 +64,10 @@ bool encoder_capture_plane_dq_callback(struct v4l2_buffer *v4l2_buf, NvBuffer * 
 		pkt->payload_size = buffer->planes[0].bytesused;
 		memcpy(pkt->payload, buffer->planes[0].data, pkt->payload_size);
 
+		//publish first, release after: a settled drain that sees held == 0
+		//must find the packet in the filled queue
 		ctx->pktPool->qFilledBuf(pkt);
+		ctx->pktPool->releaseHold();
 	}
 
 	if (ctx->enc->capture_plane.qBuffer(*v4l2_buf, NULL) < 0)

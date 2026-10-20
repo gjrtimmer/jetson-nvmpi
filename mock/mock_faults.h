@@ -7,6 +7,9 @@
  *       +      sticky: call N and every later call fail (default: only N)
  *   NVMPI_MOCK_DELAY_US = microseconds added to every successful DQBUF
  *       (a slow decoder); capped at MOCK_DELAY_MAX_US.
+ *   NVMPI_MOCK_CTRL_DELAY_US = microseconds slept in the encoder's per-buffer
+ *       metadata query (G_EXT_CTRLS METADATA), i.e. inside the DQ callback;
+ *       same cap. Widens that window for deterministic teardown tests.
  *
  * What counts as "a call" is fixed per point so N is deterministic even when
  * the application polls:
@@ -50,5 +53,9 @@ int mock_fault_hit(enum mock_fault_pt pt);
 /* Sleep NVMPI_MOCK_DELAY_US (no-op when unset/invalid). Call WITHOUT any
  * mock lock held. */
 void mock_fault_delay(void);
+
+/* Sleep NVMPI_MOCK_CTRL_DELAY_US (no-op when unset/invalid). Same locking
+ * rule as mock_fault_delay(). */
+void mock_fault_ctrl_delay(void);
 
 #endif /* NVMPI_MOCK_FAULTS_H */

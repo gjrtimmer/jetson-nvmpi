@@ -37,12 +37,16 @@
 #include "nvmpi_enc_internal.h"
 
 //Public API: take an empty packet out of the pool (e.g. to free or replace
-//it). Non-blocking: -1 when the empty queue is exhausted. The caller
-//assumes ownership of the returned packet.
+//it). Returns -1 when the empty queue is exhausted AND the DQ thread holds no
+//packet in flight. If the queue is empty only because the DQ callback has
+//taken a packet and not yet published it, waits for that publish (one AU
+//memcpy; capped at 1 s as a backstop). The caller assumes ownership of the
+//returned packet. After -1 the DQ thread cannot take another packet (the
+//queue is empty), so draining empty-then-filled misses none.
 int nvmpi_encoder_dqEmptyPacket(nvmpictx* h,nvPacket** packet)
 {
 	nvmpi_enc_ctx* ctx = static_cast<nvmpi_enc_ctx*>(h);
-	nvPacket* pkt = ctx->pktPool->dqEmptyBuf();
+	nvPacket* pkt = ctx->pktPool->dqEmptyBufSettled(std::chrono::milliseconds(1000));
 	if(!pkt) return -1;
 	*packet = pkt;
 	return 0;
@@ -286,7 +290,11 @@ int nvmpi_enc_stop_dq_thread(nvmpi_enc_ctx* ctx)
 //Stops/joins the capture DQ thread, releases self-allocated OUTPUT-plane
 //dmabufs (DMA mode only), then destroys the device and the (by now empty)
 //packet pool. Packets still inside the pool are NOT freed here — the
-//FFmpeg wrapper drains and frees them first (nvmpienc_deinitPktPool).
+//FFmpeg wrapper drains and frees them first (nvmpienc_deinitPktPool):
+//dqEmptyPacket until -1 (it waits out a packet the DQ thread is still
+//filling), THEN get_packet until empty. That order matters: the in-flight
+//packet lands in the filled queue, so the filled drain comes second. The
+//caller must not qEmptyPacket during this drain.
 int nvmpi_encoder_close(nvmpictx* h)
 {
 	nvmpi_enc_ctx* ctx = static_cast<nvmpi_enc_ctx*>(h);
@@ -338,7 +346,8 @@ int nvmpi_encoder_close(nvmpictx* h)
 
 	/* Safety-net drain: discard any packets still in the pool queues.
 	 * The normal path is the FFmpeg wrapper calling nvmpienc_deinitPktPool()
-	 * BEFORE this function, which drains and frees every nvPacket properly.
+	 * BEFORE this function, which drains and frees every nvPacket properly
+	 * (the DQ thread is already joined here, so nothing is in flight).
 	 * If the caller forgot to drain, these packets leak (libnvmpi cannot
 	 * call av_packet_free — no libavcodec linkage). The drain empties the
 	 * queues so the NVMPI_bufPool destructor does not warn, and logs the

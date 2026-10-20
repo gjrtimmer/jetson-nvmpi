@@ -221,6 +221,8 @@ so a producer and consumer do not contend on the same lock.
 | --- | --- |
 | `qEmptyBuf` / `dqEmptyBuf` | Return / take an empty item (non-blocking `dq`, plus a timed variant). |
 | `qFilledBuf` / `dqFilledBuf` | Publish / take a filled item. `dqFilledBuf(timeout)` blocks on a condition variable. |
+| `dqEmptyBufHold` / `releaseHold` | Encoder DQ thread: take an empty item and count it held until it is published (`qFilledBuf`) or returned; `releaseHold` comes after. |
+| `dqEmptyBufSettled(timeout)` | Teardown drain: like `dqEmptyBuf`, but waits while the queue is empty and an item is held; `NULL` once nothing is queued or held. |
 | `shutdown()` | Sets a flag and wakes all blocked consumers; they return `NULL` immediately. |
 | `reset()` | Clears the shutdown flag for flush and restart cycles. |
 
@@ -315,6 +317,17 @@ sets `capPlaneGotEOS` and returns `false`, and the thread exits on its own.
 This fixed a segfault when closing an encoder that never encoded a frame.
 The regression guard is the create/close test in `test/api/test_api.c`
 (strict mode on the Jetson runner).
+
+**Caller-side drain and the held packet.** Before `close`, the wrapper drains
+the pool while the DQ thread may still be running. The callback takes a packet
+from the empty queue and publishes it to the filled queue a moment later; in
+between it sits in neither queue. A plain non-blocking drain could miss it and
+close would then discard it (leak). The callback therefore takes packets with
+`dqEmptyBufHold()` and calls `releaseHold()` after publishing, and
+`nvmpi_encoder_dqEmptyPacket` uses `dqEmptyBufSettled(1000 ms)`: once it
+returns `-1` nothing is queued or in flight, so draining empty, then filled,
+misses nothing. The wait ends on the release notification (one packet copy);
+the 1 s is only a backstop.
 
 `nvmpi_encoder_flush` uses the same ordering for its own stop and restart (stop
 the DQ thread, STREAMOFF both planes, drain, STREAMON, re-queue CAPTURE

@@ -138,9 +138,11 @@ int mock_fault_hit(enum mock_fault_pt pt)
     return hit;
 }
 
-void mock_fault_delay(void)
+/* Sleep the microseconds named by env var `name` (no-op when unset or
+ * malformed), capped at MOCK_DELAY_MAX_US. */
+static void env_delay(const char *name)
 {
-    const char *env = getenv("NVMPI_MOCK_DELAY_US");
+    const char *env = getenv(name);
     char *end = NULL;
     unsigned long us;
 
@@ -153,4 +155,14 @@ void mock_fault_delay(void)
         us = MOCK_DELAY_MAX_US;
     if (us)
         usleep((useconds_t)us);
+}
+
+void mock_fault_delay(void)
+{
+    env_delay("NVMPI_MOCK_DELAY_US");
+}
+
+void mock_fault_ctrl_delay(void)
+{
+    env_delay("NVMPI_MOCK_CTRL_DELAY_US");
 }

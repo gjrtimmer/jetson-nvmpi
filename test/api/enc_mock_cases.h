@@ -6,6 +6,8 @@
 #ifndef NVMPI_TEST_ENC_MOCK_CASES_H
 #define NVMPI_TEST_ENC_MOCK_CASES_H
 
+#include "enc_mock_teardown.h"
+
 static const struct tcase k_cases[] = {
     { "blocking_h264", NULL, blocking_h264, 0 },
     { "blocking_hevc", NULL, blocking_hevc, 0 },
@@ -23,6 +25,7 @@ static const struct tcase k_cases[] = {
     { "teardown_after_eos", NULL, teardown_after_eos, 0 },
     { "teardown_no_data", NULL, teardown_no_data, 0 },
     { "teardown_all_slots", NULL, teardown_all_slots, 0 },
+    { "teardown_held_packet", NULL, teardown_held_packet, 0 },
     /* fault matrix: fn == NULL -> fault_case() */
     { "fault_none_control", "dqbuf@9999", NULL, 0 },
     { "fault_open@1", "open@1", NULL, 0 },        /* factory retry recovers */

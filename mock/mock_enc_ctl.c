@@ -16,11 +16,14 @@
  *   INSERT_VUI          BASE+546   setInsertVuiEnabled(): SPS gets VUI
  *                                  timing_info from the S_PARM frame rate
  *
- * Runs with ctx->mu held (mock_ops.on_ioctl contract); nothing blocks.
+ * Runs with ctx->mu held (mock_ops.on_ioctl contract); nothing blocks, except
+ * the opt-in NVMPI_MOCK_CTRL_DELAY_US sleep in the metadata query, which drops
+ * the lock for the sleep.
  */
 #define _GNU_SOURCE
 #include "mock_v4l2.h"
 #include "mock_enc.h"
+#include "mock_faults.h"
 
 #include <errno.h>
 
@@ -81,8 +84,16 @@ int mock_enc_ioctl(struct mock_ctx *ctx, unsigned long req, void *arg, int *ret)
         struct v4l2_ext_control *k = &ec->controls[i];
 
         if (req == VIDIOC_G_EXT_CTRLS) {
-            if (k->id == MOCK_CID_ENC_METADATA)
+            if (k->id == MOCK_CID_ENC_METADATA) {
+                /* Test hook: stretch the DQ callback's take-to-publish
+                 * window. Sleep without ctx->mu so the model keeps running;
+                 * the caller is the DQ thread, which owns the device until
+                 * it is joined, so ctx/m stay valid across the unlock. */
+                pthread_mutex_unlock(&ctx->mu);
+                mock_fault_ctrl_delay();
+                pthread_mutex_lock(&ctx->mu);
                 err = k->string ? get_metadata(ctx, m, k->string) : EFAULT;
+            }
             continue;
         }
         switch (k->id) {

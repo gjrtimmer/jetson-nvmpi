@@ -365,9 +365,13 @@ dropped with an error log.
 
 `nvmpi.h:281` -- `int nvmpi_encoder_dqEmptyPacket(nvmpictx* ctx, nvPacket** packet);`
 
-Non-blocking removal of one packet from the empty pool; returns `-1` when the
-pool is exhausted. The caller takes ownership. Use it to drain and free the
-pool before closing.
+Removes one packet from the empty pool; the caller takes ownership. Returns `-1`
+when the pool is exhausted and the encoder is not filling a packet. It may
+block briefly (capped at 1 s, normally one packet copy) while the encoder
+finishes a packet it already took from the pool. Use it to drain and free the
+pool before closing: drain this queue until `-1` **before** the filled queue
+(`get_packet`), because the in-flight packet ends up filled, and do not call
+`nvmpi_encoder_qEmptyPacket` during the drain.
 
 ### `nvmpi_encoder_qEmptyPacket`
 
@@ -411,7 +415,8 @@ needs a clean random-access point.
 
 Stops the dequeue thread and frees the context. Packets still held in the
 pools are **not** returned to you: drain the pool first with
-`nvmpi_encoder_dqEmptyPacket` (and `get_packet`) and free them. Anything left
+`nvmpi_encoder_dqEmptyPacket` until `-1`, then `get_packet` until empty, and
+free them. Anything left
 is discarded with a warning (the memory behind those packets leaks, because
 libnvmpi does not own it).
 

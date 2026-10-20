@@ -168,6 +168,85 @@ static void test_concurrent_push_pop_stress() {
     assert(consumed.load() == total); (void)total;
 }
 
+static void test_hold_counts_and_releases() {
+    NVMPI_bufPool<int*> pool;
+    int a = 1, b = 2;
+    assert(pool.dqEmptyBufHold() == nullptr);      /* empty: nothing held */
+    assert(pool.held == 0);
+    pool.qEmptyBuf(&a);
+    pool.qEmptyBuf(&b);
+    assert(pool.dqEmptyBufHold() == &a);
+    assert(pool.dqEmptyBufHold() == &b);
+    assert(pool.held == 2);
+    pool.releaseHold();
+    pool.releaseHold();
+    assert(pool.held == 0);
+    pool.releaseHold();                            /* never underflows */
+    assert(pool.held == 0);
+}
+
+static void test_settled_nonblocking_when_nothing_held() {
+    NVMPI_bufPool<int*> pool;
+    int a = 1;
+    int* r = reinterpret_cast<int*>(1);
+    auto ms = elapsed_ms([&]{ r = pool.dqEmptyBufSettled(Ms(1000)); });
+    assert(r == nullptr && ms < 50);               /* settled at once */
+    pool.qEmptyBuf(&a);
+    assert(pool.dqEmptyBufSettled(Ms(1000)) == &a);
+    (void)ms;
+}
+
+static void test_settled_waits_for_publish() {
+    NVMPI_bufPool<int*> pool;
+    int a = 1;
+    pool.qEmptyBuf(&a);
+    int* taken = pool.dqEmptyBufHold();
+    assert(taken == &a); (void)taken;
+    std::thread producer([&]{
+        std::this_thread::sleep_for(Ms(150));
+        pool.qFilledBuf(&a);                       /* publish, then release */
+        pool.releaseHold();
+    });
+    int* r = reinterpret_cast<int*>(1);
+    auto ms = elapsed_ms([&]{ r = pool.dqEmptyBufSettled(Ms(1000)); });
+    producer.join();
+    assert(r == nullptr);                          /* settled, not timed out */
+    assert(ms >= 100 && ms < 600); (void)ms;
+    assert(pool.dqFilledBuf() == &a);              /* the packet was published */
+}
+
+static void test_settled_returns_item_given_back() {
+    NVMPI_bufPool<int*> pool;
+    int a = 1;
+    pool.qEmptyBuf(&a);
+    int* taken = pool.dqEmptyBufHold();
+    assert(taken == &a); (void)taken;
+    std::thread producer([&]{
+        std::this_thread::sleep_for(Ms(100));
+        pool.qEmptyBuf(&a);                        /* dropped-frame path */
+        pool.releaseHold();
+    });
+    int* r = pool.dqEmptyBufSettled(Ms(1000));
+    producer.join();
+    assert(r == &a); (void)r;
+}
+
+static void test_settled_timeout_and_shutdown() {
+    NVMPI_bufPool<int*> pool;
+    int a = 1;
+    pool.qEmptyBuf(&a);
+    int* taken = pool.dqEmptyBufHold();
+    assert(taken == &a); (void)taken;              /* held, never released */
+    int* r = reinterpret_cast<int*>(1);
+    auto ms = elapsed_ms([&]{ r = pool.dqEmptyBufSettled(Ms(200)); });
+    assert(r == nullptr && ms >= 150 && ms <= 450);
+    std::thread waiter([&]{ r = pool.dqEmptyBufSettled(Ms(5000)); });
+    std::this_thread::sleep_for(Ms(100));
+    ms = elapsed_ms([&]{ pool.shutdown(); waiter.join(); });
+    assert(r == nullptr && ms < 500); (void)ms;    /* no hang after shutdown */
+    pool.releaseHold();
+}
+
 int main() {
     std::cout << "=== NVMPI_bufPool unit tests ===" << std::endl;
     RUN_TEST(test_dqFilledBuf_nonblocking_unchanged);
@@ -178,6 +257,11 @@ int main() {
     RUN_TEST(test_reset_clears_shutdown);
     RUN_TEST(test_qFilledBuf_notifies_one_waiter);
     RUN_TEST(test_concurrent_push_pop_stress);
+    RUN_TEST(test_hold_counts_and_releases);
+    RUN_TEST(test_settled_nonblocking_when_nothing_held);
+    RUN_TEST(test_settled_waits_for_publish);
+    RUN_TEST(test_settled_returns_item_given_back);
+    RUN_TEST(test_settled_timeout_and_shutdown);
     std::cout << std::endl;
     std::cout << tests_passed << "/" << tests_run << " tests passed." << std::endl;
     return (tests_passed == tests_run) ? 0 : 1;
