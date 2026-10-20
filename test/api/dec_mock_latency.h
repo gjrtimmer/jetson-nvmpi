@@ -17,9 +17,11 @@
 
 /* Bound for create->close with no data. The pre-fix latency was 0.5-1.5 s
  * (500 ms dqEvent slice + 500 ms race-guard wait); the fix needs one 50 ms
- * slice. 200 ms leaves 4x headroom for sanitizer builds on a loaded runner
- * and is still far below the 500 ms quantum a regression would show. */
-#define CLOSE_NO_DATA_MAX_MS 200
+ * slice (~55 ms on the Orin, ~75 ms on the mock). 400 ms is the bound:
+ * ASan with parallel ctests on a loaded runner reached 249 ms (#132), and
+ * the regression can never come in under 500 ms (the race-guard wait
+ * alone), so the check still catches it. */
+#define CLOSE_NO_DATA_MAX_MS 400
 #define CLOSE_NO_DATA_CYCLES 5
 
 static long lat_now_ms(void)
