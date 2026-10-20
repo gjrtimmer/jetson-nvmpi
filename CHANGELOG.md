@@ -3,6 +3,66 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.0.7 - 2026-10-20
+
+### Bug Fixes
+
+
+**enc**
+
+
+- Keep the in-flight packet visible to the drain before close (#121)
+- Back-pressure nonblocking put_frame instead of dropping AUs (#125)
+
+
+### CI
+
+
+**mock**
+
+
+- Check every mock binary for RPATH, fail on missing (#119)
+- Gate mock jobs on sanitizer reports in ctest output
+
+
+**scripts**
+
+
+- Add check-test-log.sh sanitizer report scanner
+
+
+**upload**
+
+
+- Split upload:s3 into tag and snapshot jobs (#119)
+
+
+### Refactor
+
+
+**enc**
+
+
+- Split the DMA-BUF put_frame_fd path out of nvmpi_enc_input.cpp (#125)
+
+
+### Testing
+
+
+**api**
+
+
+- Capture child stderr, mark expected fault errors (#120)
+
+
+**mock**
+
+
+- Decodable H.264 slices (I_PCM + P_Skip) in the encoder (#117)
+- Size enc test packets to NVMPI_ENC_CHUNK_SIZE (#117)
+- Decodable HEVC slices (CABAC PCM + skip) in the encoder (#118, #110)
+
+
 ## 4.0.6 - 2026-10-20
 
 ### Testing
