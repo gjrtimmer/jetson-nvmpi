@@ -26,6 +26,7 @@
  *                    written straight into the mapped CAPTURE buffer; an AU
  *                    that does not fit its length, or a picture above
  *                    MOCK_ENC_MAX_PIXELS, completes with V4L2_BUF_FLAG_ERROR.
+ *                    AV1 emits one OBU temporal unit instead (#8, mock_enc_av1.c).
  *   GOP              Frame 0, a forced IDR (FORCE_FRAME_TYPE), every
  *                    IDR_INTERVAL frames: IDR. Every GOP_SIZE frames: key
  *                    frame (periodic I). SPS/PPS (+VPS) lead the first IDR

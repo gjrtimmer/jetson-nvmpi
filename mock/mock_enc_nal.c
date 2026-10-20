@@ -1,5 +1,5 @@
 /*
- * mock_enc_nal.c - Annex-B access unit dispatcher of the encoder model
+ * mock_enc_nal.c - access unit dispatcher of the encoder model
  * (#100, #117): picks the builder from the CAPTURE pixelformat.
  *
  *   H.264  SPS(7) PPS(8) [IDR slice(5) | non-IDR slice(1)]   mock_enc_h264.c
@@ -8,6 +8,9 @@
  *          decodable (#118): PCM CUs for key frames carrying the input,
  *          skipped CUs for P frames (mock_enc_hevc.c, mock_enc_hevc_slice.c,
  *          mock_enc_cabac.c)
+ *
+ *   AV1    TD, sequence header (IDR), OBU_FRAME (#8, mock_enc_av1.c): one
+ *          low-overhead OBU temporal unit, parseable but not decodable
  *
  * The parameter sets hold the real picture size and VUI timing, which is
  * what a consumer of the mock encoder (libnvmpi, the FFmpeg wrapper's
@@ -18,6 +21,7 @@
 #include <linux/videodev2.h>
 
 #define PIX_H265 v4l2_fourcc('H', '2', '6', '5')   /* NVIDIA fourcc (mock_dec.c) */
+#define PIX_AV1  v4l2_fourcc('A', 'V', '1', '0')   /* NVIDIA fourcc (V4L2_PIX_FMT_AV1) */
 
 size_t mock_enc_build_au(const struct mock_enc_au *au, uint8_t *out, size_t cap,
                          uint8_t *rbsp, size_t rbsp_cap)
@@ -27,6 +31,8 @@ size_t mock_enc_build_au(const struct mock_enc_au *au, uint8_t *out, size_t cap,
     if (au->width < 2 || au->height < 2 || au->width > MOCK_ENC_MAX_DIM ||
         au->height > MOCK_ENC_MAX_DIM)
         return 0;
+    if (au->pixfmt == PIX_AV1)
+        return mock_enc_av1_au(au, out, cap);   /* OBUs, mock_enc_av1.c */
     if (au->pixfmt == V4L2_PIX_FMT_H264)
         return mock_enc_h264_au(au, out, cap, rbsp, rbsp_cap);
     if (au->pixfmt == PIX_H265 || au->pixfmt == V4L2_PIX_FMT_HEVC) {

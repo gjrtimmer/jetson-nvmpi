@@ -109,12 +109,18 @@ void mock_enc_pic_unmap(struct mock_enc_pic *pic);
 void mock_enc_pic_row(const struct mock_enc_pic *pic, unsigned comp, uint32_t x0,
                       uint32_t y, unsigned n, uint8_t *dst);
 
-/* Render the access unit as Annex-B into out (cap bytes); rbsp (rbsp_cap
+/* Render the access unit (Annex-B, or OBUs for AV1) into out (cap bytes); rbsp (rbsp_cap
  * bytes, any content) is scratch for the slice RBSP and never aliases
  * out. Returns the size, 0 when out or rbsp is too small, the picture is
- * invalid or the format is not H.264/HEVC. out may hold partial bytes then. */
+ * invalid or the format is not H.264/HEVC/AV1. out may hold partial bytes then. */
 size_t mock_enc_build_au(const struct mock_enc_au *au, uint8_t *out, size_t cap,
                          uint8_t *rbsp, size_t rbsp_cap);
+
+/* mock_enc_av1.c: one low-overhead OBU temporal unit (#8): temporal
+ * delimiter, sequence header when au->headers, OBU_FRAME (KEY_FRAME when
+ * au->key). Parseable, not decodable. Returns the size, 0 when out is too
+ * small or the size is invalid. */
+size_t mock_enc_av1_au(const struct mock_enc_au *au, uint8_t *out, size_t cap);
 
 /* mock_enc_h264.c: SPS (+VUI), PPS and the CAVLC slice of one H.264 AU. */
 size_t mock_enc_h264_au(const struct mock_enc_au *au, uint8_t *out, size_t cap,
