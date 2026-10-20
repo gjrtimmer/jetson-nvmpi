@@ -14,7 +14,8 @@
 
 #include <nvbufsurface.h>
 
-#include <dirent.h>
+#include "fd_snap.h"
+
 #include <time.h>
 
 /* New frames after a resolution change must not wait for borrows (the old
@@ -35,19 +36,6 @@ static long fdb_ms(void)
 
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return ts.tv_sec * 1000L + ts.tv_nsec / 1000000L;
-}
-
-static int fdb_nfds(void)
-{
-    DIR *d = opendir("/proc/self/fd");
-    int n = 0;
-
-    if (!d)
-        return -1;
-    while (readdir(d))
-        n++;
-    closedir(d);
-    return n;
 }
 
 static int fdb_take(nvmpictx *c, struct fdb *b)
@@ -127,10 +115,13 @@ static void fdb_hold(nvmpictx *c, struct fdb *b, int n, unsigned w,
 static int release_after_close(void)
 {
     struct fdb b[3];
-    int i, base = fdb_nfds();
-    nvmpictx *c = create(0, 0, 4);
+    int i;
+    struct fd_snap base;
+    nvmpictx *c;
     long t0;
 
+    fds_take(&base);
+    c = create(0, 0, 4);
     REQUIRE(c);
     fdb_hold(c, b, 3, 320, 240, 1);
     t0 = fdb_ms();
@@ -140,7 +131,7 @@ static int release_after_close(void)
         REQUIRE(fdb_check(&b[i]) == 0);  /* alive after close              */
     for (i = 2; i >= 0; i--)             /* any order, any time            */
         fdb_give(&b[i]);
-    REQUIRE(fdb_nfds() == base);
+    REQUIRE(fds_check(&base, 0, "released") == 0);
     return 0;
 }
 
@@ -150,18 +141,21 @@ static int release_after_close(void)
 static int fd_count(void)
 {
     struct fdb b[3];
-    int i, base = fdb_nfds();
-    nvmpictx *c = create(0, 0, 4);
+    int i;
+    struct fd_snap base;
+    nvmpictx *c;
 
+    fds_take(&base);
+    c = create(0, 0, 4);
     REQUIRE(c);
     fdb_hold(c, b, 3, 320, 240, 1);
     REQUIRE(nvmpi_decoder_close(c) == 0);
-    REQUIRE(fdb_nfds() == base + 3);
+    REQUIRE(fds_check(&base, 3, "after close") == 0);
     fdb_give(&b[0]);                     /* the generation dies with its   */
-    REQUIRE(fdb_nfds() == base + 3);     /* LAST borrow, not before        */
+    REQUIRE(fds_check(&base, 3, "borrowed") == 0); /* LAST borrow, not before */
     fdb_give(&b[1]);
     fdb_give(&b[2]);
-    REQUIRE(fdb_nfds() == base);
+    REQUIRE(fds_check(&base, 0, "released") == 0);
     for (i = 0; i < 3; i++)
         REQUIRE(b[i].rel == NULL);
     return 0;
@@ -175,10 +169,13 @@ static int fd_count(void)
 static int res_change_borrowed(void)
 {
     struct fdb old[2], nw[4];
-    int i, base = fdb_nfds();
-    nvmpictx *c = create(0, 0, 4);
+    int i;
+    struct fd_snap base;
+    nvmpictx *c;
     long t0;
 
+    fds_take(&base);
+    c = create(0, 0, 4);
     REQUIRE(c);
     fdb_hold(c, old, 2, 320, 240, 1);
     t0 = fdb_ms();
@@ -203,7 +200,7 @@ static int res_change_borrowed(void)
         fdb_give(&nw[0]);
     }
     REQUIRE(nvmpi_decoder_close(c) == 0);
-    REQUIRE(fdb_nfds() == base);
+    REQUIRE(fds_check(&base, 0, "released") == 0);
     return 0;
 }
 
@@ -213,9 +210,12 @@ static int res_change_borrowed(void)
 static int flush_borrowed(void)
 {
     struct fdb b[2], n;
-    int i, base = fdb_nfds();
-    nvmpictx *c = create(0, 0, 4);
+    int i;
+    struct fd_snap base;
+    nvmpictx *c;
 
+    fds_take(&base);
+    c = create(0, 0, 4);
     REQUIRE(c);
     fdb_hold(c, b, 2, 320, 240, 1);
     REQUIRE(nvmpi_decoder_flush(c) == 0);
@@ -233,7 +233,7 @@ static int flush_borrowed(void)
         fdb_give(&n);
     }
     REQUIRE(nvmpi_decoder_close(c) == 0);
-    REQUIRE(fdb_nfds() == base);
+    REQUIRE(fds_check(&base, 0, "released") == 0);
     return 0;
 }
 
@@ -245,10 +245,13 @@ static int flush_borrowed(void)
 static int res_change_alloc_fault(void)
 {
     struct fdb old[2], nw;
-    int i, base = fdb_nfds();
-    nvmpictx *c = create(0, 0, 4);
+    int i;
+    struct fd_snap base;
+    nvmpictx *c;
     int got;
 
+    fds_take(&base);
+    c = create(0, 0, 4);
     REQUIRE(c);
     fdb_hold(c, old, 2, 320, 240, 1);
     got = fdb_step(c, &nw, 640, 360, 10);
@@ -264,7 +267,7 @@ static int res_change_alloc_fault(void)
         REQUIRE(fdb_check(&old[i]) == 0);
     fdb_give(&old[0]);
     fdb_give(&old[1]);
-    REQUIRE(fdb_nfds() == base);
+    REQUIRE(fds_check(&base, 0, "released") == 0);
     return 0;
 }
 

@@ -19,8 +19,8 @@
 #define NVMPI_TEST_DEC_FD_CASE_H
 
 #include "dec_fd_fixture.h"
+#include "fd_snap.h"
 
-#include <dirent.h>
 #include <fcntl.h>
 #include <time.h>
 
@@ -42,19 +42,6 @@ static long decfd_ms(void)
 
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return ts.tv_sec * 1000L + ts.tv_nsec / 1000000L;
-}
-
-static int decfd_nfds(void)
-{
-    DIR *d = opendir("/proc/self/fd");
-    int n = 0;
-
-    if (!d)
-        return -1;
-    while (readdir(d))
-        n++;
-    closedir(d);
-    return n;
 }
 
 /* fd is still open and still a buffer big enough for pitch x height. */
@@ -92,27 +79,56 @@ static int decfd_step(nvmpictx *ctx, const unsigned char *au, size_t n,
                                       &b->ts, &b->rel, &b->op, true);
 }
 
-static int test_decoder_res_change_borrowed(void)
+/* Decoder for these cases: pool of 4, no reordering, generous first wait. */
+static nvmpictx *decfd_create(void)
 {
     nvDecParam param;
-    nvmpictx *ctx;
-    struct decfd_b old[2], nw;
-    int base = decfd_nfds(), i;
-    long t0;
 
-#ifdef NVMPI_MOCK_JPEG
-    /* ctest forces the mock decoder to 320x240 for the AV1 case; here the
-     * mock must read the size from each SPS, like the driver. This test runs
-     * in its own forked child, so the other cases keep the forced size. */
-    unsetenv("NVMPI_MOCK_WIDTH");
-    unsetenv("NVMPI_MOCK_HEIGHT");
-#endif
     dec_param_init(&param, NV_VIDEO_CodingH264);
     param.pixFormat = NV_PIX_NV12;
     param.frame_pool_size = 4;
     param.disable_dpb = 1;       /* no reordering: one picture in, one out */
     param.wait_timeout = 2000;   /* ms; the first frame pays NVDEC start-up */
-    ctx = nvmpi_create_decoder(&param);
+    return nvmpi_create_decoder(&param);
+}
+
+/* Warm-up: create -> decode one frame of EACH stream -> close. NVIDIA
+ * libraries open descriptors lazily on first use (nvmap, VIC/NvBufSurface
+ * sessions, libv4l2 plugin, ...) and keep them for the process lifetime, so
+ * the descriptor baseline is taken only after this cycle. 0 ok, 77 skip. */
+static int decfd_warm(void)
+{
+    struct decfd_b b;
+    nvmpictx *ctx = decfd_create();
+
+    if (!ctx) return strict_mode ? 1 : 77;
+    if (decfd_step(ctx, decfd_a, decfd_a_len, 1, &b) != 0) {
+        nvmpi_decoder_close(ctx);
+        return strict_mode ? 1 : 77;
+    }
+    decfd_give(&b);
+    if (decfd_step(ctx, decfd_b, decfd_b_len, 2, &b) == 0)
+        decfd_give(&b);
+    return nvmpi_decoder_close(ctx) == 0 ? 0 : 1;
+}
+
+/* One run: borrow 2 frames of stream A, then (change != 0) switch to stream B
+ * or (control) feed A once more; close with the 2 old frames still borrowed;
+ * release them. Without the change nothing is rebuilt, so a leak that shows
+ * only with change != 0 belongs to the resolution-change path. Checks the
+ * rebuild, the borrows' survival and the descriptor set against `base`.
+ * 0 ok, 1 fail, 77 skip. */
+static int decfd_run(int change, const struct fd_snap *base)
+{
+    nvmpictx *ctx = decfd_create();
+    const unsigned char *nxt = change ? decfd_b : decfd_a;
+    size_t nxt_len = change ? decfd_b_len : decfd_a_len;
+    int nw_w = change ? DECFD_B_W : DECFD_A_W;
+    int nw_h = change ? DECFD_B_H : DECFD_A_H;
+    struct decfd_b old[2], nw;
+    int i;
+    long t0;
+
     if (!ctx) return strict_mode ? 1 : 77;
 
     for (i = 0; i < 2; i++) {    /* borrow two 320x240 frames */
@@ -133,10 +149,11 @@ static int test_decoder_res_change_borrowed(void)
     /* Resolution change with both borrowed. The old code never rebuilt the
      * pool (the new frame was reported 640 wide over a 320 pitch). */
     t0 = decfd_ms();
-    if (decfd_step(ctx, decfd_b, decfd_b_len, 10, &nw) != 0)
-        DECFD_FAIL("no 640x360 frame after the resolution change");
-    fprintf(stderr, "dec_fd: first 640x360 frame after %ld ms\n", decfd_ms() - t0);
-    if (nw.w != DECFD_B_W || nw.h != DECFD_B_H || nw.pitch < DECFD_B_W) {
+    if (decfd_step(ctx, nxt, nxt_len, 10, &nw) != 0)
+        DECFD_FAIL("no frame after the second unit");
+    fprintf(stderr, "dec_fd[%s]: next frame after %ld ms\n",
+            change ? "change" : "control", decfd_ms() - t0);
+    if (nw.w != nw_w || nw.h != nw_h || nw.pitch < nw_w) {
         fprintf(stderr, "dec_fd: got %dx%d pitch %d\n", nw.w, nw.h, nw.pitch);
         DECFD_FAIL("new frame size / pitch (pool not rebuilt)");
     }
@@ -156,10 +173,35 @@ static int test_decoder_res_change_borrowed(void)
             DECFD_FAIL("borrowed buffer lost at close");
     decfd_give(&old[0]);
     decfd_give(&old[1]);
-    if (decfd_nfds() != base) {
-        fprintf(stderr, "dec_fd: fds %d -> %d\n", base, decfd_nfds());
-        DECFD_FAIL("descriptors leaked after the last release");
-    }
+    return fds_check(base, 0, change ? "change" : "control") ? 1 : 0;
+}
+
+static int test_decoder_res_change_borrowed(void)
+{
+    struct fd_snap base;
+    int rc, ctl, chg;
+
+#ifdef NVMPI_MOCK_JPEG
+    /* ctest forces the mock decoder to 320x240 for the AV1 case; here the
+     * mock must read the size from each SPS, like the driver. This test runs
+     * in its own forked child, so the other cases keep the forced size. */
+    unsetenv("NVMPI_MOCK_WIDTH");
+    unsetenv("NVMPI_MOCK_HEIGHT");
+#endif
+    rc = decfd_warm();
+    if (rc) return rc;
+    fds_take(&base);             /* baseline AFTER the warm-up cycle */
+
+    /* Control first (no resolution change), then the real sequence; both
+     * always run so one log shows which path, if any, leaves descriptors. */
+    ctl = decfd_run(0, &base);
+    if (ctl == 77) return 77;
+    chg = decfd_run(1, &base);
+    if (chg == 77) return 77;
+    fprintf(stderr, "dec_fd: control(no change)=%s change=%s\n",
+            ctl ? "FAIL" : "ok", chg ? "FAIL" : "ok");
+    if (chg) DECFD_FAIL("resolution-change sequence (see messages above)");
+    if (ctl) DECFD_FAIL("control sequence leaked descriptors (see above)");
     return 0;
 }
 
