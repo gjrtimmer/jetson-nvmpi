@@ -3,6 +3,36 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.2.0 - 2026-10-20
+
+### Bug Fixes
+
+
+**enc**
+
+
+- Reject unsupported codecs before opening the encoder (#134)
+
+
+### Features
+
+
+**dec**
+
+
+- AV1 hardware decode (#7, #61)
+
+
+### Testing
+
+
+**api**
+
+
+- Shard the decoder mock suite in two (#130)
+- Use a 320x240 AV1 fixture (NVDEC rejects 64x64) (#7)
+
+
 ## 4.1.0 - 2026-10-20
 
 ### Bug Fixes
