@@ -34,8 +34,10 @@ include/
   nvmpi_log.h              NVMPI_LOG / NVMPI_LOG_SUB logging macros
   nvUtils2NvBuf.h          compile-time shim: legacy nvbuf_utils names -> NvBufSurface
 src/
-  nvmpi_dec_init.cpp       nvmpi_create_decoder, frame-pool alloc, VIC parameters
-  nvmpi_dec_api.cpp        put_packet, get_frame(_fd), flush, close
+  nvmpi_dec_init.cpp       nvmpi_create_decoder, VIC parameters
+  nvmpi_dec_pool.cpp       destination frame-pool alloc/free
+  nvmpi_dec_api.cpp        put_packet, get_frame(_fd)
+  nvmpi_dec_close.cpp      flush, close
   nvmpi_dec_capture.cpp    capture thread loop, resolution-change handling
   nvmpi_dec_planes.cpp     CAPTURE-plane alloc/teardown, colour format selection
   nvmpi_dec_internal.h     decoder context struct, macros
