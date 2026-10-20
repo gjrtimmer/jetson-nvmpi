@@ -234,6 +234,13 @@ else ()
 	message(STATUS "Using NvBufUtils API.")
 endif()
 
+if(NVMPI_MOCK)
+	# The NVIDIA NvJpegDecoder sample needs the Tegra libjpeg and the NVJPG
+	# engine, so in mock builds it can create but never decode. Swap in the
+	# behavioural model (mock/mock_jpegdec.cpp, issue #128).
+	list(REMOVE_ITEM JETSON_MULTIMEDIA_API_SRC ${JETSON_MULTIMEDIA_API_SRC_DIR}/NvJpegDecoder.cpp)
+	set(NVMPI_SRC ${NVMPI_SRC} ${CMAKE_CURRENT_SOURCE_DIR}/mock/mock_jpegdec.cpp)
+endif()
 set(NVMPI_SRC ${NVMPI_SRC} ${JETSON_MULTIMEDIA_API_SRC})
 
 # AV1 decode needs V4L2_PIX_FMT_AV1 from the L4T headers (R36 has it; R35 is
@@ -351,6 +358,8 @@ if(BUILD_TESTING)
   target_link_libraries(test_api PRIVATE nvmpi Threads::Threads)
   target_compile_definitions(test_api PRIVATE NVMPI_HAVE_AV1=${NVMPI_HAVE_AV1})
   if(NVMPI_MOCK)
+    # The JPEG fd cases run (instead of skipping on the missing NVJPG node).
+    target_compile_definitions(test_api PRIVATE NVMPI_MOCK_JPEG=1)
     # LD_LIBRARY_PATH order: mock libs first (real sonames), then the build
     # dir (libnvmpi.so), then stubs/ only for libs the mock does not provide
     # (libnvjpeg.so). Never register the stub-run "api" test in mock mode.
@@ -371,6 +380,16 @@ if(BUILD_TESTING)
         ENVIRONMENT "LD_LIBRARY_PATH=${NVMPI_MOCK_LD};NVMPI_TEST_SHARD=${k}/${NVMPI_DEC_SHARDS}"
         TIMEOUT 300)
     endforeach()
+    # JPEG DMA-BUF output against the NvJPEGDecoder model (mock-only, #128).
+    add_executable(test_api_jpeg_mock test/api/test_api_jpeg_mock.c)
+    # nvbufsurface.h: the test maps the pool surface behind each borrowed fd.
+    target_include_directories(test_api_jpeg_mock PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+      ${JETSON_MULTIMEDIA_API_INCLUDE_DIR} ${CUDA_INCLUDE_DIR})
+    target_link_libraries(test_api_jpeg_mock PRIVATE nvmpi ${LIB_NVBUFSURFACE} Threads::Threads)
+    add_test(NAME api_mock_jpeg COMMAND test_api_jpeg_mock)
+    set_tests_properties(api_mock_jpeg PROPERTIES
+      ENVIRONMENT "LD_LIBRARY_PATH=${NVMPI_MOCK_LD}"
+      TIMEOUT 300)
     # Encoder data path, teardown and fault matrix (mock-only).
     add_executable(test_api_enc_mock test/api/test_api_enc_mock.c)
     target_include_directories(test_api_enc_mock PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)

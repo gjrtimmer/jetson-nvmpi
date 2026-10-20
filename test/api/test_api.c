@@ -277,7 +277,7 @@ int main(void)
     fail += RUN_TEST(test_decoder_all_codecs);
     fail += RUN_TEST(test_encoder_hevc_create_close);
     fail += RUN_TEST(test_decoder_av1_frame);
-    /* JPEG DMA-BUF output: real NVJPG only, SKIP on stubs/mock. */
+    /* JPEG DMA-BUF output: real NVJPG or the mock model, SKIP on stubs. */
     fail += RUN_TEST(test_jpeg_fd_nv12);
     fail += RUN_TEST(test_jpeg_fd_yuv420);
     fail += RUN_TEST(test_jpeg_fd_close_order);

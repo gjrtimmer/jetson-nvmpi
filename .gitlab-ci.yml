@@ -365,8 +365,12 @@ release:test:api:hw:
 #                  blocking and non-blocking (EAGAIN) encode, key frame/IDR
 #                  and SPS/PPS placement, flush, teardown with frames in
 #                  flight, DMABUF input, and the same fault matrix
+#   api_mock_jpeg  JPEG DMA-BUF output (#4) against the NvJPEGDecoder model (#128):
+#                  geometry and pixels of a padded decoder output, release
+#                  after close / from another thread, resolution change with
+#                  borrowed frames, EAGAIN, fd counts, rejected input
 #
-# The eight ctests (api_mock_dec is 2 shards, api_mock_enc 3, NVMPI_TEST_SHARD, issue #130)
+# The nine ctests (api_mock_dec is 2 shards, api_mock_enc 3, NVMPI_TEST_SHARD, issue #130)
 # run in parallel (ctest -j): they share no state. Each is its
 # own process with its own mock instance; the only shared file is the
 # read-only /dev/v4l2-* placeholder symlinks scripts/mock-dev-nodes.sh makes
@@ -411,7 +415,7 @@ release:test:api:hw:
     # mock; RUNPATH/none cannot. Fail loudly if one sneaks in.
     - |
       for f in build-mock/test_api build-mock/test_api_dec_mock build-mock/test_api_enc_mock \
-               build-mock/libnvmpi.so build-mock/mock/test_mock; do
+               build-mock/test_api_jpeg_mock build-mock/libnvmpi.so build-mock/mock/test_mock; do
         [ -f "$f" ] || { echo "missing $f"; exit 1; }
         dyn="$(readelf -d "$f")"
         printf '%s\n' "$dyn" | grep -Ei 'rpath|runpath|needed' || true

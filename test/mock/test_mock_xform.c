@@ -127,3 +127,80 @@ void test_transform_nv12_i420(void)
     NvBufSurfaceDestroy(small);
     NvBufSurfaceDestroy(bad);
 }
+
+/* ABI twins of NvBufSurfTransformRect / NvBufSurfTransformParams (the mock
+ * and this test stay independent of the transform and CUDA headers). */
+struct xrect { uint32_t top, left, width, height; };
+struct xparams {
+    uint32_t flag;
+    int flip, filter;
+    struct xrect *src_rect, *dst_rect;
+};
+
+/* Count mismatches of dst against src pattern sampled at (x + ox, y + oy)
+ * for luma and (x + ox / 2, y + oy / 2) for chroma, or, when scale is set,
+ * at the nearest-neighbour position of a src_w x src_h source. */
+static unsigned crop_bad(NvBufSurface *d, unsigned ox, unsigned oy,
+                         unsigned scale, unsigned src_w, unsigned src_h)
+{
+    NvBufSurfaceParams *p = &d->surfaceList[0];
+    unsigned dw = p->planeParams.width[0], dh = p->planeParams.height[0];
+    unsigned x, y, k, bad = 0;
+    unsigned char *m0, *m1;
+
+    CHECK(NvBufSurfaceMap(d, 0, -1, NVBUF_MAP_READ) == 0);
+    m0 = p->mappedAddr.addr[0];
+    m1 = p->mappedAddr.addr[1];
+    for (y = 0; y < dh; y++)
+        for (x = 0; x < dw; x++) {
+            unsigned sx = scale ? x * src_w / dw : x + ox;
+            unsigned sy = scale ? y * src_h / dh : y + oy;
+
+            bad += m0[y * p->planeParams.pitch[0] + x] != pat(0, 0, sx, sy);
+        }
+    for (y = 0; y < p->planeParams.height[1]; y++)
+        for (x = 0; x < p->planeParams.width[1]; x++)
+            for (k = 0; k < 2; k++) {
+                unsigned sx = scale ? x * (src_w / 2) / p->planeParams.width[1]
+                                    : x + ox / 2;
+                unsigned sy = scale ? y * (src_h / 2) / p->planeParams.height[1]
+                                    : y + oy / 2;
+
+                bad += m1[y * p->planeParams.pitch[1] + x * 2 + k] !=
+                       pat(1, k, sx, sy);
+            }
+    return bad;
+}
+
+/* Crop windows are honoured only with CROP_SRC / CROP_DST set (like the
+ * VIC); a rect without its flag is ignored and the whole surface is scaled. */
+void test_transform_crop(void)
+{
+    NvBufSurface *src = mk(NVBUF_COLOR_FORMAT_NV12, 48, 32);
+    NvBufSurface *dst = mk(NVBUF_COLOR_FORMAT_NV12, 32, 16);
+    struct xrect sr = { 4, 8, 32, 16 };         /* top, left, w, h */
+    struct xrect dr = { 0, 0, 32, 16 };
+    struct xparams tp;
+
+    if (!src || !dst)
+        return;
+    fill_nv12(src);
+    memset(&tp, 0, sizeof(tp));
+    tp.src_rect = &sr;
+    tp.dst_rect = &dr;
+
+    tp.flag = 1;                                /* CROP_SRC */
+    CHECK(NvBufSurfTransform(src, dst, &tp) == 0);
+    CHECK(crop_bad(dst, 8, 4, 0, 0, 0) == 0);
+
+    tp.flag = 0;                                /* rects set, flags not */
+    CHECK(NvBufSurfTransform(src, dst, &tp) == 0);
+    CHECK(crop_bad(dst, 0, 0, 1, 48, 32) == 0);
+
+    tp.flag = 1;                                /* window outside src */
+    sr.left = 40;
+    CHECK(NvBufSurfTransform(src, dst, &tp) != 0);
+
+    NvBufSurfaceDestroy(src);
+    NvBufSurfaceDestroy(dst);
+}

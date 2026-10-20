@@ -54,5 +54,7 @@ void test_encoder_vui(void);
 void test_encoder_h264(void);
 /* test_mock_xform.c: NvBufSurfTransform NV12 <-> I420 conversion. */
 void test_transform_nv12_i420(void);
+/* test_mock_xform.c: NvBufSurfTransform crop flags (CROP_SRC / CROP_DST). */
+void test_transform_crop(void);
 
 #endif /* NVMPI_TEST_MOCK_TEST_H */

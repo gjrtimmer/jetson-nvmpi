@@ -11,8 +11,12 @@
  * (de)interleave, combinable with scaling; see mock_convert_420). Other
  * format pairs must have matching plane layouts, else XFORM_UNSUPP.
  *
- * Not modelled yet (decoder/encoder data models, #99/#100): crop rectangles,
- * flips, any other colour conversion (10-bit, 4:4:4, RGB), composite/blend,
+ * Crop: like the real VIC, src_rect / dst_rect are honoured ONLY when the
+ * matching transform_flag bit (CROP_SRC / CROP_DST) is set; otherwise the
+ * whole surface is used and the rect is ignored. A caller that fills a rect
+ * but forgets the flag gets a scaled picture, not a crop (issue #128).
+ *
+ * Not modelled yet (decoder/encoder data models, #99/#100): flips, any other colour conversion (10-bit, 4:4:4, RGB), composite/blend,
  * async sync objects.
  *
  * The CUDA/transform headers are not included: only the NvBufSurface layout
@@ -35,6 +39,21 @@ struct mock_cfg {
     void *cuda_stream;
 };
 static __thread struct mock_cfg t_cfg;
+
+/* ABI twins of NvBufSurfTransformRect {top, left, width, height} and of
+ * NvBufSurfTransformParams {flag, flip, filter, src_rect, dst_rect}. */
+struct mock_xrect {
+    uint32_t top, left, width, height;
+};
+struct mock_xparams {
+    uint32_t flag;
+    int      flip;
+    int      filter;
+    struct mock_xrect *src_rect;
+    struct mock_xrect *dst_rect;
+};
+#define XFORM_CROP_SRC 1u               /* NVBUFSURF_TRANSFORM_CROP_SRC */
+#define XFORM_CROP_DST 2u               /* NVBUFSURF_TRANSFORM_CROP_DST */
 
 /* Serialises the memcpy engine (see file comment). */
 static pthread_mutex_t g_xform_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -67,14 +86,30 @@ MOCK_EXPORT int NvBufSurfTransform(NvBufSurface *src, NvBufSurface *dst,
     uint32_t n, i;
     int rc = XFORM_OK;
 
-    (void)params;                      /* rects/flags: not modelled yet */
+    const struct mock_xparams *tp = params;
     if (!src || !dst || !src->surfaceList || !dst->surfaceList)
         return XFORM_BAD;
     n = src->numFilled < dst->batchSize ? src->numFilled : dst->batchSize;
     pthread_mutex_lock(&g_xform_lock);
-    for (i = 0; i < n && rc == XFORM_OK; i++)
-        if (mock_copy_params(&src->surfaceList[i], &dst->surfaceList[i]) < 0)
+    for (i = 0; i < n && rc == XFORM_OK; i++) {
+        /* Rect lists are indexed per batch entry, like the real API. */
+        struct mock_rect sr, dr;
+        const struct mock_rect *psr = NULL, *pdr = NULL;
+
+        if (tp && (tp->flag & XFORM_CROP_SRC) && tp->src_rect) {
+            sr = (struct mock_rect){tp->src_rect[i].left, tp->src_rect[i].top,
+                                    tp->src_rect[i].width, tp->src_rect[i].height};
+            psr = &sr;
+        }
+        if (tp && (tp->flag & XFORM_CROP_DST) && tp->dst_rect) {
+            dr = (struct mock_rect){tp->dst_rect[i].left, tp->dst_rect[i].top,
+                                    tp->dst_rect[i].width, tp->dst_rect[i].height};
+            pdr = &dr;
+        }
+        if (mock_copy_rect(&src->surfaceList[i], psr, &dst->surfaceList[i],
+                           pdr) < 0)
             rc = XFORM_UNSUPP;
+    }
     pthread_mutex_unlock(&g_xform_lock);
     if (rc)
         MOCK_ERR("NvBufSurfTransform: unsupported conversion");

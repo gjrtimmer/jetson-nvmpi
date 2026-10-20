@@ -3,11 +3,11 @@
  * (nvmpi_create_jpeg_decoder_fmt / nvmpi_jpeg_decoder_get_frame_fd).
  *
  * Included by test_api.c (uses its strict_mode). The cases need a real NVJPG
- * engine: on stub/mock builds there is no /dev/nvhost-nvjpg and the cases
- * report SKIP (exit 77). With
- * NVMPI_TEST_STRICT=1 (real hardware) they always run and a NULL create is
- * a failure.
- * The mock has no NvJPEGDecoder model; that is tracked separately.
+ * engine: on stub builds there is no /dev/nvhost-nvjpg and the cases report
+ * SKIP (exit 77). With NVMPI_TEST_STRICT=1 (real hardware) they always run
+ * and a NULL create is a failure. The mock build (NVMPI_MOCK_JPEG) runs them
+ * against the NvJPEGDecoder model (mock/mock_jpegdec.cpp, issue #128); the
+ * lifetime cases live in test_api_jpeg_mock.c.
  */
 #ifndef NVMPI_TEST_JPEG_FD_CASE_H
 #define NVMPI_TEST_JPEG_FD_CASE_H
@@ -87,13 +87,16 @@ static int jfd_check(const nvmpi_fd_frame *f, nvPixFormat fmt)
     return 0;
 }
 
-/* The mock build links the real NvJPEGDecoder sample class against a system
+/* A stub build links the real NvJPEGDecoder sample class against a system
  * libjpeg, so create succeeds there but decoding cannot work. Without the
- * NVJPG engine node (and not strict) the cases are skipped up front. */
+ * NVJPG engine node (and not strict, not the mock model) the cases are
+ * skipped up front. */
 static nvmpictx *jfd_create(nvPixFormat fmt, int pool)
 {
+#ifndef NVMPI_MOCK_JPEG
     if (!strict_mode && access("/dev/nvhost-nvjpg", F_OK) != 0)
         return NULL;
+#endif
     return nvmpi_create_jpeg_decoder_fmt(fmt, pool);
 }
 

@@ -33,6 +33,15 @@
 #define CASE_LOG_TAG   "[libnvmpi]["
 #define CASE_LOG_ERROR "[libnvmpi][E]"
 
+/* An error line is "[libnvmpi][E]: ..." (NVMPI_LOG) or
+ * "[libnvmpi][<sub>][E]: ..." (NVMPI_LOG_SUB, e.g. [jpeg]). The sub form was
+ * missed until issue #128, so JPEG errors never failed a strict case. */
+static inline int case_log_is_error(const char *line)
+{
+    return strstr(line, CASE_LOG_ERROR) ||
+           (strstr(line, CASE_LOG_TAG) && strstr(line, "][E]:"));
+}
+
 /* Count expected/unexpected libnvmpi errors in the (rewound) capture file. */
 static inline void case_log_scan(FILE *f, int is_fault, size_t *expected,
                                  size_t *unexpected)
@@ -45,7 +54,7 @@ static inline void case_log_scan(FILE *f, int is_fault, size_t *expected,
     /* getline(): no fixed buffer, so a long line is never split in two and
      * mis-classified. */
     while (getline(&line, &cap, f) >= 0) {
-        if (!strstr(line, CASE_LOG_ERROR))
+        if (!case_log_is_error(line))
             continue;
         if (is_fault)
             (*expected)++;
@@ -68,7 +77,7 @@ static inline void case_log_dump(FILE *f, int is_fault, int strict)
         const char *tag = NULL;
         int always = 0;                  /* shown even when not verbose   */
 
-        if (strstr(line, CASE_LOG_ERROR)) {
+        if (case_log_is_error(line)) {
             tag = is_fault ? "[expected] "
                            : (strict ? "[unexpected] " : "[libnvmpi] ");
             always = !is_fault && strict;
