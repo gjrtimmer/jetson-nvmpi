@@ -172,4 +172,32 @@ static inline int e_get(nvmpictx *ctx, int hevc, int wait, struct epkt *o)
     return 0;
 }
 
+/* Deadline for a put/get/EOS drain loop (#136): a wedged EOS path then fails
+ * with its state, well before the case alarm, instead of dying as a bare
+ * SIGALRM. Zero-init; the clock starts on the first call. Returns 1 to go on,
+ * 0 (after printing the state) once EOS_LOOP_MS has passed without EOS. */
+#define EOS_LOOP_MS 10000
+
+struct eos_watch { struct timespec t0; long iters; };
+
+static inline int eos_watch(struct eos_watch *w, int got, int eos, int last)
+{
+    struct timespec now;
+    long ms;
+
+    if (w->iters++ == 0)
+        clock_gettime(CLOCK_MONOTONIC, &w->t0);
+    if (eos)
+        return 1;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    ms = (now.tv_sec - w->t0.tv_sec) * 1000 +
+         (now.tv_nsec - w->t0.tv_nsec) / 1000000;
+    if (ms < EOS_LOOP_MS)
+        return 1;
+    fprintf(stderr, "EOS drain stuck %ld ms: packets=%d eos_seen=%d "
+            "iterations=%ld last_get_packet=%d\n", ms, got, eos, w->iters,
+            last);
+    return 0;
+}
+
 #endif /* NVMPI_TEST_ENC_MOCK_UTIL_H */

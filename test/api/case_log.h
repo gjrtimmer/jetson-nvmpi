@@ -18,6 +18,7 @@
 #ifndef NVMPI_TEST_CASE_LOG_H
 #define NVMPI_TEST_CASE_LOG_H
 
+#include "hang_dump.h"
 #include "leak_check.h"
 
 #include <errno.h>
@@ -133,7 +134,7 @@ static inline uint64_t case_log_now_ms(void)
 }
 
 /*
- * Fork body(arg) with NVMPI_MOCK_FAULT=fault (if non-NULL), alarm() timeout
+ * Fork body(arg) with NVMPI_MOCK_FAULT=fault (if non-NULL), hang timeout
  * and stderr captured; print the result line. Returns 0 pass, 1 fail.
  * strict: a [libnvmpi][E] outside a fault case fails the case.
  */
@@ -163,7 +164,7 @@ static inline int case_log_run(const char *name, const char *fault,
         return 1;
     }
     if (pid == 0) {
-        alarm(timeout_s);                /* a hang dies with SIGALRM      */
+        hang_arm(timeout_s);             /* hang: stacks, then SIGALRM    */
         if (fault)
             setenv("NVMPI_MOCK_FAULT", fault, 1);
         /* Child stderr -> capture file (shared offset, parent rewinds). */

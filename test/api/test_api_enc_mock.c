@@ -106,6 +106,7 @@ static int det_run(uint64_t *hash)
     nvmpictx *ctx = e_create(&c);
     struct epkt p;
     int i, got = 0, r, eos = 0;
+    struct eos_watch w = { { 0, 0 }, 0 };
 
     REQUIRE(ctx);
     *hash = 1469598103934665603ull;
@@ -122,10 +123,8 @@ static int det_run(uint64_t *hash)
     REQUIRE(nvmpi_encoder_put_frame(ctx, NULL) == 0);       /* EOS */
     while (!eos) {
         r = e_get(ctx, 0, 0, &p);      /* no wait: EOS spin is inside */
-        if (r == 0)
-            FOLD(p);
-        else
-            eos = r == -2;
+        if (r == 0) FOLD(p); else eos = r == -2;
+        REQUIRE(eos_watch(&w, got, eos, r));
     }
 #undef FOLD
     REQUIRE(got == DET_FRAMES);
