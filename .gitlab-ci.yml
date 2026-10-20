@@ -364,7 +364,8 @@ release:test:api:hw:
 #                  and SPS/PPS placement, flush, teardown with frames in
 #                  flight, DMABUF input, and the same fault matrix
 #
-# The five ctests run in parallel (ctest -j): they share no state. Each is its
+# The seven ctests (api_mock_enc is 3 shards, NVMPI_TEST_SHARD, issue #130)
+# run in parallel (ctest -j): they share no state. Each is its
 # own process with its own mock instance; the only shared file is the
 # read-only /dev/v4l2-* placeholder symlinks scripts/mock-dev-nodes.sh makes
 # before ctest starts, and case_log.h captures stderr in per-process
