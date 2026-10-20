@@ -146,7 +146,7 @@ static int decode_n(unsigned hint_w, unsigned hint_h)
 }
 
 static int decode_plain(void) { return decode_n(0, 0); }
-static int decode_hint(void) { return decode_n(640, 360); }
+static int decode_hint(void) { (void)malloc(77); return decode_n(640, 360); }
 
 static int decode_batched(void)
 {
