@@ -3,6 +3,17 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.0.5 - 2026-10-20
+
+### Testing
+
+
+**mock**
+
+
+- Emit real HEVC VPS/SPS/PPS from the encoder model (#108)
+
+
 ## 4.0.4 - 2026-10-20
 
 ### CI
