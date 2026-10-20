@@ -87,6 +87,34 @@ static inline void case_log_dump(FILE *f, int is_fault, int strict)
     free(line);
 }
 
+/*
+ * Sharding (issue #130): NVMPI_TEST_SHARD="k/n" makes a suite run only the
+ * cases whose index i satisfies i % n == k, so ctest can run n shards of one
+ * binary side by side. Unset: never skip. A malformed value aborts instead of
+ * silently running everything (or nothing), which would hide missing cases.
+ * Env var, not argv, so the optional argv[1] name filter keeps working.
+ */
+static inline int case_shard_skip(size_t i)
+{
+    const char *v = getenv("NVMPI_TEST_SHARD");
+    char *end = NULL;
+    long k, n;
+
+    if (!v)
+        return 0;
+    k = strtol(v, &end, 10);
+    if (end == v || *end != '/' || k < 0)
+        goto bad;
+    v = end + 1;
+    n = strtol(v, &end, 10);
+    if (end == v || *end != '\0' || n < 1 || k >= n)
+        goto bad;
+    return (long)(i % (size_t)n) != k;
+bad:
+    fprintf(stderr, "NVMPI_TEST_SHARD must be \"k/n\" with 0 <= k < n\n");
+    exit(2);
+}
+
 static inline uint64_t case_log_now_ms(void)
 {
     struct timespec ts;

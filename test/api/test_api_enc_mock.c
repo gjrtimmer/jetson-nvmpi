@@ -388,6 +388,7 @@ int main(int argc, char **argv)
     for (i = 0; i < sizeof(k_cases) / sizeof(k_cases[0]); i++) {
         if (argc > 1 && strstr(k_cases[i].name, argv[1]) == NULL)
             continue;                    /* optional name filter           */
+        if (case_shard_skip(i)) continue;
         fails += run_case(&k_cases[i]);
         ran++;
     }

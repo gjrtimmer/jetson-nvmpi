@@ -328,8 +328,17 @@ if(BUILD_TESTING)
     add_executable(test_api_enc_mock test/api/test_api_enc_mock.c)
     target_include_directories(test_api_enc_mock PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_link_libraries(test_api_enc_mock PRIVATE nvmpi Threads::Threads)
-    add_test(NAME api_mock_enc COMMAND test_api_enc_mock)
-    set_tests_properties(mock_selftest api_mock api_mock_dec api_mock_enc PROPERTIES
+    # Encoder suite in 3 shards (NVMPI_TEST_SHARD=k/n, see case_log.h): the
+    # ASan job is bound by its longest ctest, so one big suite is split.
+    set(NVMPI_ENC_SHARDS 3)
+    math(EXPR NVMPI_ENC_LAST "${NVMPI_ENC_SHARDS} - 1")
+    foreach(k RANGE ${NVMPI_ENC_LAST})
+      add_test(NAME api_mock_enc_${k} COMMAND test_api_enc_mock)
+      set_tests_properties(api_mock_enc_${k} PROPERTIES
+        ENVIRONMENT "LD_LIBRARY_PATH=${NVMPI_MOCK_LD};NVMPI_TEST_SHARD=${k}/${NVMPI_ENC_SHARDS}"
+        TIMEOUT 300)
+    endforeach()
+    set_tests_properties(mock_selftest api_mock api_mock_dec PROPERTIES
       ENVIRONMENT "LD_LIBRARY_PATH=${NVMPI_MOCK_LD}"
       TIMEOUT 300)
   else()
