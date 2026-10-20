@@ -29,6 +29,7 @@ void nvmpi_enc_translate_params(nvmpi_enc_ctx* ctx, const nvEncParam* param)
 	ctx->height=param->height;
 	ctx->enableLossless=false;
 	ctx->bitrate=param->bitrate;
+	ctx->peak_bitrate=param->peak_bitrate;
 	ctx->ratecontrol = V4L2_MPEG_VIDEO_BITRATE_MODE_CBR;
 	ctx->idr_interval = param->idr_interval;
 	ctx->fps_n = param->fps_n;

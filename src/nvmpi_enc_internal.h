@@ -47,7 +47,7 @@ struct nvmpi_enc_ctx : nvmpictx
 	uint32_t height;
 	uint32_t profile;              //V4L2 H.264/H.265 profile enum value
 	uint32_t bitrate;              //target bitrate (bit/s)
-	uint32_t peak_bitrate;         //VBR peak bitrate (bit/s)
+	uint32_t peak_bitrate{0};      //VBR peak bitrate (bit/s)
 	uint32_t raw_pixfmt;           //V4L2 fourcc of the raw input frames
 	uint32_t encoder_pixfmt;       //V4L2 fourcc of the compressed output (H264/H265)
 	uint32_t iframe_interval;
