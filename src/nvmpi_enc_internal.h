@@ -49,7 +49,7 @@ struct nvmpi_enc_ctx : nvmpictx
 	uint32_t bitrate;              //target bitrate (bit/s)
 	uint32_t peak_bitrate{0};      //VBR peak bitrate (bit/s)
 	uint32_t raw_pixfmt;           //V4L2 fourcc of the raw input frames
-	uint32_t encoder_pixfmt;       //V4L2 fourcc of the compressed output (H264/H265)
+	uint32_t encoder_pixfmt;       //V4L2 fourcc of the compressed output (H264/H265/AV1)
 	uint32_t iframe_interval;
 	uint32_t idr_interval;
 	uint32_t fps_n;
@@ -218,3 +218,13 @@ int nvmpi_enc_stop_dq_thread(nvmpi_enc_ctx* ctx);
 void nvmpi_enc_translate_params(nvmpi_enc_ctx* ctx, const nvEncParam* param);
 int nvmpi_enc_apply_gop_profile_ctrls(nvmpi_enc_ctx* ctx, const nvEncParam* param);
 int nvmpi_enc_apply_stream_ctrls(nvmpi_enc_ctx* ctx, const nvEncParam* param);
+//nvmpi_enc_av1_*: defined in nvmpi_enc_av1.cpp (#8). pixfmt returns the AV1
+//CAPTURE fourcc, or 0 when the L4T headers lack the AV1 encode controls
+//(create then returns NULL). check validates the request (8-bit only) before
+//anything is allocated; translate neutralizes the H.264/HEVC-only ctx fields
+//after nvmpi_enc_translate_params(); apply_ctrls programs the AV1 controls
+//(no IVF headers) before the planes are set up and returns 0 or -1.
+uint32_t nvmpi_enc_av1_pixfmt(void);
+bool nvmpi_enc_av1_check(const nvEncParam* param);
+void nvmpi_enc_av1_translate(nvmpi_enc_ctx* ctx);
+int nvmpi_enc_av1_apply_ctrls(nvmpi_enc_ctx* ctx);

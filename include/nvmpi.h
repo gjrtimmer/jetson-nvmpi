@@ -55,7 +55,8 @@ typedef enum {
 
 //Compressed bitstream codec selector. Decode supports all entries (AV1 only
 //where the L4T headers define V4L2_PIX_FMT_AV1, i.e. JetPack 6; create returns
-//NULL otherwise); encode supports only H.264 and HEVC (see https://github.com/gjrtimmer/jetson-ffmpeg/wiki/Development-Guide).
+//NULL otherwise); encode supports H.264, HEVC and AV1 (AV1 encode: 8-bit 4:2:0 only, JetPack 6 headers; create returns
+//NULL otherwise; one OBU temporal unit per packet, see https://github.com/gjrtimmer/jetson-ffmpeg/wiki/Development-Guide).
 typedef enum {
 	NV_VIDEO_CodingUnused,
 	NV_VIDEO_CodingH264,             /**< H.264 */
@@ -65,7 +66,7 @@ typedef enum {
 	NV_VIDEO_CodingVP9,                /**< VP9 */
 	NV_VIDEO_CodingHEVC,               /**< H.265/HEVC */
 	NV_VIDEO_CodingMJPEG,              /**< MJPEG (via NvJPEGDecoder, not V4L2) */
-	NV_VIDEO_CodingAV1,                /**< AV1 (decode only; appended last to keep ABI) */
+	NV_VIDEO_CodingAV1,                /**< AV1 (appended last to keep ABI) */
 } nvCodingType;
 
 //Simple width/height pair (used for the optional decoder resize target).

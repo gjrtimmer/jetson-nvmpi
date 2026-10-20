@@ -20,6 +20,7 @@
  *                           and forward declarations.
  *   nvmpi_enc_params.cpp  — nvEncParam -> ctx translation (profile/level/
  *                           preset maps) and H.264/HEVC control programming.
+ *   nvmpi_enc_av1.cpp     — AV1 fourcc gate, request checks and controls (#8).
  *   nvmpi_enc_output.cpp  — encoder_capture_plane_dq_callback and
  *                           setup_output_dmabuf (OUTPUT-plane DMA path).
  */
@@ -37,22 +38,36 @@ nvmpictx* nvmpi_create_encoder(nvEncParam* param)
 	int ret;
 	log_level = LOG_LEVEL_INFO;
 	/* Validate the codec before anything is allocated or any device is
-	 * opened: only H.264 and HEVC are encodable, and an unset fourcc would
+	 * opened: only H.264, HEVC and AV1 are encodable, and an unset fourcc would
 	 * otherwise reach the format negotiation (#134). */
 	uint32_t pixfmt;
 	if(param->codingType==NV_VIDEO_CodingH264)
 		pixfmt=V4L2_PIX_FMT_H264;
 	else if(param->codingType==NV_VIDEO_CodingHEVC)
 		pixfmt=V4L2_PIX_FMT_H265;
+	else if(param->codingType==NV_VIDEO_CodingAV1)
+	{
+		/* AV1 (#8): 0 = headers lack the AV1 encode controls (JetPack 5). */
+		pixfmt=nvmpi_enc_av1_pixfmt();
+		if(!pixfmt)
+		{
+			NVMPI_LOG(NVMPI_LOG_ERROR, "AV1 encode not supported by this L4T build");
+			return NULL;
+		}
+		if(!nvmpi_enc_av1_check(param))
+			return NULL;
+	}
 	else
 	{
-		NVMPI_LOG(NVMPI_LOG_ERROR, "Unsupported encoder codingType %d (H.264 and HEVC only)", (int)param->codingType);
+		NVMPI_LOG(NVMPI_LOG_ERROR, "Unsupported encoder codingType %d (H.264, HEVC and AV1 only)", (int)param->codingType);
 		return NULL;
 	}
 	nvmpi_enc_ctx *ctx=new nvmpi_enc_ctx;
 	ctx->encoder_pixfmt=pixfmt;
 	/* Scalar nvEncParam -> ctx translation (profile/level/preset maps). */
 	nvmpi_enc_translate_params(ctx, param);
+	if(param->codingType==NV_VIDEO_CodingAV1)
+		nvmpi_enc_av1_translate(ctx);	/* drop H.264/HEVC-only settings */
 	ctx->pktPool = new NVMPI_bufPool<nvPacket*>();
 	/* Always allocate the output-plane fd array: used by both compile-time
 	 * DMA mode (OUTPLANE_MEMTYPE_DMA) and runtime external DMABUF mode
@@ -243,6 +258,9 @@ nvmpictx* nvmpi_create_encoder(nvEncParam* param)
 
 	/* POC type, SPS/PPS at IDR, VUI, CABAC, AUD. */
 	if (nvmpi_enc_apply_stream_ctrls(ctx, param) < 0)
+		goto cleanup;
+	/* AV1: raw OBU output instead of IVF, before the planes are set up. */
+	if (param->codingType == NV_VIDEO_CodingAV1 && nvmpi_enc_av1_apply_ctrls(ctx) < 0)
 		goto cleanup;
 
 	ret = ctx->enc->setFrameRate(ctx->fps_n, ctx->fps_d);

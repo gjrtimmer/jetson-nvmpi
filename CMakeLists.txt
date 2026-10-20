@@ -206,6 +206,7 @@ set(NVMPI_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_close.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_enc_init.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_enc_params.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_enc_av1.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_enc_input.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_enc_input_fd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_enc_api.cpp
@@ -270,6 +271,29 @@ endif()
 if(NVMPI_FORCE_NO_AV1)
 	add_definitions(-DNVMPI_NO_AV1)
 endif()
+
+# AV1 encode (#8) additionally needs the encoder control that switches the IVF
+# framing off; R35 headers lack it, so create returns NULL there. The gate is
+# passed to the library and the tests as NVMPI_HAVE_AV1_ENC (0/1).
+# NVMPI_FORCE_NO_AV1_ENC is test-only (exercises the NULL path on an R36 box);
+# NVMPI_FORCE_NO_AV1 disables AV1 encode as well.
+option(NVMPI_FORCE_NO_AV1_ENC "Test only: build as if the AV1 encode controls were missing (AV1 encode create returns NULL)." OFF)
+set(CMAKE_REQUIRED_INCLUDES ${NVMPI_INCLUDE_DIRS})
+check_cxx_source_compiles("
+#include <linux/videodev2.h>
+#include \"v4l2_nv_extensions.h\"
+#if !defined(V4L2_PIX_FMT_AV1) || !defined(V4L2_CID_MPEG_VIDEOENC_AV1_HEADERS_WITH_FRAME)
+#error no AV1 encode controls
+#endif
+int main() { return 0; }" NVMPI_HEADERS_HAVE_AV1_ENC)
+unset(CMAKE_REQUIRED_INCLUDES)
+if(NVMPI_HEADERS_HAVE_AV1_ENC AND NOT NVMPI_FORCE_NO_AV1 AND NOT NVMPI_FORCE_NO_AV1_ENC)
+	set(NVMPI_HAVE_AV1_ENC 1)
+else()
+	set(NVMPI_HAVE_AV1_ENC 0)
+endif()
+add_definitions(-DNVMPI_HAVE_AV1_ENC=${NVMPI_HAVE_AV1_ENC})
+message(STATUS "AV1 encode: NVMPI_HAVE_AV1_ENC=${NVMPI_HAVE_AV1_ENC} (headers have the controls: ${NVMPI_HEADERS_HAVE_AV1_ENC})")
 message(STATUS "AV1 decode: NVMPI_HAVE_AV1=${NVMPI_HAVE_AV1} (headers define V4L2_PIX_FMT_AV1: ${NVMPI_HEADERS_HAVE_AV1}, NVMPI_FORCE_NO_AV1=${NVMPI_FORCE_NO_AV1})")
 
 # Tegra's custom libjpeg.so.8 exports jpeg_set_hardware_acceleration_parameters_{enc,dec}
