@@ -398,9 +398,12 @@ release:test:api:hw:
     # RPATH would beat LD_LIBRARY_PATH and could pull stubs/ in front of the
     # mock; RUNPATH/none cannot. Fail loudly if one sneaks in.
     - |
-      for f in build-mock/test_api build-mock/libnvmpi.so build-mock/test_mock; do
-        readelf -d "$f" | grep -Ei 'rpath|runpath|needed' || true
-        if readelf -d "$f" | grep -q '(RPATH)'; then echo "DT_RPATH in $f: would shadow the mock"; exit 1; fi
+      for f in build-mock/test_api build-mock/test_api_dec_mock build-mock/test_api_enc_mock \
+               build-mock/libnvmpi.so build-mock/mock/test_mock; do
+        [ -f "$f" ] || { echo "missing $f"; exit 1; }
+        dyn="$(readelf -d "$f")"
+        printf '%s\n' "$dyn" | grep -Ei 'rpath|runpath|needed' || true
+        if printf '%s\n' "$dyn" | grep -q '(RPATH)'; then echo "DT_RPATH in $f: would shadow the mock"; exit 1; fi
       done
     - export LD_LIBRARY_PATH="${CI_PROJECT_DIR}/build-mock/mock:${CI_PROJECT_DIR}/build-mock:${CI_PROJECT_DIR}/stubs"
     # Proof the mock (not the stubs) is what test_api loads.
@@ -624,9 +627,6 @@ release:test:deb:hw:
   image:
     name: "${RELEASE_IMAGE}"
     pull_policy: if-not-present
-  variables:
-    GIT_DEPTH: "0"   # full history + tags for git-cliff
-  script:
 
 # Tags: changelog (NOTES.md artifact for release:gitlab/release:github) +
 # upload; also needs the hw deb test.
@@ -635,6 +635,9 @@ upload:s3:
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/'
   needs: ["dist:jp6", "dist:jp5", "test:deb:jp6", "test:deb:jp5", "release:test:deb:hw"]
+  variables:
+    GIT_DEPTH: "0"   # full history + tags for git-cliff
+  script:
     - curl --version | head -1
     - git fetch --tags --force || true
     - bash ./scripts/changelog.sh
@@ -644,9 +647,6 @@ upload:s3:
       - NOTES.md
     expire_in: 1 week
 
-# ---------------------------------------------------------------------------
-# Stage: release — generic package registry + GitLab Release. Tag pipelines
-# only, after the S3 upload. Independent of release:github (neither needs the
 # Default branch: snapshot upload only (no changelog, no artifacts).
 upload:s3:snapshot:
   extends: .upload-s3
@@ -657,6 +657,9 @@ upload:s3:snapshot:
     - curl --version | head -1
     - bash ./scripts/upload-s3.sh "snapshots/${CI_COMMIT_SHORT_SHA}"
 
+# ---------------------------------------------------------------------------
+# Stage: release — generic package registry + GitLab Release. Tag pipelines
+# only, after the S3 upload. Independent of release:github (neither needs the
 # other, so one failing does not block the other).
 # ---------------------------------------------------------------------------
 release:gitlab:
