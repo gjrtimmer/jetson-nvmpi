@@ -187,6 +187,7 @@ static void encode_frame(struct mock_ctx *ctx, struct enc_model *m, int oi, int 
     au.key = key;
     au.headers = idr && (m->frames == 0 || m->headers_at_idr);
     au.seq = m->seq++;
+    au.poc = idr ? 0 : m->since_idr;     /* since_idr counts the last IDR */
     n = write_au(ctx, ci, &au);
     flags = n ? 0 : V4L2_BUF_FLAG_ERROR;
     flags |= key ? V4L2_BUF_FLAG_KEYFRAME : V4L2_BUF_FLAG_PFRAME;

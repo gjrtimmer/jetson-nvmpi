@@ -16,6 +16,7 @@ struct mock_ctx;
  * any CAPTURE buffer libnvmpi requests (NVMPI_ENC_CHUNK_SIZE = 10 MiB). */
 #define MOCK_ENC_AU_MAX 1024u
 #define MOCK_ENC_MAX_DIM 8192u        /* same bound as the decoder model   */
+#define MOCK_ENC_SLICE_MAX 96u        /* canned slice data bytes (IDR)     */
 #define MOCK_ENC_MAX_LATENCY 32u      /* NVMPI_MOCK_ENC_LATENCY bound      */
 
 /* Per-device encoder state. ctx->model points at one; ctx->mu guards it. */
@@ -42,11 +43,19 @@ struct mock_enc_au {
     bool     key;                  /* key frame (IDR, or periodic I)         */
     bool     headers;              /* prepend SPS+PPS (+VPS for HEVC)        */
     uint32_t seq;                  /* varies slice bytes frame to frame      */
+    uint32_t poc;                  /* frames since the last IDR (HEVC POC)   */
 };
 
 /* Render the access unit as Annex-B into out (cap bytes). Returns the size,
  * 0 when cap is too small or the format is not H.264/HEVC. */
 size_t mock_enc_build_au(const struct mock_enc_au *au, uint8_t *out, size_t cap);
+
+/* mock_enc_hevc.c: real HEVC VPS+SPS+PPS for a w x h picture, and one slice
+ * NAL (nal_type 19/21/1) with a real slice header followed by blen canned
+ * body bytes. Both return the bytes written, 0 when room is too small. */
+size_t mock_enc_hevc_params(uint8_t *out, size_t room, uint32_t w, uint32_t h);
+size_t mock_enc_hevc_slice(uint8_t *out, size_t room, unsigned nal_type,
+                           uint32_t poc, const uint8_t *body, size_t blen);
 
 /* mock_enc_ctl.c: GOP/IDR/header controls and the metadata query. Same
  * contract as mock_ops.on_ioctl (1 = handled). ctx->mu held. */

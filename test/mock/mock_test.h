@@ -44,6 +44,8 @@ void test_decoder_model(void);
 void test_fault_injection(void);
 /* test_mock_enc.c: encoder model. */
 void test_encoder_model(void);
+/* test_mock_hevc.c: HEVC VPS/SPS/PPS of the encoder model. */
+void test_encoder_hevc_params(void);
 /* test_mock_xform.c: NvBufSurfTransform NV12 <-> I420 conversion. */
 void test_transform_nv12_i420(void);
 
