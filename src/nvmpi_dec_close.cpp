@@ -7,6 +7,7 @@
  *   - nvmpi_decoder_close() — full teardown.
  */
 #include "nvmpi_dec_internal.h"
+#include "nvmpi_timing.h"
 
 //Public API: shut the decoder down and free everything.
 //
@@ -70,6 +71,7 @@ int nvmpi_decoder_close(nvmpictx* h)
 	if (!ctx)
 		return -1;
 
+	NvmpiTimer tm("dec_close");        /* NVMPI_TIMING=1 only; no-op otherwise */
 	ctx->eos.store(true);
 	/* Unblock any get_frame() caller blocked in dqFilledBuf(timeout)
 	 * before STREAMOFF — otherwise the consumer hangs until its timeout
@@ -80,6 +82,7 @@ int nvmpi_decoder_close(nvmpictx* h)
 	{
 		ctx->dec_capture_loop.join();
 	}
+	tm.phase("eos_to_join");           /* capture-thread exit latency (#105) */
 
 #ifndef WITH_NVUTILS
 	if (ctx->numberCaptureBuffers > 0)
@@ -107,5 +110,7 @@ int nvmpi_decoder_close(nvmpictx* h)
 	ctx->dec = nullptr;
 
 	delete ctx;
+
+	tm.total();                        /* ctx is gone; tm lives on the stack */
 	return 0;
 }

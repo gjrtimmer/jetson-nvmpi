@@ -272,6 +272,8 @@ static int fault_case(const struct tcase *t)
     return fault_run(t->hint, t->expect);
 }
 
+#include "dec_mock_latency.h"
+
 static const struct tcase k_cases[] = {
     { "decode_plain", NULL, decode_plain, 0, 0 },
     { "decode_hint", NULL, decode_hint, 0, 0 },
@@ -279,6 +281,8 @@ static const struct tcase k_cases[] = {
     { "resolution_change", NULL, resolution_change, 0, 0 },
     { "teardown_undrained", NULL, teardown_undrained, 0, 0 },
     { "teardown_no_data", NULL, teardown_no_data, 0, 0 },
+    { "teardown_no_data_latency", NULL, teardown_no_data_latency, 0, 0 },
+    { "teardown_no_data_hint_latency", NULL, teardown_no_data_hint_latency, 0, 0 },
     { "flush_blocked", NULL, flush_blocked, 0, 0 },
     /* fault matrix: fn == NULL -> fault_case() */
     { "fault_none_control", "dqbuf@9999", NULL, 0, 0 },

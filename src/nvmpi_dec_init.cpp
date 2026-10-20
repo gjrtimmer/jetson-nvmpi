@@ -29,6 +29,7 @@
  *   nvmpi_dec_close.cpp   — flush and close.
  */
 #include "nvmpi_dec_internal.h"
+#include "nvmpi_timing.h"
 
 //Query the actual plane geometry (count, pitch, height, bytes-per-line) of
 //one freshly allocated dst_dma frame buffer and cache it in the context.
@@ -152,6 +153,7 @@ nvmpictx* nvmpi_create_decoder(nvDecParam* param)
 	}
 #endif
 
+	NvmpiTimer tm("dec_create");       /* NVMPI_TIMING=1 only (#105) */
 	nvmpi_dec_ctx* ctx=new nvmpi_dec_ctx();
 
 	/* Open the V4L2 decoder device. Retry up to 3 times with 100ms
@@ -224,6 +226,7 @@ nvmpictx* nvmpi_create_decoder(nvDecParam* param)
 		return NULL;
 	}
 
+	tm.phase("probe_and_createVideoDecoder");
 	ret=ctx->dec->subscribeEvent(V4L2_EVENT_RESOLUTION_CHANGE, 0, 0);
 	if (ret < 0)
 	{
@@ -233,6 +236,7 @@ nvmpictx* nvmpi_create_decoder(nvDecParam* param)
 		return NULL;
 	}
 
+	tm.phase("subscribeEvent");
 	ctx->frame_pool_size = param->frame_pool_size;
 	ctx->max_perf = param->max_perf;
 	ctx->disable_dpb = param->disable_dpb;
@@ -286,6 +290,8 @@ nvmpictx* nvmpi_create_decoder(nvDecParam* param)
 		return NULL;
 	}
 
+	tm.phase("setOutputPlaneFormat");
+
 	//input mode 0 = feed complete NAL units / frames per buffer
 	ret = ctx->dec->setFrameInputMode(0);
 	if (ret < 0)
@@ -295,6 +301,8 @@ nvmpictx* nvmpi_create_decoder(nvDecParam* param)
 		delete ctx;
 		return NULL;
 	}
+
+	tm.phase("setFrameInputMode");
 
 	if(ctx->disable_dpb)
 	{
@@ -318,6 +326,8 @@ nvmpictx* nvmpi_create_decoder(nvDecParam* param)
 		}
 	}
 
+	tm.phase("disableDPB_maxperf");
+
 	//10 USERPTR buffers on the OUTPUT plane; packet data is memcpy'd into
 	//them in nvmpi_decoder_put_packet()
 	ret = ctx->dec->output_plane.setupPlane(V4L2_MEMORY_USERPTR, 10, false, true);
@@ -328,6 +338,8 @@ nvmpictx* nvmpi_create_decoder(nvDecParam* param)
 		delete ctx;
 		return NULL;
 	}
+
+	tm.phase("setupPlane");
 
 	/* Capture the return value — previous code tested stale ret from
 	 * setupPlane(), silently missing setStreamStatus failures. */
@@ -340,6 +352,8 @@ nvmpictx* nvmpi_create_decoder(nvDecParam* param)
 		delete ctx;
 		return NULL;
 	}
+
+	tm.phase("STREAMON");
 
 	ctx->out_pixfmt=param->pixFormat;
 	ctx->resized = param->resized;
@@ -373,8 +387,12 @@ nvmpictx* nvmpi_create_decoder(nvDecParam* param)
 		          ctx->output_width, ctx->output_height);
 	}
 
+	tm.phase("frame_pool");
+
 	ctx->dec_capture_loop = std::thread(dec_capture_loop_fcn,ctx);
 	pthread_setname_np(ctx->dec_capture_loop.native_handle(), "dec_capture");
+	tm.phase("thread_spawn");
+	tm.total();
 
 	return ctx;
 }

@@ -1,5 +1,10 @@
 #include "nvmpi_dec_internal.h"
 #include <pthread.h>
+#include "nvmpi_timing.h"
+
+/* Slice length of the pre-event dqEvent poll: bounds how long close()/flush()
+ * wait for a capture thread that is still waiting for the first event. */
+#define EVENT_POLL_MS 50
 
 /* Defined in nvmpi_vic.cpp — serializes NvBufSurfTransform calls to
  * prevent driver deadlock between capture thread and filter thread. */
@@ -142,13 +147,22 @@ void dec_capture_loop_fcn(void *arg)
 	nvmpi_frame_buffer* fb = NULL;
 	bool got_resolution_change = false;
 
+    NvmpiTimer tm("dec_capture");      /* NVMPI_TIMING=1 only (#105) */
+
     /* Need to wait for the first Resolution change event, so that
        the decoder knows the stream resolution and can allocate appropriate
-       buffers when we call REQBUFS. */
+       buffers when we call REQBUFS.
+
+       Poll in short slices (EVENT_POLL_MS) instead of one long dqEvent:
+       close()/flush() set eos and then join this thread, so the join waits
+       for the slice in flight. With the former 500 ms slice a
+       create->close without data took 0.5-1.5 s (#105). The loop still
+       runs until the event arrives or eos is set; only the eos latency
+       changes. */
     do
     {
         /* Refer ioctl VIDIOC_DQEVENT */
-        ret = dec->dqEvent(v4l2Event, 500);
+        ret = dec->dqEvent(v4l2Event, EVENT_POLL_MS);
         if (ret < 0)
         {
             if (errno == EAGAIN)
@@ -165,6 +179,7 @@ void dec_capture_loop_fcn(void *arg)
             got_resolution_change = true;
     }
     while (!got_resolution_change && !ctx->eos.load());
+    tm.phase(got_resolution_change ? "pre_event_wait(event)" : "pre_event_wait(eos)");
 
     /* Race guard: after flush/seek, FFmpeg's threaded decoder model
      * (libavcodec >= 61 / FFmpeg 7.0+) may queue all remaining packets
@@ -180,11 +195,21 @@ void dec_capture_loop_fcn(void *arg)
      *
      * One additional 500 ms dqEvent covers the gap with margin; the
      * extradata-to-event latency is normally single-digit ms. For
-     * nvmpi_decoder_close() the extra wait is within join tolerance. */
-    if (!got_resolution_change && ctx->eos.load()) {
+     * nvmpi_decoder_close() the extra wait is within join tolerance.
+     *
+     * Origin: commit 55d5f7f (fix for the FFmpeg 7.0+ threaded model).
+     * Only needed when data was fed: the decoder can emit the event only
+     * after it parsed a queued packet. With packets_put == 0 (create ->
+     * close, nothing ever queued) no event can be in flight, the capture
+     * plane has no frames to receive, and the wait only delayed close()
+     * by 500 ms (#105). packets_put is never reset by flush, so every
+     * stream that was fed keeps the guard exactly as before. */
+    if (!got_resolution_change && ctx->eos.load() &&
+        ctx->packets_put.load(std::memory_order_acquire) > 0) {
         ret = dec->dqEvent(v4l2Event, 500);
         if (ret == 0 && v4l2Event.type == V4L2_EVENT_RESOLUTION_CHANGE)
             got_resolution_change = true;
+        tm.phase("race_guard");
     }
 
     /* Initialize capture plane if and only if we received the event.

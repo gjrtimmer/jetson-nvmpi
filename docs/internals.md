@@ -41,6 +41,7 @@ src/
   nvmpi_dec_capture.cpp    capture thread loop, resolution-change handling
   nvmpi_dec_planes.cpp     CAPTURE-plane alloc/teardown, colour format selection
   nvmpi_dec_internal.h     decoder context struct, macros
+  nvmpi_timing.h           NVMPI_TIMING phase timer (create/close latency)
   nvmpi_enc_init.cpp       nvmpi_create_encoder (device open, format, planes)
   nvmpi_enc_input.cpp      put_frame (memory copy), frame copy helper
   nvmpi_enc_input_fd.cpp   put_frame_fd (DMA-BUF)
@@ -358,6 +359,30 @@ plane, moves filled frames back to the empty queue, `reset()`s the pool,
 restarts the OUTPUT plane and spawns a new capture thread. That thread waits
 for the next resolution-change event, which only fires after the caller primes
 the decoder again with SPS/PPS, hence the "re-prime after flush" rule in the API.
+
+### Close latency and `NVMPI_TIMING`
+
+The join in step 2 waits for the capture thread, so close latency is bounded by
+what that thread is blocked in. Before the first resolution-change event it
+polls `dqEvent` in 50 ms slices and re-checks `eos` between slices, so a
+create-then-close without data returns in about one slice (50-75 ms). It used
+to wait out a 500 ms `dqEvent` plus the 500 ms race guard below, 0.5-1.5 s per
+cycle (issue #105).
+
+The race guard (an extra 500 ms `dqEvent` when the loop ended on `eos` without
+an event) exists because FFmpeg 7.0+ may queue the EOS marker before the driver
+emits the event for re-primed extradata. It runs only when a packet was ever
+queued to the OUTPUT plane (`packets_put`, never reset by flush): without data
+the driver cannot emit an event, so there is nothing to wait for. Teardown after
+data is unchanged.
+
+Setting `NVMPI_TIMING=1` in the environment prints per-phase timings to stderr
+(`[libnvmpi][timing]: <scope> phase=<name> ms=<n>`), independent of the log
+level: every `nvmpi_create_decoder` phase (`dec_create`), the capture thread's
+wait for the first event or `eos` (`dec_capture`), and `nvmpi_decoder_close`
+from `eos` set to join return and in total (`dec_close`). The value is read
+once; unset, it costs one cached-bool branch per phase. The `test:api:hw` CI
+job enables it.
 
 ## NvBufSurfTransform mutex rule
 

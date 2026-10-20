@@ -89,6 +89,10 @@ int nvmpi_decoder_put_packet(nvmpictx* h,nvPacket* packet)
 		return -2;
 	}
 
+	/* Count BEFORE the EOS store below: the capture thread's race guard
+	 * (nvmpi_dec_capture.cpp) reads this after seeing eos. */
+	ctx->packets_put.fetch_add(1, std::memory_order_release);
+
 	if (v4l2_buf.m.planes[0].bytesused == 0)
 	{
 		ctx->eos.store(true);

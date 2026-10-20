@@ -50,6 +50,13 @@ struct nvmpi_dec_ctx : nvmpictx
 	std::atomic<bool> eos{false};       //set on EOS or fatal error; stops capture loop
 	                                    //(atomic: read by user thread, written by capture thread)
 	int index{0};                       //next OUTPUT-plane buffer index until all are used once
+	/* Packets successfully queued to the OUTPUT plane since create (incl.
+	 * the zero-sized EOS marker). Written by the user thread in
+	 * put_packet AFTER qBuffer succeeds and BEFORE eos is set; read by the
+	 * capture thread after it observed eos, so the release/acquire pair
+	 * orders the counter before the eos flag. Never reset (flush keeps it):
+	 * the capture thread's race guard keys on "was ever fed". */
+	std::atomic<uint32_t> packets_put{0};
 	unsigned int coded_width{0};        //stream resolution reported by the decoder (crop)
 	unsigned int coded_height{0};
 	unsigned int output_width{0};       //resolution delivered to the user (resized or coded)
