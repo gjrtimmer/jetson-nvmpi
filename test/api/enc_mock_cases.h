@@ -10,6 +10,7 @@
 #include "enc_mock_backpressure.h"
 #include "enc_mock_lowdelay.h"
 #include "enc_mock_codec.h"
+#include "enc_mock_rc.h"
 
 static const struct tcase k_cases[] = {
     { "blocking_h264", NULL, blocking_h264, 0 },
@@ -36,6 +37,7 @@ static const struct tcase k_cases[] = {
     { "teardown_all_slots", NULL, teardown_all_slots, 0 },
     { "teardown_held_packet", NULL, teardown_held_packet, 0 },
     { "teardown_pool_empty_drop", NULL, teardown_pool_empty_drop, 0 },
+    { "vbr_peak_bitrate", NULL, vbr_peak_bitrate, 0 },
     /* fault matrix: fn == NULL -> fault_case() */
     { "fault_none_control", "dqbuf@9999", NULL, 0 },
     { "fault_open@1", "open@1", NULL, 0 },        /* factory retry recovers */

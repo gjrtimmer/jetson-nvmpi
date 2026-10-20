@@ -15,6 +15,8 @@
  *   METADATA            BASE+536   getMetadata(): KeyFrame of a CAPTURE buffer
  *   INSERT_VUI          BASE+546   setInsertVuiEnabled(): SPS gets VUI
  *                                  timing_info from the S_PARM frame rate
+ *   BITRATE_PEAK                   setPeakBitrate(): recorded for tests only
+ *                                  (mock_enc_last_peak_bitrate())
  *
  * Runs with ctx->mu held (mock_ops.on_ioctl contract); nothing blocks, except
  * the opt-in NVMPI_MOCK_CTRL_DELAY_US sleep in the metadata query, which drops
@@ -26,11 +28,29 @@
 #include "mock_faults.h"
 
 #include <errno.h>
+#include <stdatomic.h>
+
+#define MOCK_EXPORT __attribute__((visibility("default")))
 
 #define MOCK_CID_IDR_INTERVAL      (V4L2_CID_MPEG_BASE + 514)
 #define MOCK_CID_SPS_PPS_AT_IDR    (V4L2_CID_MPEG_BASE + 535)
 #define MOCK_CID_ENC_METADATA      (V4L2_CID_MPEG_BASE + 536)
 #define MOCK_CID_INSERT_VUI        (V4L2_CID_MPEG_BASE + 546)
+
+/* Last BITRATE_PEAK value programmed on any encoder in this process; test
+ * read-back only (the model has no use for it). peak_seen = 0 until set. */
+static _Atomic uint32_t peak_value;
+static atomic_int peak_seen;
+
+/* Test hook (found with dlsym(RTLD_DEFAULT), like the other mock exports):
+ * stores the last peak bitrate in *out and returns 0, or -1 if none was set. */
+MOCK_EXPORT int mock_enc_last_peak_bitrate(uint32_t *out)
+{
+    if (!out || !atomic_load(&peak_seen))
+        return -1;
+    *out = atomic_load(&peak_value);
+    return 0;
+}
 
 /* ABI twins of the NVIDIA structs (v4l2_nv_extensions.h): the metadata
  * pointer block of v4l2_ctrl_video_metadata, and the first fields of
@@ -108,6 +128,10 @@ int mock_enc_ioctl(struct mock_ctx *ctx, unsigned long req, void *arg, int *ret)
             break;
         case MOCK_CID_INSERT_VUI:
             m->insert_vui = k->value != 0;
+            break;
+        case V4L2_CID_MPEG_VIDEO_BITRATE_PEAK:
+            atomic_store(&peak_value, (uint32_t)k->value);
+            atomic_store(&peak_seen, 1);
             break;
         case V4L2_CID_MPEG_MFC51_VIDEO_FORCE_FRAME_TYPE:
             m->force_idr = true;         /* consumed by the next frame     */
