@@ -3,6 +3,17 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.0.3 - 2026-10-20
+
+### Testing
+
+
+**mock**
+
+
+- Convert NV12 <-> I420 in NvBufSurfTransform (#109)
+
+
 ## 4.0.2 - 2026-10-19
 
 ### Bug Fixes
