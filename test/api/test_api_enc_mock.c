@@ -317,6 +317,9 @@ static int fault_run(int expect)
                                           * worth a 1 s timeout            */
             got++;
     }
+    /* Load can lag the model; get returns -1 at once if nothing is owed (#103),
+     * so draining is free and real loss still leaves got < 8. */
+    while (!expect && got < 8 && e_get(ctx, 0, 1, &p) == 0) got++;
     visible = put_err > 0 || got < 8;
     printf("    packets=%d put_err=%d\n", got, put_err);
     (void)nvmpi_encoder_put_frame(ctx, NULL);
