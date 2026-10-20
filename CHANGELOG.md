@@ -3,6 +3,17 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.0.4 - 2026-10-20
+
+### CI
+
+
+**release**
+
+
+- Run test_api on the Orin against the installed debs (#115)
+
+
 ## 4.0.3 - 2026-10-20
 
 ### Testing
