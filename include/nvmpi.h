@@ -370,7 +370,9 @@ extern "C" {
 	//profile/level/rate-control from param, sets up both planes and starts
 	//the capture-plane dequeue thread. Returns opaque handle, or NULL on
 	//failure (no encoder device node, device probe error, creation failed
-	//after 3 attempts, or a critical format/plane/stream setup error).
+	//after 3 attempts, or a critical format/plane/stream setup error), or
+	//when param->codingType is not H.264 or HEVC (checked first, before any
+	//device is opened).
 	//NOTE: the caller must still fill the packet pool (qEmptyPacket) before
 	//encoded output can be delivered.
 	nvmpictx* nvmpi_create_encoder(nvEncParam* param);

@@ -34,7 +34,21 @@ nvmpictx* nvmpi_create_encoder(nvEncParam* param)
 {
 	int ret;
 	log_level = LOG_LEVEL_INFO;
+	/* Validate the codec before anything is allocated or any device is
+	 * opened: only H.264 and HEVC are encodable, and an unset fourcc would
+	 * otherwise reach the format negotiation (#134). */
+	uint32_t pixfmt;
+	if(param->codingType==NV_VIDEO_CodingH264)
+		pixfmt=V4L2_PIX_FMT_H264;
+	else if(param->codingType==NV_VIDEO_CodingHEVC)
+		pixfmt=V4L2_PIX_FMT_H265;
+	else
+	{
+		NVMPI_LOG(NVMPI_LOG_ERROR, "Unsupported encoder codingType %d (H.264 and HEVC only)", (int)param->codingType);
+		return NULL;
+	}
 	nvmpi_enc_ctx *ctx=new nvmpi_enc_ctx;
+	ctx->encoder_pixfmt=pixfmt;
 	ctx->index=0;
 	ctx->width=param->width;
 	ctx->height=param->height;
@@ -206,13 +220,6 @@ nvmpictx* nvmpi_create_encoder(nvEncParam* param)
 	if(param->mode_vbr)
 		ctx->ratecontrol=V4L2_MPEG_VIDEO_BITRATE_MODE_VBR;
 
-	if(param->codingType==NV_VIDEO_CodingH264)
-	{
-		ctx->encoder_pixfmt=V4L2_PIX_FMT_H264;
-	}else if(param->codingType==NV_VIDEO_CodingHEVC)
-	{
-		ctx->encoder_pixfmt=V4L2_PIX_FMT_H265;
-	}
 	/* Open the V4L2 encoder device. Retry up to 3 times with 100ms
 	 * backoff. Before each factory call, probe the device node ourselves
 	 * to capture errno — MMAPI's NvV4l2Element discards it, making EBUSY

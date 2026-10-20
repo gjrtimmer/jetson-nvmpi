@@ -327,7 +327,9 @@ pooled `nvPacket`.
 
 Opens the V4L2 encoder, programs profile, level and rate control from `param`,
 sets up both planes and starts the capture-plane dequeue thread. Returns a
-handle, or `NULL` when no encoder device node exists, the device probe fails
+handle, or `NULL` when `param->codingType` is not `NV_VIDEO_CodingH264` or
+`NV_VIDEO_CodingHEVC` (checked first, before any device is opened; logs
+"Unsupported encoder codingType N"), when no encoder device node exists, the device probe fails
 (`ENODEV`, `ENXIO`, `EACCES`, or `EBUSY` on all 3 attempts), the encoder cannot
 be created after 3 attempts, or a critical format, plane or stream setup step
 fails (the half-built context is released; in the rare case the dequeue thread

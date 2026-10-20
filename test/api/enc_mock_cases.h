@@ -9,6 +9,7 @@
 #include "enc_mock_teardown.h"
 #include "enc_mock_backpressure.h"
 #include "enc_mock_lowdelay.h"
+#include "enc_mock_codec.h"
 
 static const struct tcase k_cases[] = {
     { "blocking_h264", NULL, blocking_h264, 0 },
@@ -49,6 +50,8 @@ static const struct tcase k_cases[] = {
     { "fault_dqbuf@1", "dqbuf@1", NULL, 1 },
     { "fault_dqbuf@4", "dqbuf@4", NULL, 1 },
     { "fault_dqbuf@2+", "dqbuf@2+", NULL, 1 },
+    /* open@1+ proves create fails before the device is touched */
+    { "create_unsupported_codec", "open@1+", create_unsupported_codec, 0 },
     { "fault_surface_alloc", "alloc@1", fault_surface_alloc, 0 },
     { "fault_dmabuf_alloc", "alloc@2", fault_dmabuf_alloc, 0 },
 };
