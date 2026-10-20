@@ -3,6 +3,37 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.1.0 - 2026-10-20
+
+### Bug Fixes
+
+
+**jpeg**
+
+
+- Read the SOF component count at the right offset (#4)
+- Report the displayed JPEG size in nvmpi_fd_frame (#4)
+
+
+### Features
+
+
+**jpeg**
+
+
+- DMA-BUF fd output for the JPEG decoder (#4)
+
+
+### Testing
+
+
+**api**
+
+
+- Widen the no-data decoder close bound to 400 ms (#132)
+- Make mock latency and fault-control checks load-tolerant (#133)
+
+
 ## 4.0.9 - 2026-10-20
 
 ### Bug Fixes
