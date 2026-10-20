@@ -18,7 +18,7 @@
  * case, not the run. Exit status of the child: 0 pass, anything else fail.
  * Run under ASan/valgrind to prove the teardown paths leak nothing.
  */
-#include "leak_check.h"
+#include "case_log.h"
 #include <nvmpi.h>
 
 #include <errno.h>
@@ -298,38 +298,18 @@ static const struct tcase k_cases[] = {
     { "fault_alloc@3+_hint", "alloc@3+", NULL, 320, 1 },
 };
 
+static int run_body(void *arg)
+{
+    const struct tcase *t = arg;
+
+    return t->fn ? t->fn() : fault_case(t);
+}
+
+/* strict: the decoder logs no libnvmpi error outside the fault cases. */
 static int run_case(const struct tcase *t)
 {
-    pid_t pid;
-    int st;
-
-    printf("  %-24s ", t->name);
-    fflush(stdout);
-    pid = fork();
-    if (pid < 0)
-        return 1;
-    if (pid == 0) {
-        alarm(CASE_TIMEOUT_S);           /* a hang dies with SIGALRM      */
-        if (t->fault)
-            setenv("NVMPI_MOCK_FAULT", t->fault, 1);
-        if (!getenv("NVMPI_TEST_VERBOSE"))
-            (void)!freopen("/dev/null", "w", stderr);
-        st = t->fn ? t->fn() : fault_case(t);
-        fflush(stdout);
-        nvmpi_test_leak_check();
-        _exit(st & 0xff);
-    }
-    waitpid(pid, &st, 0);
-    if (WIFSIGNALED(st)) {
-        printf("FAIL (signal %d: %s)\n", WTERMSIG(st), strsignal(WTERMSIG(st)));
-        return 1;
-    }
-    if (WEXITSTATUS(st)) {
-        printf("FAIL (exit %d)\n", WEXITSTATUS(st));
-        return 1;
-    }
-    printf("PASS\n");
-    return 0;
+    return case_log_run(t->name, t->fault, 1, 0, CASE_TIMEOUT_S, run_body,
+                        (void *)t);
 }
 
 int main(int argc, char **argv)

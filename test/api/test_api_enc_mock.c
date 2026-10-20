@@ -23,7 +23,7 @@
  * case, not the run. Exit status of the child: 0 pass, anything else fail.
  * Run under ASan/valgrind to prove the teardown paths leak nothing.
  */
-#include "leak_check.h"
+#include "case_log.h"
 #include <signal.h>
 #include <sys/wait.h>
 
@@ -364,39 +364,19 @@ static int fault_case(const struct tcase *t) { return fault_run(t->expect); }
 
 #include "enc_mock_cases.h"
 
+static int run_body(void *arg)
+{
+    const struct tcase *t = arg;
+
+    return t->fn ? t->fn() : fault_case(t);
+}
+
+/* TODO(#120): lenient (strict=0): normal encode cases still log "error while
+ * dequeing buffer from output plane" under the mock; go strict once fixed. */
 static int run_case(const struct tcase *t)
 {
-    pid_t pid;
-    int st;
-    uint64_t t0 = e_now_ms();
-
-    printf("  %-24s ", t->name);
-    fflush(stdout);
-    pid = fork();
-    if (pid < 0)
-        return 1;
-    if (pid == 0) {
-        alarm(CASE_TIMEOUT_S);           /* a hang dies with SIGALRM      */
-        if (t->fault)
-            setenv("NVMPI_MOCK_FAULT", t->fault, 1);
-        if (!getenv("NVMPI_TEST_VERBOSE"))
-            (void)!freopen("/dev/null", "w", stderr);
-        st = t->fn ? t->fn() : fault_case(t);
-        fflush(stdout);
-        nvmpi_test_leak_check();
-        _exit(st & 0xff);
-    }
-    waitpid(pid, &st, 0);
-    if (WIFSIGNALED(st)) {
-        printf("FAIL (signal %d: %s)\n", WTERMSIG(st), strsignal(WTERMSIG(st)));
-        return 1;
-    }
-    if (WEXITSTATUS(st)) {
-        printf("FAIL (exit %d)\n", WEXITSTATUS(st));
-        return 1;
-    }
-    printf("PASS (%llu ms)\n", (unsigned long long)(e_now_ms() - t0));
-    return 0;
+    return case_log_run(t->name, t->fault, 0, 1, CASE_TIMEOUT_S, run_body,
+                        (void *)t);
 }
 
 int main(int argc, char **argv)
