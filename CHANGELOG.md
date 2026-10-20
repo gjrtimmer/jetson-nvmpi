@@ -3,6 +3,17 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.3.0 - 2026-10-20
+
+### Features
+
+
+**dec**
+
+
+- Nvmpi_decoder_get_frame_fd2 with per-plane geometry (#138, #129)
+
+
 ## 4.2.2 - 2026-10-20
 
 ### Bug Fixes
