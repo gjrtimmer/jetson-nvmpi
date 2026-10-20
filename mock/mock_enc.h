@@ -118,8 +118,9 @@ size_t mock_enc_build_au(const struct mock_enc_au *au, uint8_t *out, size_t cap,
 
 /* mock_enc_av1.c: one low-overhead OBU temporal unit (#8): temporal
  * delimiter, sequence header when au->headers, OBU_FRAME (KEY_FRAME when
- * au->key). Parseable, not decodable. Returns the size, 0 when out is too
- * small or the size is invalid. */
+ * au->key), in the driver's IVF framing (file header on au->seq == 0, frame
+ * header always). Parseable, not decodable. Returns the size, 0 when out is
+ * too small or the size is invalid. */
 size_t mock_enc_av1_au(const struct mock_enc_au *au, uint8_t *out, size_t cap);
 
 /* mock_enc_h264.c: SPS (+VUI), PPS and the CAVLC slice of one H.264 AU. */

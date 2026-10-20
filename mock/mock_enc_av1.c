@@ -2,8 +2,11 @@
  * mock_enc_av1.c - AV1 temporal units of the encoder model (#8).
  *
  * One temporal unit per frame in the low-overhead OBU format (every OBU has
- * obu_has_size_field = 1, no IVF framing - the real encoder is told
- * HEADERS_WITH_FRAME = 0):
+ * obu_has_size_field = 1), wrapped in IVF framing the way the Orin driver
+ * (L4T R36.4) emits it even with HEADERS_WITH_FRAME = 0 (pipeline 57361):
+ * the 32-byte "DKIF" file header before the first AU of a session, and a
+ * 12-byte IVF frame header (le32 size, le64 pts) before every AU. libnvmpi
+ * strips both (nvmpi_enc_av1_ivf_skip), so this exercises that path.
  *
  *   temporal delimiter   12 00                         always first
  *   sequence header      0a <size> ...                 when au->headers
@@ -31,6 +34,8 @@
 #define OBU_FRAME   6u
 #define TILE_BYTES  32u                /* filler tile data per frame        */
 #define HDR_MAX     64u                /* sequence / frame header bytes     */
+#define IVF_FILE    32u                /* "DKIF" file header                */
+#define IVF_FRAME   12u                /* le32 size + le64 pts              */
 
 /* ceil(log2(v)) for v >= 1 (spec tile_log2(1, v)). */
 static unsigned tile_log2(uint32_t v)
@@ -166,13 +171,20 @@ static size_t frame_hdr(uint8_t *b, size_t cap, uint32_t w, uint32_t h, bool key
     return bw_bytes(&bw);
 }
 
-size_t mock_enc_av1_au(const struct mock_enc_au *au, uint8_t *out, size_t cap)
+static void put_le(uint8_t *p, uint64_t v, unsigned bytes)
+{
+    unsigned i;
+
+    for (i = 0; i < bytes; i++)
+        p[i] = (uint8_t)(v >> (8 * i));
+}
+
+/* The OBUs of one temporal unit, unframed. */
+static size_t av1_obus(const struct mock_enc_au *au, uint8_t *out, size_t cap)
 {
     uint8_t hdr[HDR_MAX] = { 0 }, fr[HDR_MAX + TILE_BYTES];
     size_t o = 0, n;
 
-    if (!au->width || !au->height || au->width > 65536u || au->height > 65536u)
-        return 0;
     if (!(n = put_obu(out, cap, OBU_TD, NULL, 0)))
         return 0;
     o += n;
@@ -191,4 +203,29 @@ size_t mock_enc_av1_au(const struct mock_enc_au *au, uint8_t *out, size_t cap)
     if (!(n = put_obu(out + o, cap - o, OBU_FRAME, fr, n + TILE_BYTES)))
         return 0;
     return o + n;
+}
+
+size_t mock_enc_av1_au(const struct mock_enc_au *au, uint8_t *out, size_t cap)
+{
+    size_t pre = IVF_FRAME + (au->seq == 0 ? IVF_FILE : 0u), n;
+    uint8_t *f;
+
+    if (!au->width || !au->height || au->width > 65536u || au->height > 65536u)
+        return 0;
+    if (cap <= pre || !(n = av1_obus(au, out + pre, cap - pre)))
+        return 0;
+    if (au->seq == 0) {                /* IVF file header, first AU only   */
+        memset(out, 0, IVF_FILE);
+        memcpy(out, "DKIF", 4);
+        put_le(out + 6, IVF_FILE, 2);  /* version 0, header length 32      */
+        memcpy(out + 8, "AV01", 4);
+        put_le(out + 12, au->width, 2);
+        put_le(out + 14, au->height, 2);
+        put_le(out + 16, au->tpf_den ? au->tpf_den : 30u, 4);
+        put_le(out + 20, au->tpf_num ? au->tpf_num : 1u, 4);
+    }
+    f = out + pre - IVF_FRAME;         /* IVF frame header, every AU       */
+    put_le(f, n, 4);
+    put_le(f + 4, au->seq, 8);
+    return pre + n;
 }
