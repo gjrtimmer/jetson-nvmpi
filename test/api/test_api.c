@@ -267,6 +267,7 @@ static int test_encoder_hevc_create_close(void)
 #include "jpeg_fd_case.h"
 #include "av1_case.h"
 #include "av1_enc_case.h"
+#include "enc_p010_case.h"
 #include "dec_fd_case.h"
 #include "dec_fd2_case.h"
 
@@ -285,6 +286,8 @@ int main(void)
     fail += RUN_TEST(test_encoder_hevc_create_close);
     fail += RUN_TEST(test_decoder_av1_frame);
     fail += RUN_TEST(test_encoder_av1_roundtrip);
+    /* HEVC Main10 from P010 input (#126). */
+    fail += RUN_TEST(test_encoder_hevc_p010_roundtrip);
     /* Zero-copy lifetime: resolution change + release after close (#137). */
     fail += RUN_TEST(test_decoder_res_change_borrowed);
     /* get_frame_fd2 layout vs the allocator's planeParams (#138). */
