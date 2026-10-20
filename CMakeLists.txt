@@ -209,6 +209,8 @@ set(NVMPI_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_frame_buffer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_jpeg.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_jpeg_ctx.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_jpeg_fd.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_jpeg_fd_util.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_enc_jpeg.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_surface.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_vic.cpp)

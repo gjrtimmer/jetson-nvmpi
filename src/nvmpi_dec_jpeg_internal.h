@@ -40,6 +40,9 @@
 		NVMPI_LOG_SUB(NVMPI_LOG_ERROR, "jpeg", "%s", message); \
 	}
 
+/* Zero-copy (DMA-BUF) output state, defined in nvmpi_dec_jpeg_fd.cpp. */
+struct jpeg_fd_state;
+
 /*
  * JPEG decoder context.
  *
@@ -65,6 +68,11 @@ struct nvmpictx_jpeg
 
 	/* Output pixel format — JPEG always produces YUV420 via VIC. */
 	nvPixFormat out_pixfmt{NV_PIX_YUV420};
+
+	/* Non-NULL in DMA-BUF mode (nvmpi_create_jpeg_decoder_fmt): the copy
+	 * pool below is then unused. Allocated by the create function; freed
+	 * by jpegFdClose() from nvmpi_jpeg_decoder_close(). */
+	jpeg_fd_state *fd{nullptr};
 
 	/* Frame pool: producer = put_packet (synchronous), consumer = get_frame. */
 	NVMPI_bufPool<nvmpi_frame_buffer*>* framePool{nullptr};
@@ -113,3 +121,26 @@ int jpegCopyToFrame(nvmpictx_jpeg* ctx, nvmpi_frame_buffer *buf, nvFrame* frame)
  * Defined in nvmpi_dec_jpeg_ctx.cpp; used by nvmpi_jpeg_decoder_put_packet()
  * in nvmpi_dec_jpeg.cpp. Not static because it is called from another TU. */
 bool jpegIsProgressive(const unsigned char *data, unsigned long size);
+
+/* DMA-BUF mode put_packet body (EOS and null checks already done by the
+ * caller). Returns 0, -1 on error or NVMPI_ERR_EAGAIN. Defined in
+ * nvmpi_dec_jpeg_fd.cpp. */
+int jpegFdPutPacket(nvmpictx_jpeg *ctx, nvPacket *packet);
+
+/* Release the context's references to the DMA-BUF pool and free ctx->fd.
+ * Borrowed frames keep their pool generation alive. Defined in
+ * nvmpi_dec_jpeg_fd.cpp. */
+void jpegFdClose(nvmpictx_jpeg *ctx);
+
+/* True if the JPEG is 3-component baseline/extended-sequential (SOF0/SOF1);
+ * logs and returns false for progressive, grayscale, CMYK or malformed
+ * input. Bounds-checked (untrusted bytes). Defined in nvmpi_dec_jpeg_sof.cpp. */
+bool jpegFdCheckSof(const unsigned char *d, unsigned long size);
+
+/* Plane geometry of one pool buffer into *fr (pitch/offset from the
+ * allocator's planeParams, validated). NvUtils builds only. Defined in
+ * nvmpi_dec_jpeg_fd_util.cpp. */
+#ifdef WITH_NVUTILS
+bool jpegFdFillGeometry(nvPixFormat fmt, nvmpi_frame_buffer *fb,
+                        uint32_t w, uint32_t h, nvmpi_fd_frame *fr);
+#endif

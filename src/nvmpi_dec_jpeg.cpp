@@ -108,6 +108,10 @@ int nvmpi_jpeg_decoder_put_packet(nvmpictx* handle, nvPacket* packet)
 	if (ctx->eos.load())
 		return -1;
 
+	/* DMA-BUF mode has its own pool, checks and decode flow. */
+	if (ctx->fd)
+		return jpegFdPutPacket(ctx, packet);
+
 	/* Reject progressive JPEG (SOF2) — NVJPG engine supports baseline only. */
 	if (jpegIsProgressive(packet->payload, packet->payload_size)) {
 		NVMPI_LOG_SUB(NVMPI_LOG_ERROR, "jpeg", "progressive JPEG not supported by hardware decoder (SOF2 marker detected)");
@@ -211,6 +215,10 @@ int nvmpi_jpeg_decoder_get_frame(nvmpictx* handle, nvFrame* frame, bool wait)
 
 	nvmpictx_jpeg *ctx = reinterpret_cast<nvmpictx_jpeg*>(handle);
 
+	/* DMA-BUF mode has no copy pool; use nvmpi_jpeg_decoder_get_frame_fd. */
+	if (ctx->fd)
+		return -1;
+
 	nvmpi_frame_buffer* fb;
 
 	if (wait)
@@ -250,6 +258,10 @@ int nvmpi_jpeg_decoder_close(nvmpictx* handle)
 	nvmpictx_jpeg *ctx = reinterpret_cast<nvmpictx_jpeg*>(handle);
 
 	ctx->eos.store(true);
+
+	/* DMA-BUF mode: drop the context's pool references (borrowed frames
+	 * keep their generation alive until released). */
+	jpegFdClose(ctx);
 
 	/* Unblock any consumer waiting in get_frame. */
 	if (ctx->framePool)

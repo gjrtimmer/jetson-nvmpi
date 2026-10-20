@@ -68,7 +68,16 @@ taken now: no OUTPUT-plane buffer is free, or the pool has no spare packet for
 the frame's encoded output (see `nvmpi_encoder_put_frame`). The frame was not
 queued. Drain output packets with `nvmpi_encoder_get_packet`, return each with
 `nvmpi_encoder_qEmptyPacket`, and retry the same frame. The value matches Linux
-`EAGAIN`.
+`EAGAIN`. The JPEG decoder in DMA-BUF mode also returns it from
+`nvmpi_jpeg_decoder_put_packet` when its pool is empty.
+
+### `NVMPI_ERR_INVAL`
+
+`nvmpi.h` -- `#define NVMPI_ERR_INVAL (-22)`
+
+NULL argument, `struct_size` too small, or a handle of the wrong kind
+(`nvmpi_jpeg_decoder_get_frame_fd`). Matches Linux `EINVAL`. The value is part
+of the frozen 4.1.0 ABI.
 
 ## Enums
 
@@ -477,6 +486,47 @@ it blocks up to 500 ms. Returns `0`, or `-1` when no frame is available
 Destroys the context and frees all DMA buffers; the handle is invalid
 afterwards.
 
+### JPEG decoder, DMA-BUF output (`nvmpi_create_jpeg_decoder_fmt`, `nvmpi_jpeg_decoder_get_frame_fd`)
+
+`nvmpictx* nvmpi_create_jpeg_decoder_fmt(nvPixFormat out, int pool_size);`
+
+`int nvmpi_jpeg_decoder_get_frame_fd(nvmpictx* ctx, nvmpi_fd_frame* frame, nvmpi_frame_release_cb *release, void **opaque, bool wait);`
+
+Zero-copy alternative to `nvmpi_jpeg_decoder_get_frame`. `out` is `NV_PIX_NV12`
+or `NV_PIX_YUV420`; `pool_size` is 1..64 (0 = 8). Anything else, or a failed
+`NvJPEGDecoder` creation, returns `NULL`. Needs the NvUtils buffer API (legacy
+`nvbuf_utils` builds return `NULL`). Use only `put_packet`,
+`get_frame_fd` and `close` on the handle; the copying `get_frame` returns -1.
+The legacy `nvmpi_create_jpeg_decoder` is unchanged.
+
+Per packet: libnvjpeg decodes to its own block-linear buffer, the VIC converts
+it into a pool buffer (pitch-linear, full range, 4:2:2 and 4:4:4 included),
+and the pool buffer is queued. The libnvjpeg buffer is reused by its next
+decode, so it is never handed out. Grayscale, CMYK and progressive JPEGs are
+rejected (`put_packet` returns -1). `put_packet` returns `NVMPI_ERR_EAGAIN`
+before decoding, with the packet not consumed, when every pool buffer is
+borrowed or queued; release frames and retry. A change of picture size starts
+a new pool; frames of the old size stay valid.
+
+`nvmpi_fd_frame` (frozen ABI, fields only appended): `struct_size` (set to
+`sizeof` before the call, minimum `NVMPI_FD_FRAME_V1_SIZE`), `fd`, `width`,
+`height`, `format`, `num_planes` (2 or 3), `pitch[3]`, `offset[3]`, `size`,
+`timestamp` (the packet `pts`), `flags` (bit0 full range). Plane addresses are
+`offset[i]`, never `pitch*height`.
+
+Ownership and threads:
+
+- The fd belongs to the pool and is not dup'd (`NvBufSurfaceFromFd` fails on
+  dup'd fds). Do not `close()` it. `dup()` it before releasing to keep it.
+- Call the release callback exactly once per frame, from any thread, before or
+  after `close`. After `close` every borrowed fd stays valid until its release;
+  `close` never blocks or fails because of borrows (each pool generation is
+  reference counted; the surfaces are destroyed by the last release).
+- `put_packet` and `get_frame_fd` run on one thread at a time.
+- Pool fds are `FD_CLOEXEC`. A forked child must not use the context.
+- Returns 0; -1 no frame (non-blocking), 500 ms timeout or closed;
+  `NVMPI_ERR_INVAL` for bad arguments.
+
 ## JPEG encoder
 
 Synchronous encode on the NVJPG engine through `NvJPEGEncoder`. No V4L2 device,
@@ -692,6 +742,8 @@ Blocking behaviour at a glance:
 | `nvmpi_encoder_dqEmptyPacket` | `0` | `-1` pool empty |
 | `nvmpi_encoder_force_idr`, `_set_bitrate` | `0` | `-1` |
 | `*_flush`, `*_close` | `0` | see the per-function notes (close can return `-1`) |
+| `nvmpi_jpeg_decoder_get_frame_fd` | `0` | `-1` no frame / timeout / closed, `NVMPI_ERR_INVAL` |
+| `nvmpi_jpeg_decoder_put_packet` (fd mode) | `0` | `-1` error, `NVMPI_ERR_EAGAIN` pool empty |
 | `nvmpi_jpeg_encoder_get_packet` | `0` | `-1` none ready, `-2` EOS |
 | `nvmpi_surface_*`, `nvmpi_vic_transform` | `0` | `-1` |
 

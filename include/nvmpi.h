@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 
 //Maximum size of the encoded buffers on the capture plane in bytes
 //Also used by the FFmpeg wrapper as the allocation size of each pooled
@@ -33,6 +34,10 @@
  * was NOT queued. Caller must drain get_packet (returning each packet with
  * qEmptyPacket) and retry the same frame. Matches Linux EAGAIN. */
 #define NVMPI_ERR_EAGAIN (-11)
+
+/* Invalid argument: NULL pointer, struct_size too small, or the handle was not
+ * created by the API family the function belongs to. Matches Linux EINVAL. */
+#define NVMPI_ERR_INVAL (-22)
 
 //Opaque context handle. Note: the decoder and encoder each define their own
 //(different) struct nvmpictx internally; a handle must only be passed back
@@ -164,6 +169,56 @@ typedef struct _NVFRAME{
 //and stalls decoding.
 typedef void (*nvmpi_frame_release_cb)(void *opaque);
 
+//One decoded frame handed out as a borrowed DMA-BUF fd by
+//nvmpi_jpeg_decoder_get_frame_fd. Geometry is per plane and comes from the
+//allocator, so never derive a plane address as pitch*height: use offset[].
+//Caller sets struct_size = sizeof(nvmpi_fd_frame) before the call; fields
+//are only ever appended, so an older caller keeps working against a newer
+//library (the library fills at most struct_size bytes).
+typedef struct {
+	uint32_t struct_size;      //IN: sizeof(nvmpi_fd_frame) of the caller
+	int fd;                    //borrowed pitch-linear dmabuf fd (see ownership)
+	uint32_t width, height;    //visible size of the decoded picture
+	nvPixFormat format;        //NV_PIX_NV12 (2 planes) or NV_PIX_YUV420 (3)
+	uint32_t num_planes;       //2 for NV12, 3 for YUV420
+	uint32_t pitch[3];         //bytes per row of each plane (>= row bytes)
+	uint32_t offset[3];        //byte offset of each plane inside the fd
+	uint64_t size;             //total size of the buffer behind fd in bytes
+	int64_t timestamp;         //pts copied from nvPacket.pts of the input
+	uint32_t flags;            //bit0 (NVMPI_FD_FRAME_FULL_RANGE): full range
+} nvmpi_fd_frame;
+
+#define NVMPI_FD_FRAME_FULL_RANGE 0x1u
+//Smallest struct_size the library accepts (the first released layout).
+#define NVMPI_FD_FRAME_V1_SIZE (offsetof(nvmpi_fd_frame, flags) + sizeof(uint32_t))
+
+//FROZEN ABI (4.1.0): the layout of nvmpi_fd_frame and the value of
+//NVMPI_ERR_INVAL are copied byte for byte by consumers (jetson-ffmpeg's
+//dynlink header). Fields are only ever appended after `flags`; existing
+//offsets never change. The asserts below pin the LP64 (aarch64) layout.
+#if defined(__cplusplus)
+#define NVMPI_STATIC_ASSERT(c, m) static_assert(c, m)
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+#define NVMPI_STATIC_ASSERT(c, m) _Static_assert(c, m)
+#endif
+#if defined(NVMPI_STATIC_ASSERT) && defined(__LP64__)
+NVMPI_STATIC_ASSERT(sizeof(nvPixFormat) == 4, "nvPixFormat ABI");
+NVMPI_STATIC_ASSERT(NVMPI_ERR_INVAL == -22, "NVMPI_ERR_INVAL ABI");
+NVMPI_STATIC_ASSERT(sizeof(nvmpi_fd_frame) == 72, "nvmpi_fd_frame size ABI");
+NVMPI_STATIC_ASSERT(offsetof(nvmpi_fd_frame, struct_size) == 0, "struct_size ABI");
+NVMPI_STATIC_ASSERT(offsetof(nvmpi_fd_frame, fd) == 4, "fd ABI");
+NVMPI_STATIC_ASSERT(offsetof(nvmpi_fd_frame, width) == 8, "width ABI");
+NVMPI_STATIC_ASSERT(offsetof(nvmpi_fd_frame, height) == 12, "height ABI");
+NVMPI_STATIC_ASSERT(offsetof(nvmpi_fd_frame, format) == 16, "format ABI");
+NVMPI_STATIC_ASSERT(offsetof(nvmpi_fd_frame, num_planes) == 20, "num_planes ABI");
+NVMPI_STATIC_ASSERT(offsetof(nvmpi_fd_frame, pitch) == 24, "pitch ABI");
+NVMPI_STATIC_ASSERT(offsetof(nvmpi_fd_frame, offset) == 36, "offset ABI");
+NVMPI_STATIC_ASSERT(offsetof(nvmpi_fd_frame, size) == 48, "size ABI");
+NVMPI_STATIC_ASSERT(offsetof(nvmpi_fd_frame, timestamp) == 56, "timestamp ABI");
+NVMPI_STATIC_ASSERT(offsetof(nvmpi_fd_frame, flags) == 64, "flags ABI");
+NVMPI_STATIC_ASSERT(NVMPI_FD_FRAME_V1_SIZE == 68, "V1 size ABI");
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -227,6 +282,61 @@ extern "C" {
 
 	//Destroy the JPEG decoder context and free all DMA buffers.
 	int nvmpi_jpeg_decoder_close(nvmpictx* ctx);
+
+	//--- JPEG decoder, zero-copy DMA-BUF output ---
+
+	//Create a JPEG decoder whose frames are retrieved as DMA-BUF fds with
+	//nvmpi_jpeg_decoder_get_frame_fd instead of being copied.
+	//  out:       NV_PIX_NV12 or NV_PIX_YUV420 (anything else -> NULL).
+	//  pool_size: number of pitch-linear output buffers, 1..64; 0 selects
+	//             the default of 8. Out of range -> NULL.
+	//The pool is allocated on the first decoded frame and re-created when
+	//the picture size changes. 4:2:0, 4:2:2 and 4:4:4 baseline JPEGs are
+	//converted by the VIC; grayscale and progressive JPEGs are rejected by
+	//put_packet (-1). Requires the NvUtils/NvBufSurface API; builds against
+	//the legacy nvbuf_utils API return NULL.
+	//Use ONLY the nvmpi_jpeg_decoder_{put_packet,get_frame_fd,close}
+	//functions with the returned handle; nvmpi_jpeg_decoder_get_frame
+	//(copying) returns -1 on it. Returns NULL on invalid arguments or if
+	//NvJPEGDecoder creation fails. The legacy nvmpi_create_jpeg_decoder
+	//is unchanged.
+	//
+	//In this mode nvmpi_jpeg_decoder_put_packet additionally returns
+	//NVMPI_ERR_EAGAIN (the packet was NOT consumed) when every pool buffer
+	//is still borrowed or queued: return frames via their release callback
+	//(or drain get_frame_fd) and retry the same packet. Other results are
+	//as documented above: 0 ok, -1 error.
+	nvmpictx* nvmpi_create_jpeg_decoder_fmt(nvPixFormat out, int pool_size);
+
+	//Retrieve one decoded frame as a borrowed DMA-BUF fd.
+	//  frame:   OUT, caller sets frame->struct_size first.
+	//  release: OUT, callback the caller MUST call exactly once with *opaque
+	//           when it is done with frame->fd.
+	//  opaque:  OUT, cookie for the callback.
+	//  wait:    false = non-blocking; true = block up to 500 ms.
+	//Ownership: the fd belongs to libnvmpi's pool and is NOT dup'd; the
+	//caller must not close() it. It stays valid until the release callback
+	//ran. To keep it longer, dup() it BEFORE releasing (a dup'd fd is not
+	//known to NvBufSurfaceFromFd; only the original fd is). Decoder-internal
+	//buffers are never exposed, so the fd is never overwritten by a later
+	//decode while borrowed.
+	//Threads: put_packet and get_frame_fd must be called from one thread at
+	//a time. The release callback may be called from any thread, at any
+	//time, including after nvmpi_jpeg_decoder_close(): the pool memory then
+	//lives until the last borrowed frame is released (no timeout, no wait).
+//Guarantee: after nvmpi_jpeg_decoder_close() every borrowed fd/surface stays
+//fully valid (usable, e.g. by NvBufSurfaceFromFd or as encoder input) until
+//its release callback runs; the destruction is deferred to that last
+//release. close() never fails or blocks because of outstanding borrows.
+	//Release exactly once, never touch frame->fd afterwards.
+	//Pool fds are created close-on-exec (FD_CLOEXEC). A forked child must
+	//not use the context or a borrowed fd for anything but exec/_exit.
+	//Returns 0 on success; -1 no frame available (non-blocking), timeout
+	//or EOS/closed; NVMPI_ERR_INVAL for NULL ctx/frame/release/opaque, a
+	//struct_size below NVMPI_FD_FRAME_V1_SIZE, or a handle that was not
+	//created by nvmpi_create_jpeg_decoder_fmt.
+	int nvmpi_jpeg_decoder_get_frame_fd(nvmpictx* ctx, nvmpi_fd_frame* frame,
+		nvmpi_frame_release_cb *release, void **opaque, bool wait);
 
 	//--- JPEG encoder (synchronous, NvJPEGEncoder-backed, no V4L2) ---
 

@@ -250,6 +250,8 @@ static int test_encoder_hevc_create_close(void)
     return (ret == 0) ? 0 : 1;
 }
 
+#include "jpeg_fd_case.h"
+
 int main(void)
 {
     printf("=== libnvmpi API test ===\n");
@@ -263,6 +265,11 @@ int main(void)
     fail += RUN_TEST(test_encoder_rapid_lifecycle);
     fail += RUN_TEST(test_decoder_all_codecs);
     fail += RUN_TEST(test_encoder_hevc_create_close);
+    /* JPEG DMA-BUF output: real NVJPG only, SKIP on stubs/mock. */
+    fail += RUN_TEST(test_jpeg_fd_nv12);
+    fail += RUN_TEST(test_jpeg_fd_yuv420);
+    fail += RUN_TEST(test_jpeg_fd_close_order);
+    fail += RUN_TEST(test_jpeg_fd_loop_fd_count);
 
     printf("\n%d tests: %d passed, %d skipped",
            tests_run, tests_passed, tests_skipped);
