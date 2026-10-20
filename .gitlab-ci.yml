@@ -357,7 +357,7 @@ release:test:api:hw:
 #                  wake-ups, NvBufSurface strict FromFd, transform, decoder
 #                  and encoder models, fault/delay injection)
 #   api_mock       test/api/test_api against the mock (create/close paths)
-#   api_mock_dec   libnvmpi decoder against the mock decoder model (#99):
+#   api_mock_dec   (2 shards) libnvmpi decoder against the mock decoder model (#99):
 #                  N-packet decode, resolution change, teardown, flush and a
 #                  fault-injection matrix (NVMPI_MOCK_FAULT), each case in a
 #                  forked child under alarm()
@@ -366,7 +366,7 @@ release:test:api:hw:
 #                  and SPS/PPS placement, flush, teardown with frames in
 #                  flight, DMABUF input, and the same fault matrix
 #
-# The seven ctests (api_mock_enc is 3 shards, NVMPI_TEST_SHARD, issue #130)
+# The eight ctests (api_mock_dec is 2 shards, api_mock_enc 3, NVMPI_TEST_SHARD, issue #130)
 # run in parallel (ctest -j): they share no state. Each is its
 # own process with its own mock instance; the only shared file is the
 # read-only /dev/v4l2-* placeholder symlinks scripts/mock-dev-nodes.sh makes

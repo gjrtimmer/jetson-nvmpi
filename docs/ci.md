@@ -72,7 +72,7 @@ Stages, in order: `build`, `test`, `release-test`, `dist`, `test-deb`, `publish`
 | build | `build:jp6` | Compile libnvmpi against the **stubs** (compile check, not runnable) in the JetPack 6 builder image, run the `bufpool` unit test with `ctest`, install into `_nvmpi/`. | any runner |
 | build | `build:jp5` | Same in the JetPack 5 builder image. Catches V4L2 headers/symbols that exist on JetPack 6 (kernel 5.15+) but not on JetPack 5 (kernel 5.10); covers all JetPack 5 releases. | any runner |
 | test | `test:api:hw` | Run the `test_api` binary built by `build:jp6` on real Jetson hardware. | Jetson runner |
-| test | `test:api:stub:jp6`, `test:api:stub:jp5` | Build the behavioural Jetson mock (`NVMPI_MOCK=ON`) in the JetPack 6 / 5 builder image and run `ctest` (`mock_selftest`, `api_mock`, `api_mock_dec`, `api_mock_enc_0..2`; `ctest -j`, the encoder suite is split into 3 shards with `NVMPI_TEST_SHARD=k/n`). | any runner, no tags |
+| test | `test:api:stub:jp6`, `test:api:stub:jp5` | Build the behavioural Jetson mock (`NVMPI_MOCK=ON`) in the JetPack 6 / 5 builder image and run `ctest` (`mock_selftest`, `api_mock`, `api_mock_dec_0..1`, `api_mock_enc_0..2`; `ctest -j`, the decoder suite is split into 2 shards and the encoder suite into 3 with `NVMPI_TEST_SHARD=k/n`). | any runner, no tags |
 | test | `test:api:asan` | Same suite in an ASan + UBSan + LSan build (`NVMPI_SANITIZER=address`). | any runner, no tags |
 | test | `test:api:tsan` | Same suite in a TSan build (`NVMPI_SANITIZER=thread`), run under `setarch -R`. | any runner, no tags |
 | dist | `dist:jp6` | Build the **real** (non-stub) library against NVIDIA's apt-repository libraries and package it. Needs `test:api:hw`. | any arm64 runner |
