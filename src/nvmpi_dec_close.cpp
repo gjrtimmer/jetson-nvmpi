@@ -17,7 +17,7 @@
 //  1. Signal EOS and STREAMOFF capture — stops the capture thread.
 //  2. Join the capture thread.
 //  3. STREAMOFF output plane — aborts any in-flight V4L2 buffers.
-//  4. Drain the frame pool (move filled frames back to the empty queue).
+//  4. Move filled frames back to the empty queue (generation unchanged).
 //  5. Reset EOS flag and output-plane buffer index.
 //  6. STREAMON output plane.
 //  7. Restart the capture thread — it will wait for the next
@@ -37,9 +37,12 @@ int nvmpi_decoder_flush(nvmpictx* h)
 
 	ctx->dec->output_plane.setStreamStatus(false);
 
-	nvmpi_frame_buffer* fb;
-	while ((fb = ctx->framePool->dqFilledBuf()))
-		ctx->framePool->qEmptyBuf(fb);
+	/* Filled-but-undelivered frames go back to the empty queue. The
+	 * generation stays current (flush keeps the pool); each slot still owns
+	 * its generation reference while queued, so nothing changes hands. */
+	dec_slot* slot;
+	while ((slot = ctx->framePool->dqFilledBuf()))
+		ctx->framePool->qEmptyBuf(slot);
 
 	ctx->eos.store(false);
 	/* Clear shutdown so the pool blocks again after flush/restart. */
@@ -60,8 +63,9 @@ int nvmpi_decoder_flush(nvmpictx* h)
 //  3. Destroy the VIC transform session (legacy path only).
 //  4. Stop the output (input-side) plane and release its V4L2 buffers.
 //  5. Release CAPTURE-plane DMA buffers (decoder output side).
-//  6. Destroy frame pool (VIC destination buffers) — safe because all
-//     planes are stopped and no transforms can be pending.
+//  6. Retire the frame-pool generation (VIC destination buffers): safe
+//     because all planes are stopped and no transforms can be pending.
+//     Borrowed buffers (get_frame_fd) outlive close until released.
 //  7. Free the pool container, decoder device, and context.
 //
 //The handle is invalid after this call.
@@ -94,16 +98,14 @@ int nvmpi_decoder_close(nvmpictx* h)
 
 	ctx->deinitDecoderCapturePlane();
 
-	/* Signal DRM_PRIME release callbacks that the pool is gone BEFORE
-	 * destroying buffers — a callback firing between deinitFramePool()
-	 * and the store(false) would pass the pool_alive guard and call
-	 * qEmptyBuf on a destroyed buffer.  Must be BEFORE deinitFramePool
-	 * AND before delete so late-arriving callbacks (from FFmpeg 8.1+
-	 * scheduler cleanup order) skip the qEmptyBuf call entirely. */
-	if (ctx->pool_alive)
-		ctx->pool_alive->store(false);
-	ctx->deinitFramePool();
-	delete ctx->framePool;
+	/* Retire the pool generation after the join (no capture thread holds a
+	 * slot) and the plane teardown: unborrowed buffers are destroyed now;
+	 * buffers still borrowed via get_frame_fd stay valid and are destroyed
+	 * by the last release, possibly after this function returned. Never
+	 * waits. Flipping `current` under gen->mu happens BEFORE the pool is
+	 * deleted, so a concurrent release can never requeue into a dead pool. */
+	ctx->retireFramePool();
+	delete ctx->framePool;   //allocated in nvmpi_create_decoder; both queues drained by retire
 	ctx->framePool = nullptr;
 
 	delete ctx->dec;

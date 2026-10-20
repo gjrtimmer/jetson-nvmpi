@@ -274,6 +274,7 @@ static int fault_case(const struct tcase *t)
 
 #include "dec_mock_latency.h"
 #include "dec_mock_av1.h"
+#include "dec_mock_fd.h"
 
 static const struct tcase k_cases[] = {
     { "decode_plain", NULL, decode_plain, 0, 0 },
@@ -286,6 +287,19 @@ static const struct tcase k_cases[] = {
     { "teardown_no_data_latency", NULL, teardown_no_data_latency, 0, 0 },
     { "teardown_no_data_hint_latency", NULL, teardown_no_data_hint_latency, 0, 0 },
     { "flush_blocked", NULL, flush_blocked, 0, 0 },
+    /* zero-copy borrow lifetime (#137) */
+    { "release_after_close", NULL, release_after_close, 0, 0 },
+    { "res_change_borrowed", NULL, res_change_borrowed, 0, 0 },
+    { "fd_count", NULL, fd_count, 0, 0 },
+    { "flush_borrowed", NULL, flush_borrowed, 0, 0 },
+    /* allocation failure during a resolution change with borrows held. The
+     * allocator calls are counted per surface: 1-9 capture plane + 10-13
+     * pool at the first event, 14-22 capture plane + 23-26 pool at the
+     * change. @22 = capture plane fails, @23 = new pool empty, @24 = new
+     * pool of 1 buffer. */
+    { "res_change_alloc@22", "alloc@22", res_change_alloc_fault, 0, 1 },
+    { "res_change_alloc@23", "alloc@23", res_change_alloc_fault, 0, 1 },
+    { "res_change_alloc@24", "alloc@24", res_change_alloc_fault, 0, 1 },
     /* fault matrix: fn == NULL -> fault_case() */
     { "fault_none_control", "dqbuf@9999", NULL, 0, 0 },
     { "fault_dqbuf@1", "dqbuf@1", NULL, 0, 1 },

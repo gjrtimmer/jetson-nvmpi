@@ -316,9 +316,10 @@ thread only; joins the capture thread internally.
 
 Stops the capture thread, frees all DMA buffers and pools and destroys the
 context; the handle is invalid afterwards. Returns `0`, or
-`-1` for a `NULL` ctx (nothing is done). Frames borrowed through `get_frame_fd` and
-released after close are handled safely: the release callback checks a shared
-"pool alive" flag and skips the pool access. Threading: user thread only.
+`-1` for a `NULL` ctx (nothing is done). Close never waits for frames borrowed
+through `get_frame_fd`: they stay valid until released and are freed by the
+last release, which is safe after close and from any thread. Threading: user
+thread only.
 
 ## Video encoder
 
@@ -606,6 +607,13 @@ buffer geometry, a timestamp in microseconds, and a `release` callback plus
 - If the fd must outlive the callback (for example as encoder input), `dup()`
   it first.
 - Not releasing starves the decoder's frame pool and stalls decoding.
+- The release may come from any thread, before or after `nvmpi_decoder_close`.
+  After close, or after a mid-stream resolution change, a borrowed buffer
+  stays valid until its release (a resolution change rebuilds the pool at the
+  new size without waiting); the buffers of that pool generation are freed
+  when its last borrow is released.
+- `width`, `height` and `pitch` describe the borrowed buffer itself, so a
+  frame decoded before a resolution change keeps its original geometry.
 - `wait` behaves as in `nvmpi_decoder_get_frame`.
 
 Returns `0` on success, `-1` on no frame / timeout (also if the small

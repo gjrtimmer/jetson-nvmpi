@@ -39,6 +39,54 @@
 
 using namespace std;
 
+struct dec_gen;
+
+//One frame-pool entry: a destination DMA buffer plus its owner reference.
+//Ownership invariant: whoever holds a slot holds a reference to its
+//generation. While the slot is queued in the pool or owned by the capture
+//thread that reference is `self`; while it is borrowed (get_frame_fd) it is
+//moved into the borrow cookie. `self` is therefore a deliberate cycle
+//(gen -> slots -> self -> gen) that retire breaks for every queued slot.
+struct dec_slot {
+	nvmpi_frame_buffer *fb{nullptr};    //destination buffer; owned by the generation
+	int idx{0};                         //position in dec_gen::slots
+	std::shared_ptr<dec_gen> self;      //see invariant above; empty while borrowed
+};
+
+//One pool generation: buffers of a single output size plus the geometry
+//cache read by every consumer of those buffers. Held by shared_ptr (same
+//model as the JPEG fd path, jpeg_pool_gen). A resolution change or close
+//retires the generation; borrowed buffers are destroyed by ~dec_gen when the
+//last borrow is released (any thread, possibly after close). No waiting.
+//
+//Lock order (never invert): dec_gen::mu -> one pool queue lock
+//(m_emptyBuf or m_filledBuf, never both). Pool code never takes
+//dec_gen::mu and the capture thread's hot path (dqEmptyBuf / qFilledBuf)
+//does not either. nvmpi_transform_mutex is never held together with mu.
+struct dec_gen {
+	std::mutex mu;                      //guards `current` and the decision to requeue
+	bool current{true};                 //false once retired; written under mu only
+	//pool the slots circulate through. Valid ONLY while `current` (the
+	//context deletes the pool after retiring, which flips `current` under mu).
+	NVMPI_bufPool<dec_slot*> *pool{nullptr};
+	std::vector<dec_slot> slots;        //reserved up front: slot addresses stay stable
+	unsigned int w{0}, h{0};            //output size of this generation
+	//geometry of the pitch-linear buffers (filled once, before any slot is
+	//queued; read-only afterwards, so lock-free reads are safe)
+	unsigned int num_planes{0};
+	unsigned int linesize[MAX_NUM_PLANES]{};     //stride (pitch) of each plane in bytes
+	unsigned int height[MAX_NUM_PLANES]{};       //number of lines in each plane
+	unsigned int linedatasize[MAX_NUM_PLANES]{}; //usable data size for 1 line
+	~dec_gen();
+};
+
+//Give a slot back after the consumer is done with it. Takes over the
+//generation reference held for the slot; requeues the slot as empty if the
+//generation is still current, else just drops the reference (which frees the
+//buffers if it was the last). Any thread, before or after close.
+//Defined in nvmpi_dec_fd.cpp.
+void dec_gen_release(std::shared_ptr<dec_gen> &&ref, dec_slot *slot);
+
 //Decoder context behind the opaque nvmpictx* handle of the public API.
 //Created by nvmpi_create_decoder(), owned by the caller via
 //nvmpi_decoder_close(). Shared between the user thread and the internal
@@ -91,41 +139,22 @@ struct nvmpi_dec_ctx : nvmpictx
 	bool max_perf{true};                //lift NVDEC clock governor for max throughput
 	bool disable_dpb{false};            //skip DPB reordering (low-latency, B-frame-free only)
 	int wait_timeout_ms{500};           //blocking dequeue ceiling (ms); set via AVOption
-	//producer/consumer pool: capture thread fills, user thread consumes
-	NVMPI_bufPool<nvmpi_frame_buffer*>* framePool{nullptr};
-	/* Shared flag: true while framePool is valid. Ref-counted via
-	 * shared_ptr so DRM_PRIME frame release callbacks can safely check
-	 * it after nvmpi_decoder_close deletes the pool. Without this,
-	 * FFmpeg schedulers that close the codec before all frame refs drop
-	 * (FFmpeg 8.1+) trigger a use-after-free in frame_fd_release_impl.
-	 * Allocated in nvmpi_create_decoder; set to false in decoder_close
-	 * before deleting framePool. */
-	std::shared_ptr<std::atomic<bool>> pool_alive;
-	/* Number of frame buffers currently checked out by user code —
-	 * incremented in get_frame/get_frame_fd, decremented on return/release.
-	 * Shared via shared_ptr so release callbacks can decrement after close.
-	 * respondToResolutionEvent waits for this to reach 0 before destroying
-	 * the pool to prevent use-after-free on resolution change. */
-	std::shared_ptr<std::atomic<int>> frames_checked_out;
-	//all frame bufs ever allocated by initFramePool — ensures deinitFramePool
-	//can destroy every buffer even if one is temporarily outside both queues
-	std::vector<nvmpi_frame_buffer*> allocatedFrameBufs;
+	//producer/consumer pool of generation slots: capture thread fills,
+	//user thread consumes. Owned by the context; deleted in close AFTER the
+	//generation is retired (a current generation points at it).
+	NVMPI_bufPool<dec_slot*>* framePool{nullptr};
+	/* The context's own reference to the CURRENT pool generation (see
+	 * dec_gen above). Touched by one thread at a time only: create (before
+	 * the capture thread starts), the capture thread (resolution change),
+	 * close (after the join). Never read by the user/release threads, which
+	 * reach their generation through the slot / borrow cookie. */
+	std::shared_ptr<dec_gen> gen;
 
-	//output frame size params
-	//(describes the pitch-linear dst_dma buffers; filled by
-	// updateFrameSizeParams() and used when copying out to the user)
-	unsigned int num_planes;
-	unsigned int frame_linesize[MAX_NUM_PLANES]; //stride (pitch) of each plane in bytes
-	unsigned int frame_height[MAX_NUM_PLANES];   //number of lines in each plane
-	unsigned int frame_linedatasize[MAX_NUM_PLANES]; //usable data size for 1 line
-
-	//empty frame queue and free buffers memory
-	void deinitFramePool();
-	//alloc frame buffers based on frame_size data in nvmpi_dec_ctx
+	//retire the current generation (no-op without one): see nvmpi_dec_pool.cpp
+	void retireFramePool();
+	//allocate a new generation of frame_pool_size buffers at output_width x
+	//output_height and queue its slots as empty
 	void initFramePool();
-
-	//get dst_dma buffer params and set corresponding frame size and linesize in nvmpi_dec_ctx
-	void updateFrameSizeParams();
 	//refresh src/dst rects and filter settings for the per-frame transform
 	void updateBufferTransformParams();
 
@@ -141,4 +170,4 @@ unsigned int nvmpi_dec_codec_pixfmt(nvCodingType codec);
 NvBufferColorFormat getNvColorFormatFromV4l2Format(v4l2_format &format, bool want_10bit);
 void dec_capture_loop_fcn(void *arg);
 void respondToResolutionEvent(v4l2_format &format, v4l2_crop &crop, nvmpi_dec_ctx* ctx);
-int copyNvBufToFrame(nvmpi_dec_ctx* ctx, nvmpi_frame_buffer *nvmpiBuf, nvFrame* frame);
+int copyNvBufToFrame(const dec_gen* g, nvmpi_frame_buffer *nvmpiBuf, nvFrame* frame);

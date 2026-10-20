@@ -6,7 +6,6 @@
  * frame-pool and per-frame VIC transform parameter setup it depends on.
  *
  * This file owns:
- *   - updateFrameSizeParams()       — cache dst_dma buffer plane geometry.
  *   - updateBufferTransformParams() — cache VIC src/dst rects and filter.
  *   - nvmpi_create_decoder()        — open the V4L2 decoder device, configure
  *                                     the OUTPUT plane, start the capture
@@ -20,79 +19,18 @@
  * Companion files:
  *   nvmpi_dec_internal.h  — shared includes, defines, nvmpi_dec_ctx struct,
  *                           and forward declarations.
- *   nvmpi_dec_api.cpp     — runtime API: put_packet, get_frame,
- *                           get_frame_fd, copyNvBufToFrame, flush, close.
+ *   nvmpi_dec_api.cpp     — runtime API: put_packet, get_frame.
+ *   nvmpi_dec_fd.cpp      — zero-copy get_frame_fd, borrow/release.
  *   nvmpi_dec_capture.cpp — capture-thread loop and resolution-change
  *                           handling.
  *   nvmpi_dec_planes.cpp  — CAPTURE-plane allocation/teardown helpers.
  *   nvmpi_dec_codec.cpp   — codingType to V4L2 fourcc mapping.
- *   nvmpi_dec_pool.cpp    — deinitFramePool()/initFramePool().
+ *   nvmpi_dec_pool.cpp    — frame-pool generations: initFramePool()/
+ *                           retireFramePool(), geometry cache.
  *   nvmpi_dec_close.cpp   — flush and close.
  */
 #include "nvmpi_dec_internal.h"
 #include "nvmpi_timing.h"
-
-//Query the actual plane geometry (count, pitch, height, bytes-per-line) of
-//one freshly allocated dst_dma frame buffer and cache it in the context.
-//These values drive the memcpy in copyNvBufToFrame(); the allocator may
-//choose pitches different from width, so they must be read back, not
-//assumed. Uses peekEmptyBuf() — safe only because no consumer runs yet.
-void nvmpi_dec_ctx::updateFrameSizeParams()
-{
-	//it's safe when called from respondToResolutionEvent() after initFramePool()
-	nvmpi_frame_buffer* fb = framePool->peekEmptyBuf();
-	/* initFramePool() may have allocated no buffer at all (allocator
-	 * exhausted); there is no geometry to cache then, and dereferencing the
-	 * missing buffer crashed here. The pool is rebuilt at the next resolution
-	 * change; until then no frame can be produced (num_planes stays 0). */
-	if (!fb) {
-		NVMPI_LOG(NVMPI_LOG_ERROR, "updateFrameSizeParams: frame pool is empty (allocation failed)");
-		num_planes = 0;
-		return;
-	}
-#ifdef WITH_NVUTILS
-	NvBufSurfacePlaneParams parm;
-	NvBufSurfaceParams dst_dma_surface_params;
-	dst_dma_surface_params = fb->dst_dma_surface->surfaceList[0];
-	parm = dst_dma_surface_params.planeParams;
-#else
-	NvBufferParams parm;
-	int ret = NvBufferGetParams(fb->dst_dma_fd, &parm);
-	if (ret < 0) {
-		NVMPI_LOG(NVMPI_LOG_ERROR, "Failed to get dst dma buf params (code=%d)", ret);
-		return;
-	}
-#endif
-
-	num_planes = parm.num_planes;
-	for(unsigned int i=0; i<num_planes; i++)
-	{
-		frame_linesize[i] = parm.pitch[i];
-		frame_height[i] = parm.height[i];
-#ifdef WITH_NVUTILS
-		frame_linedatasize[i] = parm.width[i] * parm.bytesPerPix[i]; //valid only for nvutils
-#else
-		//legacy API lacks bytesPerPix: the interleaved UV plane of NV12
-		//variants carries 2 bytes per pixel, everything else 1.
-		if(i == 1 && (parm.pixel_format == NvBufferColorFormat_NV12 ||
-				parm.pixel_format == NvBufferColorFormat_NV16 ||
-				parm.pixel_format == NvBufferColorFormat_NV24 ||
-				parm.pixel_format == NvBufferColorFormat_NV12_ER ||
-				parm.pixel_format == NvBufferColorFormat_NV12_709 ||
-				parm.pixel_format == NvBufferColorFormat_NV12_709_ER ||
-				parm.pixel_format == NvBufferColorFormat_NV12_2020))
-		{
-			frame_linedatasize[i] = parm.width[i] * 2;
-		}
-		else
-		{
-			frame_linedatasize[i] = parm.width[i];
-		}
-#endif
-	}
-
-	return;
-}
 
 //Build the cached VIC transform parameters used for every decoded frame:
 //src rect = coded (cropped) decoder resolution, dst rect = user-visible
@@ -343,12 +281,7 @@ nvmpictx* nvmpi_create_decoder(nvDecParam* param)
 	ctx->resized = param->resized;
 	ctx->hint_width = param->width;
 	ctx->hint_height = param->height;
-	ctx->framePool = new NVMPI_bufPool<nvmpi_frame_buffer*>();
-	/* Shared flag for DRM_PRIME frame release callbacks — stays valid
-	 * after decoder close because frame refs hold shared_ptr copies.
-	 * Allocated here; set to false in nvmpi_decoder_close(). */
-	ctx->pool_alive = std::make_shared<std::atomic<bool>>(true);
-	ctx->frames_checked_out = std::make_shared<std::atomic<int>>(0);
+	ctx->framePool = new NVMPI_bufPool<dec_slot*>();
 	ctx->eos.store(false);
 	ctx->index=0;
 	for(int index=0;index<MAX_BUFFERS;index++)
@@ -366,7 +299,6 @@ nvmpictx* nvmpi_create_decoder(nvDecParam* param)
 		ctx->output_width = ctx->resized.width ? ctx->resized.width : ctx->hint_width;
 		ctx->output_height = ctx->resized.height ? ctx->resized.height : ctx->hint_height;
 		ctx->initFramePool();
-		ctx->updateFrameSizeParams();
 		NVMPI_LOG(NVMPI_LOG_INFO, "pre-allocated frame pool at %ux%u from container hints",
 		          ctx->output_width, ctx->output_height);
 	}

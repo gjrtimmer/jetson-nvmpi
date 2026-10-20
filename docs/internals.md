@@ -36,8 +36,9 @@ include/
 src/
   nvmpi_dec_init.cpp       nvmpi_create_decoder, VIC parameters
   nvmpi_dec_codec.cpp      codingType to V4L2 fourcc mapping
-  nvmpi_dec_pool.cpp       destination frame-pool alloc/free
-  nvmpi_dec_api.cpp        put_packet, get_frame(_fd)
+  nvmpi_dec_pool.cpp       destination frame-pool generations (alloc, retire)
+  nvmpi_dec_api.cpp        put_packet, get_frame
+  nvmpi_dec_fd.cpp         get_frame_fd, borrow/release
   nvmpi_dec_close.cpp      flush, close
   nvmpi_dec_capture.cpp    capture thread loop, resolution-change handling
   nvmpi_dec_planes.cpp     CAPTURE-plane alloc/teardown, colour format selection
@@ -141,13 +142,27 @@ Details worth knowing:
   a blocking `dqBuffer`.
 - **EOS.** A zero-size packet is queued like any other, and flips the context's
   atomic `eos` flag.
-- **Checked-out accounting.** Frames handed to callers (`get_frame` while
-  copying, `get_frame_fd` until release) are counted. A resolution change waits
-  for that counter to reach zero before destroying the old pool, so a late
-  release can never touch freed buffers.
+- **Pool generations.** The destination pool is a refcounted generation
+  (`dec_gen`, the same model as the JPEG fd path): buffers of one output size,
+  the plane geometry of those buffers, and a `dec_slot` per buffer. Whoever
+  holds a slot holds a reference to its generation (the slot's own `self`
+  while queued or owned by the capture thread, the borrow cookie while
+  borrowed). A resolution change (capture thread) or close (after the join)
+  retires the generation: it is marked not-current, both queues are drained,
+  unborrowed buffers are destroyed at once, and the context drops its
+  reference. Borrowed buffers are destroyed by the last release, on any thread,
+  possibly after close. Nothing waits.
+- **Rebuild check.** On a resolution event the new output size is compared with
+  the current generation's own size; the pool is rebuilt only if it differs
+  (or there is no usable generation). Frames queued at the old size are
+  dropped.
+- **Release.** Release takes the generation reference, then under the
+  generation's mutex requeues the slot only if the generation is still
+  current; the reference is dropped outside the lock. Lock order: generation
+  mutex, then one pool queue lock; never the reverse.
 - **Zero-copy.** `get_frame_fd` returns the pool buffer's fd plus a release
-  callback; the callback re-queues the buffer to the empty queue, guarded by a
-  shared "pool alive" flag that survives decoder close.
+  callback; geometry comes from the slot's generation, so frames from before a
+  resolution change keep their size.
 
 ## Encoder pipeline
 
@@ -467,9 +482,9 @@ sites. Guidelines:
 | Decoder context | `nvmpi_create_decoder` | `nvmpi_decoder_close` | Join the capture thread first. |
 | Encoder context | `nvmpi_create_encoder` | `nvmpi_encoder_close` | Stop the DQ thread first (leak instead of use-after-free if the join fails). |
 | `NvVideoDecoder` / `NvVideoEncoder` | create functions | deleted in close | After `STREAMOFF` and thread join. |
-| Frame pool buffers | `initFramePool` (capture thread) | `deinitFramePool` | Destroy after all planes are stopped. |
+| Frame pool generation (`dec_gen`) | `initFramePool` (create or capture thread) | `retireFramePool` (unborrowed buffers), `~dec_gen` (the rest) | Retire after the capture thread is joined or on its own thread; borrowed buffers outlive close until released. |
 | DMA frame buffer | `nvmpi_frame_buffer::alloc` | `destroy()` | Idempotent; fd reset to `-1`. |
-| `nvmpi_frame_ref` (zero-copy release cookie) | `nvmpi_decoder_get_frame_fd` | the release callback | Freed exactly once by the callback. |
+| `dec_fd_borrow` (zero-copy release cookie) | `nvmpi_decoder_get_frame_fd` | the release callback | Freed exactly once by the callback; owns the generation reference. |
 | Encoder OUTPUT-plane fds | DMA / dmabuf mode | per fd in close | Only in DMA modes. |
 | Packet memory | caller | caller | libnvmpi never allocates or frees packet payloads. |
 | `nvmpi_vic_ctx` | `nvmpi_vic_create` | `nvmpi_vic_close` | One context per thread. |

@@ -200,6 +200,7 @@ set(NVMPI_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_capture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_planes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_pool.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_fd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_codec.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_close.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_enc_init.cpp
@@ -368,8 +369,10 @@ if(BUILD_TESTING)
     add_test(NAME api_mock COMMAND test_api)
     # Decoder data path + fault matrix (needs the mock model; mock-only).
     add_executable(test_api_dec_mock test/api/test_api_dec_mock.c)
-    target_include_directories(test_api_dec_mock PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(test_api_dec_mock PRIVATE nvmpi Threads::Threads)
+    # nvbufsurface.h: the zero-copy cases check the surface behind each borrowed fd (#137).
+    target_include_directories(test_api_dec_mock PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+      ${JETSON_MULTIMEDIA_API_INCLUDE_DIR} ${CUDA_INCLUDE_DIR})
+    target_link_libraries(test_api_dec_mock PRIVATE nvmpi ${LIB_NVBUFSURFACE} Threads::Threads)
     target_compile_definitions(test_api_dec_mock PRIVATE NVMPI_HAVE_AV1=${NVMPI_HAVE_AV1})
     # Decoder suite in 2 shards (NVMPI_TEST_SHARD=k/n, see case_log.h).
     set(NVMPI_DEC_SHARDS 2)

@@ -51,42 +51,27 @@ void respondToResolutionEvent(v4l2_format &format, v4l2_crop &crop,nvmpi_dec_ctx
 	ctx->session = NvBufferSessionCreate();
 #endif
 
-	/* Skip frame pool rebuild if the pool was pre-allocated at the same
-	 * dimensions by nvmpi_create_decoder (hint path). The first resolution-change
-	 * event will match when container headers were accurate — saves one
-	 * alloc/free cycle and reduces first-frame latency. On mismatch (or
-	 * mid-stream resolution changes) the pool is rebuilt at the correct size. */
-	if (!ctx->allocatedFrameBufs.empty() &&
-	    ctx->output_width == (ctx->resized.width ? ctx->resized.width : crop.c.width) &&
-	    ctx->output_height == (ctx->resized.height ? ctx->resized.height : crop.c.height))
+	/* Skip the rebuild only if the CURRENT generation already has the new
+	 * output size (e.g. pre-allocated from container hints that turned out
+	 * accurate): saves one alloc/free cycle and first-frame latency. The
+	 * comparison must be against the generation's own size: output_width/
+	 * height were just overwritten above, so comparing them with the same
+	 * expression was always true and a mid-stream resolution change never
+	 * rebuilt the pool (#137). A generation without buffers (allocation
+	 * failed earlier) is rebuilt too. */
+	if (ctx->gen && !ctx->gen->slots.empty() &&
+	    ctx->gen->w == ctx->output_width && ctx->gen->h == ctx->output_height)
 	{
 		NVMPI_LOG(NVMPI_LOG_DEBUG, "frame pool already allocated at %ux%u, skipping rebuild",
 		          ctx->output_width, ctx->output_height);
 	}
 	else
 	{
-		/* Wait for all checked-out frame buffers to be returned before
-		 * destroying the pool.  Without this, deinitFramePool destroys
-		 * DMA buffers that the user thread still holds (via get_frame_fd),
-		 * causing use-after-free.  Bounded wait with 1s timeout to avoid
-		 * hanging the capture thread if a frame is never released. */
-		if (ctx->frames_checked_out) {
-			int wait_us = 0;
-			while (ctx->frames_checked_out->load(std::memory_order_acquire) > 0
-			       && wait_us < 1000000) {
-				usleep(1000);
-				wait_us += 1000;
-			}
-			if (ctx->frames_checked_out->load(std::memory_order_acquire) > 0) {
-				NVMPI_LOG(NVMPI_LOG_WARN,
-				          "resolution change: %d frames still checked out "
-				          "after 1s timeout, proceeding with pool teardown",
-				          ctx->frames_checked_out->load(std::memory_order_relaxed));
-			}
-		}
-		ctx->deinitFramePool();
+		/* Retire the old generation without waiting: unborrowed buffers die
+		 * now, borrowed ones when released (their cookies keep the
+		 * generation alive), then allocate at the new size. */
+		ctx->retireFramePool();
 		ctx->initFramePool();
-		ctx->updateFrameSizeParams();
 	}
 
 	//reset buffer transformation params based on new resolution data
@@ -144,7 +129,7 @@ void dec_capture_loop_fcn(void *arg)
 	struct v4l2_event v4l2Event;
 	memset(&v4l2Event, 0, sizeof(v4l2Event));
 	int ret;
-	nvmpi_frame_buffer* fb = NULL;
+	dec_slot* slot = NULL;
 	bool got_resolution_change = false;
 
     NvmpiTimer tm("dec_capture");      /* NVMPI_TIMING=1 only (#105) */
@@ -279,10 +264,12 @@ void dec_capture_loop_fcn(void *arg)
 			//point the buffer at the DMA fd it was queued with
 			dec_buffer->planes[0].fd = ctx->dmaBufferFileDescriptor[v4l2_buf.index];
 
-			//grab a free destination buffer from the pool (non-blocking)
-			fb = ctx->framePool->dqEmptyBuf();
+			//grab a free destination slot from the pool (non-blocking). The slot
+			//stays owned by this thread (its generation reference lives in
+			//slot->self) until it is queued as filled.
+			slot = ctx->framePool->dqEmptyBuf();
 
-			if(fb)
+			if(slot)
 			{
 				/* hw transform: block-linear decoder output → pitch-linear
 			 * dst buffer, converting format and scaling as configured.
@@ -292,19 +279,19 @@ void dec_capture_loop_fcn(void *arg)
 #ifdef WITH_NVUTILS
 				pthread_mutex_lock(&nvmpi_transform_mutex);
 				NvBufSurfTransformSetSessionParams(&(ctx->session));
-				ret = NvBufSurfTransform(ctx->dmaBufferSurface[v4l2_buf.index], fb->dst_dma_surface, &(ctx->transform_params));
+				ret = NvBufSurfTransform(ctx->dmaBufferSurface[v4l2_buf.index], slot->fb->dst_dma_surface, &(ctx->transform_params));
 				pthread_mutex_unlock(&nvmpi_transform_mutex);
 #else
 				pthread_mutex_lock(&nvmpi_transform_mutex);
-				ret = NvBufferTransform(dec_buffer->planes[0].fd, fb->dst_dma_fd, &(ctx->transform_params));
+				ret = NvBufferTransform(dec_buffer->planes[0].fd, slot->fb->dst_dma_fd, &(ctx->transform_params));
 				pthread_mutex_unlock(&nvmpi_transform_mutex);
 #endif
 				TEST_ERROR(ret==-1, "Transform failed",ret);
 				//carry the pts through (V4L2 timeval -> microseconds)
-				fb->timestamp = (v4l2_buf.timestamp.tv_usec % 1000000) + (v4l2_buf.timestamp.tv_sec * 1000000UL);
+				slot->fb->timestamp = (v4l2_buf.timestamp.tv_usec % 1000000) + (v4l2_buf.timestamp.tv_sec * 1000000UL);
 
 				//hand the filled frame to the consumer (user thread)
-				ctx->framePool->qFilledBuf(fb);
+				ctx->framePool->qFilledBuf(slot);
 			}
 			else
 			{
@@ -317,23 +304,23 @@ void dec_capture_loop_fcn(void *arg)
 				 * meanwhile, eventually stalling the decoder hardware. */
 				while(!ctx->eos.load())
 				{
-					fb = ctx->framePool->dqEmptyBuf(std::chrono::milliseconds(100));
-					if(fb)
+					slot = ctx->framePool->dqEmptyBuf(std::chrono::milliseconds(100));
+					if(slot)
 					{
 #ifdef WITH_NVUTILS
 						pthread_mutex_lock(&nvmpi_transform_mutex);
 						NvBufSurfTransformSetSessionParams(&(ctx->session));
-						ret = NvBufSurfTransform(ctx->dmaBufferSurface[v4l2_buf.index], fb->dst_dma_surface, &(ctx->transform_params));
+						ret = NvBufSurfTransform(ctx->dmaBufferSurface[v4l2_buf.index], slot->fb->dst_dma_surface, &(ctx->transform_params));
 						pthread_mutex_unlock(&nvmpi_transform_mutex);
 #else
 						pthread_mutex_lock(&nvmpi_transform_mutex);
-						ret = NvBufferTransform(dec_buffer->planes[0].fd, fb->dst_dma_fd, &(ctx->transform_params));
+						ret = NvBufferTransform(dec_buffer->planes[0].fd, slot->fb->dst_dma_fd, &(ctx->transform_params));
 						pthread_mutex_unlock(&nvmpi_transform_mutex);
 #endif
 						TEST_ERROR(ret==-1, "Transform failed",ret);
-						fb->timestamp = (v4l2_buf.timestamp.tv_usec % 1000000) + (v4l2_buf.timestamp.tv_sec * 1000000UL);
+						slot->fb->timestamp = (v4l2_buf.timestamp.tv_usec % 1000000) + (v4l2_buf.timestamp.tv_sec * 1000000UL);
 
-						ctx->framePool->qFilledBuf(fb);
+						ctx->framePool->qFilledBuf(slot);
 						break;
 					}
 				}

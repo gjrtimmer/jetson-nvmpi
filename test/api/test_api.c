@@ -262,6 +262,7 @@ static int test_encoder_hevc_create_close(void)
 
 #include "jpeg_fd_case.h"
 #include "av1_case.h"
+#include "dec_fd_case.h"
 
 int main(void)
 {
@@ -277,6 +278,8 @@ int main(void)
     fail += RUN_TEST(test_decoder_all_codecs);
     fail += RUN_TEST(test_encoder_hevc_create_close);
     fail += RUN_TEST(test_decoder_av1_frame);
+    /* Zero-copy lifetime: resolution change + release after close (#137). */
+    fail += RUN_TEST(test_decoder_res_change_borrowed);
     /* JPEG DMA-BUF output: real NVJPG or the mock model, SKIP on stubs. */
     fail += RUN_TEST(test_jpeg_fd_nv12);
     fail += RUN_TEST(test_jpeg_fd_yuv420);
