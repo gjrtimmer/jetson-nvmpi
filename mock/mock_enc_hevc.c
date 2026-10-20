@@ -6,7 +6,7 @@
  * 8-bit 4:2:0, the encoder's actual picture size, so FFmpeg can build hvcC
  * (mp4/mkv) and RTP sprop-* from them. The slice NAL starts with a real
  * slice_segment_header() matching those sets; the slice DATA after it is
- * still canned and not decodable (#110).
+ * still canned and not decodable (#118).
  *
  * Coding tools are minimal: CTB 16, min CB 8, no AMP/SAO/PCM/scaling lists,
  * no long-term refs, no temporal MVP, no tiles. VUI is absent unless the

@@ -1,6 +1,6 @@
 /*
  * mock_enc_bits.h - bit writer and NAL framing shared by the encoder model's
- * access unit builders (mock_enc_nal.c, mock_enc_hevc.c). Header-only and
+ * access unit builders (mock_enc_h264.c, mock_enc_hevc.c). Header-only and
  * allocation free; every write is bounds-checked against the caller's buffer.
  */
 #ifndef NVMPI_MOCK_ENC_BITS_H
@@ -65,6 +65,16 @@ static inline void put_bytes(struct bw *w, const uint8_t *p, size_t n)
     }
     for (i = 0; i < n && !w->over; i++)
         put_bits(w, p[i], 8);
+}
+
+/* pcm_alignment_zero_bits: skip to the next byte boundary. The skipped bits
+ * stay 0 because the buffer is zeroed. Flags over when that leaves the
+ * buffer, like put_bits. */
+static inline void put_align0(struct bw *w)
+{
+    w->bits = (w->bits + 7) & ~(size_t)7;
+    if ((w->bits >> 3) > w->cap)
+        w->over = true;
 }
 
 /* rbsp_trailing_bits / byte_alignment: a 1 bit, then zeros to the byte end. */

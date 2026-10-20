@@ -294,6 +294,7 @@ int main(void)
     test_encoder_model();
     test_encoder_hevc_params();
     test_encoder_vui();
+    test_encoder_h264();
     if (mock_fails) {
         fprintf(stderr, "test_mock: %d check(s) failed\n", mock_fails);
         return 1;

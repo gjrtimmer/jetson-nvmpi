@@ -16,7 +16,8 @@
 
 #define ENC_NODE "/dev/v4l2-nvenc"
 #define EH_N     4                       /* buffers per queue              */
-#define EH_CAPSZ (1u << 20)
+#define EH_CAPSZ (10u << 20)             /* NVMPI_ENC_CHUNK_SIZE: a PCM key
+                                          * frame (#117) is ~1.5 bytes/pixel */
 #define H264 V4L2_PIX_FMT_H264
 #define H265 v4l2_fourcc('H', '2', '6', '5')
 
@@ -29,10 +30,18 @@ struct video_metadata { void *a, *b, *enc, *mv; uint32_t index; };
 
 static int g_oflags;                     /* extra v4l2_open flags (O_NONBLOCK) */
 static uint32_t g_capsz = EH_CAPSZ;      /* CAPTURE sizeimage asked for      */
+static uint32_t g_outfmt = V4L2_PIX_FMT_NV12M;   /* OUTPUT pixelformat       */
+static uint32_t g_outmem = V4L2_MEMORY_MMAP;     /* OUTPUT memory type       */
 
 struct eh {
     int fd;
     uint8_t *cap[EH_N];                  /* CAPTURE mappings               */
+    int dmafd[EH_N];                     /* DMABUF: dma-buf per OUTPUT slot,
+                                          * set by the test before eh_put  */
+    uint8_t *raw[EH_N][3];               /* OUTPUT plane mappings (rw)     */
+    uint32_t caplen;                     /* CAPTURE mapping length         */
+    unsigned onp;                        /* OUTPUT planes of g_outfmt      */
+    uint32_t ostride[3], olen[3];        /* OUTPUT bytesperline / sizeimage */
     unsigned out_used;
     unsigned hevc;
 };
@@ -50,7 +59,7 @@ static inline int rb(int fd, uint32_t type, unsigned n)
 
     memset(&r, 0, sizeof(r));
     r.type = type;
-    r.memory = V4L2_MEMORY_MMAP;
+    r.memory = type == OUT ? g_outmem : V4L2_MEMORY_MMAP;
     r.count = n;
     return v4l2_ioctl(fd, VIDIOC_REQBUFS, &r);
 }
@@ -108,12 +117,17 @@ static inline int eh_open(struct eh *e, uint32_t codec, uint32_t w, uint32_t h,
         return -1;
     memset(&f, 0, sizeof(f));
     f.type = OUT;
-    f.fmt.pix_mp.pixelformat = V4L2_PIX_FMT_NV12M;
+    f.fmt.pix_mp.pixelformat = g_outfmt;
     f.fmt.pix_mp.width = w;
     f.fmt.pix_mp.height = h;
-    f.fmt.pix_mp.num_planes = 2;
+    f.fmt.pix_mp.num_planes = g_outfmt == V4L2_PIX_FMT_YUV420M ? 3 : 2;
     if (v4l2_ioctl(e->fd, VIDIOC_S_FMT, &f))
         return -1;
+    e->onp = f.fmt.pix_mp.num_planes;    /* the driver decides the layout   */
+    for (i = 0; i < e->onp && i < 3; i++) {
+        e->ostride[i] = f.fmt.pix_mp.plane_fmt[i].bytesperline;
+        e->olen[i] = f.fmt.pix_mp.plane_fmt[i].sizeimage;
+    }
     if (pre)
         pre(e->fd);
     if (rb(e->fd, OUT, EH_N) || rb(e->fd, CAP, EH_N))
@@ -140,12 +154,42 @@ static inline int eh_open(struct eh *e, uint32_t codec, uint32_t w, uint32_t h,
             eb.index = i;
             if (v4l2_ioctl(e->fd, VIDIOC_EXPBUF, &eb))
                 return -1;
+            e->caplen = pl[0].length;
             e->cap[i] = mmap(NULL, pl[0].length, PROT_READ, MAP_SHARED, eb.fd,
                              (off_t)pl[0].m.mem_offset);
             close(eb.fd);                /* the mapping outlives the fd     */
         }
         if (e->cap[i] == MAP_FAILED)
             return -1;
+    }
+    for (i = 0; i < EH_N && g_outmem == V4L2_MEMORY_MMAP; i++) {
+        /* map the raw planes, like CAPTURE */
+        struct v4l2_buffer b;
+        struct v4l2_plane pl[VIDEO_MAX_PLANES];
+        struct v4l2_exportbuffer eb;
+        unsigned p;
+
+        memset(&b, 0, sizeof(b));
+        memset(pl, 0, sizeof(pl));
+        b.type = OUT;
+        b.memory = V4L2_MEMORY_MMAP;
+        b.index = i;
+        b.length = e->onp;
+        b.m.planes = pl;
+        if (v4l2_ioctl(e->fd, VIDIOC_QUERYBUF, &b))
+            return -1;
+        memset(&eb, 0, sizeof(eb));
+        eb.type = OUT;
+        eb.index = i;
+        if (v4l2_ioctl(e->fd, VIDIOC_EXPBUF, &eb))
+            return -1;
+        for (p = 0; p < e->onp && p < 3; p++) {
+            e->raw[i][p] = mmap(NULL, pl[p].length, PROT_READ | PROT_WRITE,
+                                MAP_SHARED, eb.fd, (off_t)pl[p].m.mem_offset);
+            if (e->raw[i][p] == MAP_FAILED)
+                return -1;
+        }
+        close(eb.fd);
     }
     t = OUT;
     if (v4l2_ioctl(e->fd, VIDIOC_STREAMON, &t))
@@ -161,7 +205,16 @@ static inline int eh_open(struct eh *e, uint32_t codec, uint32_t w, uint32_t h,
 
 static inline void eh_close(struct eh *e)
 {
+    unsigned i, p;
+
     (void)v4l2_close(e->fd);             /* mappings outlive the memfd     */
+    for (i = 0; i < EH_N; i++) {         /* unmap what eh_open mapped      */
+        if (e->cap[i] && e->cap[i] != MAP_FAILED)
+            munmap(e->cap[i], e->caplen);
+        for (p = 0; p < e->onp && p < 3; p++)
+            if (e->raw[i][p] && e->raw[i][p] != MAP_FAILED)
+                munmap(e->raw[i][p], e->olen[p]);
+    }
 }
 
 /* Queue a raw frame (bytesused != 0) or the EOS marker (n == 0). */
@@ -173,12 +226,14 @@ static inline int eh_put(struct eh *e, unsigned idx, uint32_t used, long pts)
     memset(&b, 0, sizeof(b));
     memset(pl, 0, sizeof(pl));
     b.type = OUT;
-    b.memory = V4L2_MEMORY_MMAP;
+    b.memory = g_outmem;
     b.index = idx;
-    b.length = 2;
+    b.length = e->onp;
     b.m.planes = pl;
+    pl[0].m.fd = e->dmafd[idx];          /* DMABUF: one fd covers all planes */
     pl[0].bytesused = used;
     pl[1].bytesused = used / 2;
+    pl[2].bytesused = used / 2;
     b.timestamp.tv_usec = pts;
     return v4l2_ioctl(e->fd, VIDIOC_QBUF, &b);
 }
@@ -196,8 +251,8 @@ static inline int eh_slot(struct eh *e, int *idx)
     memset(&b, 0, sizeof(b));
     memset(pl, 0, sizeof(pl));
     b.type = OUT;
-    b.memory = V4L2_MEMORY_MMAP;
-    b.length = 2;
+    b.memory = g_outmem;
+    b.length = e->onp;
     b.m.planes = pl;
     if (v4l2_ioctl(e->fd, VIDIOC_DQBUF, &b))
         return -1;
@@ -247,8 +302,8 @@ static inline int dq_raw(struct eh *e, uint32_t type, uint32_t *used)
     memset(&b, 0, sizeof(b));
     memset(pl, 0, sizeof(pl));
     b.type = type;
-    b.memory = V4L2_MEMORY_MMAP;
-    b.length = type == OUT ? 2 : 1;
+    b.memory = type == OUT ? g_outmem : V4L2_MEMORY_MMAP;
+    b.length = type == OUT ? e->onp : 1;
     b.m.planes = pl;
     r = v4l2_ioctl(e->fd, VIDIOC_DQBUF, &b);
     if (!r && used)

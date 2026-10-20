@@ -48,6 +48,8 @@ void test_encoder_model(void);
 void test_encoder_hevc_params(void);
 /* test_mock_vui.c: S_PARM frame rate, VUI timing_info, AU size bound. */
 void test_encoder_vui(void);
+/* test_mock_h264.c: decodable H.264 slices (I_PCM, P skip) of the encoder. */
+void test_encoder_h264(void);
 /* test_mock_xform.c: NvBufSurfTransform NV12 <-> I420 conversion. */
 void test_transform_nv12_i420(void);
 

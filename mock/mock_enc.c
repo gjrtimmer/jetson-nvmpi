@@ -14,13 +14,17 @@
  *                    buffers so the EAGAIN path can be driven. Returned
  *                    OUTPUT buffers report bytesused 0 (EOS after the buffer
  *                    pool wrapped relies on that; see enc_release()).
- *   CAPTURE (AUs)    One canned Annex-B access unit per frame (H.264 or HEVC
- *                    from the CAPTURE pixelformat, picture size from the
- *                    OUTPUT format; mock_enc_nal.c), the input timestamp
- *                    copied through, KEYFRAME/PFRAME flags set. The AU is
+ *   CAPTURE (AUs)    One Annex-B access unit per frame (H.264 or HEVC from
+ *                    the CAPTURE pixelformat, picture size from the OUTPUT
+ *                    format; mock_enc_nal.c), the input timestamp copied
+ *                    through, KEYFRAME/PFRAME flags set. H.264 is decodable
+ *                    (#117): key frames are I_PCM macroblocks carrying the
+ *                    OUTPUT picture (mock_enc_pic.c), P frames are all
+ *                    skip; HEVC slices stay canned (#118). The slice RBSP is
  *                    built in a heap scratch buffer sized from the picture
- *                    (enc_scratch_size) and copied into the mapped buffer;
- *                    one that does not fit its length, or a picture above
+ *                    (enc_scratch_size) and the NAL units are written
+ *                    straight into the mapped CAPTURE buffer; an AU that
+ *                    does not fit its length, or a picture above
  *                    MOCK_ENC_MAX_PIXELS, completes with V4L2_BUF_FLAG_ERROR.
  *   GOP              Frame 0, a forced IDR (FORCE_FRAME_TYPE), every
  *                    IDR_INTERVAL frames: IDR. Every GOP_SIZE frames: key
@@ -79,16 +83,19 @@ static void enc_on_open(struct mock_ctx *ctx)
  * bytesperline (aligned to 32 like the hardware's pitch, so stride != width
  * is exercised) and sizeimage = bytesperline * plane height. NvV4l2Element
  * reads both back after S_FMT; a zero stride would make every frame empty. */
-/* Bytes the scratch buffer needs for a w x h picture: ~1.5 bytes per pixel
- * (a PCM key frame, #110) plus header room. 0 = refuse (above the pixel
- * bound; also keeps the product far from size_t overflow). */
+/* Bytes the RBSP scratch buffer needs for a w x h picture: an I_PCM key
+ * frame (#117) takes MOCK_ENC_MB_MAX bytes per macroblock of the picture
+ * rounded up to whole macroblocks, plus header room (derivation in
+ * mock_enc.h). 0 = refuse (above the pixel bound; also keeps the product
+ * far from size_t overflow). */
 static size_t enc_scratch_size(uint32_t w, uint32_t h)
 {
     uint64_t px = (uint64_t)w * h;
+    uint64_t nmb = (uint64_t)((w + 15) / 16) * ((h + 15) / 16);
 
     if (px > MOCK_ENC_MAX_PIXELS)
         return 0;
-    return (size_t)(px + px / 2) + MOCK_ENC_AU_HEADROOM;
+    return (size_t)(nmb * MOCK_ENC_MB_MAX) + MOCK_ENC_AU_HEADROOM;
 }
 
 /* (Re)size the AU scratch buffer for the OUTPUT picture. The buffer is
@@ -191,35 +198,34 @@ static void enc_release(struct mock_ctx *ctx, struct enc_model *m, uint32_t keep
 
 /* Render one AU into CAPTURE buffer ci. Returns bytes written; 0 = failure
  * (picture refused, AU larger than the buffer, CAPTURE not MMAP, mapping
- * failed, unsupported format): the caller flags the buffer with ERROR. */
+ * failed, unsupported format): the caller flags the buffer with ERROR. The
+ * RBSP lives in m->scratch, the NAL units go straight into the CAPTURE
+ * mapping (separate memory, no aliasing); a failed AU may leave partial
+ * bytes there, but it completes flagged ERROR with bytesused 1. */
 static size_t write_au(struct mock_ctx *ctx, struct enc_model *m, int ci,
                        const struct mock_enc_au *au)
 {
     struct mock_queue *cap = &ctx->q[MOCK_Q_CAPTURE];
     struct mock_buf *cb = &cap->bufs[ci];
-    size_t room, n, off;
+    size_t n;
     void *p;
 
-    if (!m->scratch || cap->memory != V4L2_MEMORY_MMAP || cb->memfd < 0) {
+    if (!m->scratch || cap->memory != V4L2_MEMORY_MMAP || cb->memfd < 0 ||
+        cb->length[0] == 0) {
         MOCK_ERR("encoder: no AU buffer (picture refused or CAPTURE not MMAP)");
         return 0;
     }
-    /* The builder stops at the smaller of scratch and the CAPTURE buffer,
-     * so an AU is never truncated: it either fits whole or is refused. */
-    room = m->scratch_cap < cb->length[0] ? m->scratch_cap : cb->length[0];
-    n = mock_enc_build_au(au, m->scratch, room);
-    if (!n) {
-        MOCK_ERR("encoder: AU does not fit %zu bytes (capture buffer %u)", room,
-                 cb->length[0]);
-        return 0;
-    }
-    /* The plane offset inside the memfd is page aligned (queue.c). */
-    off = cb->plane_off[0];
-    p = mmap(NULL, n, PROT_WRITE, MAP_SHARED, cb->memfd, (off_t)off);
+    /* The plane offset inside the memfd is page aligned (queue.c). Mapped
+     * here; unmapped below (single point), whatever the build result. */
+    p = mmap(NULL, cb->length[0], PROT_WRITE, MAP_SHARED, cb->memfd,
+             (off_t)cb->plane_off[0]);
     if (p == MAP_FAILED)
         return 0;
-    memcpy(p, m->scratch, n);
-    munmap(p, n);
+    n = mock_enc_build_au(au, p, cb->length[0], m->scratch, m->scratch_cap);
+    munmap(p, cb->length[0]);
+    if (!n)
+        MOCK_ERR("encoder: AU does not fit (capture buffer %u, scratch %zu)",
+                 cb->length[0], m->scratch_cap);
     return n;
 }
 
@@ -231,6 +237,7 @@ static void encode_frame(struct mock_ctx *ctx, struct enc_model *m, int oi, int 
     struct mock_queue *cap = &ctx->q[MOCK_Q_CAPTURE];
     struct v4l2_pix_format_mplane *raw = &out->fmt.fmt.pix_mp;
     struct mock_enc_au au;
+    struct mock_enc_pic pic;
     uint32_t used[MOCK_MAX_PLANES] = { 0 }, flags;
     bool idr = m->frames == 0 || m->force_idr ||
                (m->idr_interval && m->since_idr >= m->idr_interval);
@@ -250,7 +257,13 @@ static void encode_frame(struct mock_ctx *ctx, struct enc_model *m, int oi, int 
         au.tpf_num = out->tpf.numerator;
         au.tpf_den = out->tpf.denominator;
     }
+    /* The OUTPUT frame supplies the H.264 PCM samples (HEVC slices are
+     * canned until #118 and ignore it). Mapped here; unmapped right after
+     * the AU is written. Unreadable input becomes a pattern, never fails. */
+    mock_enc_pic_map(out, oi, au.seq, &pic);
+    au.pic = &pic;
     n = write_au(ctx, m, ci, &au);
+    mock_enc_pic_unmap(&pic);
     flags = n ? 0 : V4L2_BUF_FLAG_ERROR;
     flags |= key ? V4L2_BUF_FLAG_KEYFRAME : V4L2_BUF_FLAG_PFRAME;
     used[0] = n ? (uint32_t)n : 1;       /* never 0: 0 means EOS to libnvmpi */
