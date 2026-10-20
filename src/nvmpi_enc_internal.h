@@ -92,6 +92,20 @@ struct nvmpi_enc_ctx : nvmpictx
 	std::atomic<bool> capPlaneGotEOS{false};
 	std::atomic<bool> flushing{false};
 
+	/* Encoder back-pressure (issue #125). aus_pending = frames accepted by
+	 * put_frame whose AU the DQ callback has not yet consumed (published,
+	 * or dropped on an error path). Incremented by the user thread just
+	 * before the OUTPUT buffer is queued; decremented by the DQ callback
+	 * after releaseHold(). Signed: it is only a counter, never an index.
+	 * Non-blocking put_frame admits a frame only while
+	 *   aus_pending < pktPool->emptyAvailable()
+	 * so every in-flight AU owns a packet and the callback never finds the
+	 * pool empty. Reset by nvmpi_encoder_flush() (STREAMOFF discards the
+	 * frames in flight). aus_dropped counts last-resort drops (contract
+	 * violation by the caller); it must stay 0. */
+	std::atomic<int> aus_pending{0};
+	std::atomic<unsigned> aus_dropped{0};
+
 	/* Blocking-wait ceiling for nvmpi_encoder_get_packet() when wait=true.
 	 * Mirrors the decoder's wait_timeout_ms (default 500ms). */
 	unsigned int wait_timeout_ms{500};
@@ -112,6 +126,21 @@ struct nvmpi_enc_ctx : nvmpictx
 	NVMPI_bufPool<nvPacket*>* pktPool;
 	int *output_plane_fd; //array to store dmabuf fd's
 };
+
+//Non-blocking admission test, user thread only. True when one more frame
+//may be queued without risking an AU that finds no packet.
+//Order matters: aus_pending is read BEFORE the pool capacity. The DQ
+//callback publishes, releases the hold, and only then decrements
+//aus_pending, so a reader that sees the new (lower) pending also sees the
+//new capacity; the reverse read order could pair a stale-high capacity with
+//a fresh-low pending and over-admit. The races left only under-admit (a
+//spurious EAGAIN the caller retries after draining).
+static inline bool enc_can_admit(nvmpi_enc_ctx* ctx)
+{
+	int pending = ctx->aus_pending.load(std::memory_order_seq_cst);
+	size_t avail = ctx->pktPool->emptyAvailable();
+	return pending < 0 || (size_t)pending < avail;
+}
 
 //Forward declarations for functions defined across the split encoder files.
 //encoder_capture_plane_dq_callback: defined in nvmpi_enc_output.cpp; registered

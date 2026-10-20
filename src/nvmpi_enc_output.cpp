@@ -9,8 +9,12 @@
 //bitstream into the packet, then publish it "filled" for
 //nvmpi_encoder_get_packet(); release the hold; finally re-queue the V4L2
 //buffer so the encoder can reuse it. If the pool is empty the encoded data
-//is DROPPED (warning printed) — the FFmpeg wrapper sizes the pool via the
-//packet_pool_size option to avoid this.
+//is DROPPED (error printed, ctx->aus_dropped counted). Non-blocking mode
+//cannot reach that: put_frame admits a frame only while the pool holds a
+//packet for every AU still owed (aus_pending, issue #125). Blocking mode
+//relies on the caller's pool size (FFmpeg packet_pool_size) as before.
+//Every non-EOS buffer consumes exactly one aus_pending count, on every
+//path below, after releaseHold() (see enc_can_admit for the ordering).
 //Held window (issue #121): between the take and the publish the packet is
 //in neither pool queue. The hold lets nvmpi_encoder_dqEmptyPacket() (the
 //teardown drain) wait for it instead of closing while it is in flight.
@@ -43,8 +47,15 @@ bool encoder_capture_plane_dq_callback(struct v4l2_buffer *v4l2_buf, NvBuffer * 
 
 	if(!pkt)
 	{
-		//TODO wait for user to read buffer. make send_frame return AVERROR(EAGAIN) until avcodec_receive_packet() is called
-		NVMPI_LOG(NVMPI_LOG_WARN, "EAGAIN: user must read output; encoder packet pool empty; packet dropped; there may be artifacts in output video");
+		//Last resort, unreachable with a well-behaved non-blocking caller
+		//(admission in put_frame). Reached in blocking mode with a pool
+		//smaller than the frames in flight, or if the caller removed packets
+		//(dqEmptyPacket) outside teardown. The capture buffer is re-queued
+		//below like every other one; nothing is leaked.
+		ctx->aus_dropped.fetch_add(1, std::memory_order_relaxed);
+		NVMPI_LOG(NVMPI_LOG_ERROR, "encoder packet pool empty; encoded frame dropped (%u so far); caller must return packets with qEmptyPacket after get_packet; there will be artifacts in output video",
+			ctx->aus_dropped.load(std::memory_order_relaxed));
+		ctx->aus_pending.fetch_sub(1, std::memory_order_seq_cst);
 	}
 	else if (buffer->planes[0].bytesused > NVMPI_ENC_CHUNK_SIZE)
 	{
@@ -55,6 +66,7 @@ bool encoder_capture_plane_dq_callback(struct v4l2_buffer *v4l2_buf, NvBuffer * 
 		ctx->pktPool->qEmptyBuf(pkt);
 		//publish-then-release: the packet is back in the empty queue first
 		ctx->pktPool->releaseHold();
+		ctx->aus_pending.fetch_sub(1, std::memory_order_seq_cst);
 	}
 	else
 	{
@@ -68,6 +80,9 @@ bool encoder_capture_plane_dq_callback(struct v4l2_buffer *v4l2_buf, NvBuffer * 
 		//must find the packet in the filled queue
 		ctx->pktPool->qFilledBuf(pkt);
 		ctx->pktPool->releaseHold();
+		//after the release: the freed hold and the lower count must never
+		//be observed the other way round (over-admission)
+		ctx->aus_pending.fetch_sub(1, std::memory_order_seq_cst);
 	}
 
 	if (ctx->enc->capture_plane.qBuffer(*v4l2_buf, NULL) < 0)

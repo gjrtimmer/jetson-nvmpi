@@ -66,6 +66,11 @@ int nvmpi_encoder_put_frame_fd(nvmpictx* h,
 	if (ctx->enc->isInError())
 		return -1;
 
+	/* Non-blocking back-pressure (issue #125), see nvmpi_encoder_put_frame.
+	 * EOS (dmabuf_fd < 0) yields no AU and is never refused here. */
+	if (dmabuf_fd >= 0 && !ctx->blocking_mode && !enc_can_admit(ctx))
+		return NVMPI_ERR_EAGAIN;
+
 	/* Buffer acquisition: same index-then-dqBuffer pattern as put_frame.
 	 * First N frames use sequential indices; after that, reclaim a used
 	 * buffer. Blocking mode waits indefinitely; non-blocking returns
@@ -291,8 +296,13 @@ int nvmpi_encoder_put_frame_fd(nvmpictx* h,
 		v4l2_buf.m.planes[1].bytesused = 0;
 	}
 
+	/* Count the owed AU before queueing (see nvmpi_encoder_put_frame). */
+	if (dmabuf_fd >= 0)
+		ctx->aus_pending.fetch_add(1, std::memory_order_seq_cst);
 	ret = ctx->enc->output_plane.qBuffer(v4l2_buf, NULL);
 	if (ret < 0) {
+		if (dmabuf_fd >= 0)
+			ctx->aus_pending.fetch_sub(1, std::memory_order_seq_cst);
 		NVMPI_LOG(NVMPI_LOG_ERROR, "Error while queueing buffer at output plane (dmabuf mode, code=%d)", ret);
 		return ret;
 	}

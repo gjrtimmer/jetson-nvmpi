@@ -85,6 +85,13 @@ int nvmpi_encoder_put_frame(nvmpictx* h,nvFrame* frame)
 	if(ctx->enc->isInError())
 		return -1;
 
+	/* Non-blocking back-pressure (issue #125): refuse a frame whose AU
+	 * could find no packet. Checked before any OUTPUT buffer is taken, so
+	 * EAGAIN leaves the encoder untouched. EOS (frame==NULL) yields no AU
+	 * and is never refused here. */
+	if(frame && !ctx->blocking_mode && !enc_can_admit(ctx))
+		return NVMPI_ERR_EAGAIN;
+
 	if(ctx->index < ctx->enc->output_plane.getNumBuffers())
 	{
 		nvBuffer=ctx->enc->output_plane.getNthBuffer(ctx->index);
@@ -172,8 +179,14 @@ int nvmpi_encoder_put_frame(nvmpictx* h,nvFrame* frame)
 	}
 #endif
 
+	/* This frame now owes one AU. Counted BEFORE the queue call so the DQ
+	 * callback can never decrement first; rolled back if the queue fails. */
+	if(frame)
+		ctx->aus_pending.fetch_add(1, std::memory_order_seq_cst);
 	ret = ctx->enc->output_plane.qBuffer(v4l2_buf, NULL);
 	if (ret < 0) {
+		if(frame)
+			ctx->aus_pending.fetch_sub(1, std::memory_order_seq_cst);
 		NVMPI_LOG(NVMPI_LOG_ERROR, "Error while queueing buffer at output plane (code=%d)", ret);
 		return ret;
 	}

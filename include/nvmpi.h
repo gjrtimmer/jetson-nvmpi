@@ -28,8 +28,10 @@
 //this are dropped with an error instead of overflowing the packet buffer.
 #define NVMPI_ENC_CHUNK_SIZE 10*1024*1024
 
-/* Encoder would block waiting for a free OUTPUT-plane buffer; caller should
- * drain output packets (receive_packet) and retry. Matches Linux EAGAIN. */
+/* Non-blocking encoder cannot take the frame now: no free OUTPUT-plane
+ * buffer, or every empty packet is already owed an access unit. The frame
+ * was NOT queued. Caller must drain get_packet (returning each packet with
+ * qEmptyPacket) and retry the same frame. Matches Linux EAGAIN. */
 #define NVMPI_ERR_EAGAIN (-11)
 
 //Opaque context handle. Note: the decoder and encoder each define their own
@@ -104,6 +106,8 @@ typedef struct _NVENCPARAM{
 	int nonblocking;               //non-zero: put_frame/put_frame_fd return NVMPI_ERR_EAGAIN
 	                               //instead of blocking when no OUTPUT-plane buffer is available.
 	                               //Default 0 = blocking (backward compatible).
+	                               //Non-blocking mode never loses an encoded frame: see
+	                               //nvmpi_encoder_put_frame().
 } nvEncParam;
 
 //Decoder creation parameters, consumed once by nvmpi_create_decoder().
@@ -262,8 +266,16 @@ extern "C" {
 	//In non-blocking mode (nonblocking=1): returns NVMPI_ERR_EAGAIN when no
 	//OUTPUT-plane buffer is available — caller should drain encoded packets
 	//via get_packet and retry. frame==NULL sends EOS and puts the encoder
-	//into flushing mode. Returns 0 on success, NVMPI_ERR_EAGAIN when
-	//non-blocking and no buffer available, -2 if already flushing, -1 if
+	//into flushing mode (never refused for lack of packets).
+	//Non-blocking back-pressure: a frame is also refused (NVMPI_ERR_EAGAIN,
+	//not queued) while the frames in flight would outnumber the empty
+	//packets of the pool, so every accepted frame has a packet waiting for
+	//its encoded output and nothing is dropped. The caller must read
+	//packets (get_packet) and return them (qEmptyPacket), then retry the
+	//same frame. The pool must hold more packets than the encoder delays
+	//frames (B-frames/reordering), or no output appears until EOS.
+	//Returns 0 on success, NVMPI_ERR_EAGAIN when
+	//non-blocking and no buffer/packet available, -2 if already flushing, -1 if
 	//the encoder is in error or the blocking dequeue failed, or the negative
 	//queue (qBuffer) error code.
 	int nvmpi_encoder_put_frame(nvmpictx* ctx, nvFrame* frame);

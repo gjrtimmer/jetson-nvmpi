@@ -63,9 +63,12 @@ wrap it yourself when using it in an expression: `(NVMPI_ENC_CHUNK_SIZE)`.
 
 `nvmpi.h:33` -- `#define NVMPI_ERR_EAGAIN (-11)`
 
-Returned by the non-blocking encoder submit calls when no OUTPUT-plane buffer
-is free. Drain output packets with `nvmpi_encoder_get_packet` and retry. The
-value matches Linux `EAGAIN`.
+Returned by the non-blocking encoder submit calls when the frame cannot be
+taken now: no OUTPUT-plane buffer is free, or the pool has no spare packet for
+the frame's encoded output (see `nvmpi_encoder_put_frame`). The frame was not
+queued. Drain output packets with `nvmpi_encoder_get_packet`, return each with
+`nvmpi_encoder_qEmptyPacket`, and retry the same frame. The value matches Linux
+`EAGAIN`.
 
 ## Enums
 
@@ -334,10 +337,22 @@ blocking mode (default) it blocks waiting for a free buffer. With
 `nonblocking=1` it returns `NVMPI_ERR_EAGAIN` when none is free. `frame == NULL`
 sends EOS and puts the encoder into flushing mode.
 
+Non-blocking back-pressure (no silent drops): besides the OUTPUT-buffer check,
+a frame is refused with `NVMPI_ERR_EAGAIN` (and not queued) while the frames
+already in flight would outnumber the pool's empty packets. Each accepted frame
+therefore has an empty packet reserved for its encoded output, and the capture
+callback never has to discard an access unit. After `EAGAIN` call
+`nvmpi_encoder_get_packet` until it reports nothing ready, return every packet
+with `nvmpi_encoder_qEmptyPacket`, then retry the same frame. EOS is never
+refused for lack of packets. The pool must hold more packets than the encoder
+holds frames back (B-frames, reordering); a pool smaller than that produces no
+output until EOS. Blocking mode is unchanged: the caller sizes the pool, and an
+access unit that finds the pool empty is dropped with an error log.
+
 | Return | Meaning |
 | --- | --- |
 | `0` | Success. |
-| `NVMPI_ERR_EAGAIN` (-11) | Non-blocking mode and no OUTPUT buffer is free. |
+| `NVMPI_ERR_EAGAIN` (-11) | Non-blocking mode and no OUTPUT buffer is free, or no empty packet is spare for the frame's output. The frame was not queued. |
 | `-2` | Already flushing (EOS was sent). |
 | `-1` | Encoder is in an error state, or the blocking dequeue failed. |
 | other negative | The error code from queueing the buffer on the OUTPUT plane. |
@@ -551,7 +566,7 @@ NV12 DMA-BUF surface with pitch-linear layout and matching dimensions. The
 encoder reads it directly through `V4L2_MEMORY_DMABUF`. Requires
 `nvEncParam::use_dmabuf = 1` at creation time; otherwise the call fails.
 `dmabuf_fd == -1` signals EOS. Returns `0`, `NVMPI_ERR_EAGAIN` (non-blocking,
-no buffer), or a negative value on error or if already flushing.
+no buffer or no spare packet, same back-pressure rule as `nvmpi_encoder_put_frame`), or a negative value on error or if already flushing.
 
 For fds you allocate yourself and pass to the encoder, use
 [`nvmpi_surface_alloc_for_enc`](#nvmpi_surface_alloc_for_enc).

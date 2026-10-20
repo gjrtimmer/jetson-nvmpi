@@ -186,7 +186,10 @@ int nvmpi_encoder_flush(nvmpictx* h)
 			ctx->pktPool->qEmptyBuf(pkt);
 	}
 
-	/* 4. Reset EOS/flushing atomics so put_frame/get_packet work again. */
+	/* 4. Reset EOS/flushing atomics so put_frame/get_packet work again.
+	 *    STREAMOFF discarded every frame in flight, so no AU is owed. The
+	 *    DQ thread is stopped: nothing decrements concurrently. */
+	ctx->aus_pending.store(0, std::memory_order_seq_cst);
 	ctx->flushing.store(false, std::memory_order_release);
 	ctx->capPlaneGotEOS.store(false, std::memory_order_release);
 

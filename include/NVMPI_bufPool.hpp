@@ -100,6 +100,9 @@ struct NVMPI_bufPool
 	 * nothing is held (settled), on timeout, or after shutdown(). Woken by
 	 * releaseHold()/qEmptyBuf(); never blocks when nothing is held. */
 	T dqEmptyBufSettled(std::chrono::milliseconds timeout);
+	/* Empty queue size + held count, one observation under m_emptyBuf.
+	 * Encoder admission (issue #125) compares it with the frames owed an AU. */
+	size_t emptyAvailable();
 
 	/* Non-blocking: returns NULL immediately if queue is empty. */
 	T dqFilledBuf();
@@ -258,6 +261,14 @@ T NVMPI_bufPool<T>::dqEmptyBufSettled(std::chrono::milliseconds timeout)
 			return NULL;
 		cv_emptyBuf.wait_for(lock, std::min(remaining, GRANULARITY));
 	}
+}
+
+/* Empty queue size + held count under m_emptyBuf only. */
+template<typename T>
+size_t NVMPI_bufPool<T>::emptyAvailable()
+{
+	std::lock_guard<std::mutex> lock(m_emptyBuf);
+	return emptyBuf.size() + held;
 }
 
 /* Peek at the front empty buffer without removing it (non-blocking).

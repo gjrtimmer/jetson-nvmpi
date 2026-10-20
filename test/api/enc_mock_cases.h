@@ -7,6 +7,7 @@
 #define NVMPI_TEST_ENC_MOCK_CASES_H
 
 #include "enc_mock_teardown.h"
+#include "enc_mock_backpressure.h"
 
 static const struct tcase k_cases[] = {
     { "blocking_h264", NULL, blocking_h264, 0 },
@@ -18,6 +19,8 @@ static const struct tcase k_cases[] = {
     { "force_idr", NULL, force_idr, 0 },
     { "nonblock_flow", NULL, nonblock_flow, 0 },
     { "nonblock_eagain", NULL, nonblock_eagain, 0 },
+    { "nonblock_backpressure", NULL, nonblock_backpressure, 0 },
+    { "nonblock_backpressure_latency", NULL, nonblock_backpressure_latency, 0 },
     { "flush_restart", NULL, flush_restart, 0 },
     { "dmabuf_flow", NULL, dmabuf_flow, 0 },
     { "teardown_in_flight", NULL, teardown_in_flight, 0 },
