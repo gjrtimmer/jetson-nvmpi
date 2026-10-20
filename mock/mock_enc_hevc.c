@@ -2,8 +2,9 @@
  * mock_enc_hevc.c - HEVC parameter sets and slice headers of the encoder
  * model (#108).
  *
- * VPS/SPS/PPS are REAL, spec-conformant syntax (H.265 7.3.2): Main profile,
- * 8-bit 4:2:0, the encoder's actual picture size, so FFmpeg can build hvcC
+ * VPS/SPS/PPS are REAL, spec-conformant syntax (H.265 7.3.2): Main profile
+ * (Main10 with 10-bit luma/chroma when the H265_PROFILE control says so,
+ * #126), 4:2:0, the encoder's actual picture size, so FFmpeg can build hvcC
  * (mp4/mkv) and RTP sprop-* from them. The slice NAL starts with a real
  * slice_segment_header() matching those sets, followed by decodable CABAC
  * slice data (#118, mock_enc_hevc_slice.c).
@@ -34,13 +35,15 @@ static unsigned hevc_level_idc(uint32_t w, uint32_t h)
     return 186;                        /* 6.2 */
 }
 
-/* profile_tier_level(1, 0): Main, tier 0, progressive frame-only stream. */
-static void put_ptl(struct bw *bw, unsigned level_idc)
+/* profile_tier_level(1, 0): Main or Main10, tier 0, progressive frame-only
+ * stream. Main10 (profile_idc 2) is compatible with itself only; Main
+ * streams also flag Main10 compatibility (every Main stream is Main10). */
+static void put_ptl(struct bw *bw, unsigned level_idc, bool main10)
 {
     put_bits(bw, 0, 2);                /* general_profile_space            */
     put_bits(bw, 0, 1);                /* general_tier_flag                */
-    put_bits(bw, 1, 5);                /* general_profile_idc: Main        */
-    put_bits(bw, 0x60000000u, 32);     /* compat flags 1 (Main) and 2 (Main10) */
+    put_bits(bw, main10 ? 2 : 1, 5);   /* general_profile_idc              */
+    put_bits(bw, main10 ? 0x20000000u : 0x60000000u, 32); /* compat flags  */
     put_bits(bw, 1, 1);                /* progressive_source_flag          */
     put_bits(bw, 0, 1);                /* interlaced_source_flag           */
     put_bits(bw, 0, 1);                /* non_packed_constraint_flag       */
@@ -51,7 +54,7 @@ static void put_ptl(struct bw *bw, unsigned level_idc)
     put_bits(bw, level_idc, 8);        /* general_level_idc                */
 }
 
-static size_t hevc_vps(uint8_t *out, size_t room, unsigned lvl)
+static size_t hevc_vps(uint8_t *out, size_t room, unsigned lvl, bool main10)
 {
     uint8_t rbsp[PS_MAX] = { 0 };
     struct bw bw = { rbsp, sizeof(rbsp), 0, false };
@@ -63,7 +66,7 @@ static size_t hevc_vps(uint8_t *out, size_t room, unsigned lvl)
     put_bits(&bw, 0, 3);               /* vps_max_sub_layers_minus1        */
     put_bits(&bw, 1, 1);               /* vps_temporal_id_nesting_flag     */
     put_bits(&bw, 0xffff, 16);         /* vps_reserved_0xffff_16bits       */
-    put_ptl(&bw, lvl);
+    put_ptl(&bw, lvl, main10);
     put_bits(&bw, 1, 1);               /* sub_layer_ordering_info_present  */
     put_ue(&bw, 1);                    /* max_dec_pic_buffering_minus1     */
     put_ue(&bw, 0);                    /* max_num_reorder_pics             */
@@ -98,7 +101,7 @@ static void put_vui(struct bw *bw, uint32_t tick, uint32_t scale)
 }
 
 static size_t hevc_sps(uint8_t *out, size_t room, uint32_t w, uint32_t h,
-                       unsigned lvl, uint32_t tick, uint32_t scale)
+                       unsigned lvl, uint32_t tick, uint32_t scale, bool main10)
 {
     uint8_t rbsp[PS_MAX] = { 0 };
     struct bw bw = { rbsp, sizeof(rbsp), 0, false };
@@ -110,7 +113,7 @@ static size_t hevc_sps(uint8_t *out, size_t room, uint32_t w, uint32_t h,
     put_bits(&bw, 0, 4);               /* sps_video_parameter_set_id       */
     put_bits(&bw, 0, 3);               /* sps_max_sub_layers_minus1        */
     put_bits(&bw, 1, 1);               /* sps_temporal_id_nesting_flag     */
-    put_ptl(&bw, lvl);
+    put_ptl(&bw, lvl, main10);
     put_ue(&bw, 0);                    /* sps_seq_parameter_set_id         */
     put_ue(&bw, 1);                    /* chroma_format_idc: 4:2:0         */
     put_ue(&bw, pw);                   /* pic_width_in_luma_samples        */
@@ -124,8 +127,8 @@ static size_t hevc_sps(uint8_t *out, size_t room, uint32_t w, uint32_t h,
     } else {
         put_bits(&bw, 0, 1);
     }
-    put_ue(&bw, 0);                    /* bit_depth_luma_minus8            */
-    put_ue(&bw, 0);                    /* bit_depth_chroma_minus8          */
+    put_ue(&bw, main10 ? 2 : 0);       /* bit_depth_luma_minus8            */
+    put_ue(&bw, main10 ? 2 : 0);       /* bit_depth_chroma_minus8          */
     put_ue(&bw, 4);                    /* log2_max_poc_lsb_minus4 (8 bits) */
     put_bits(&bw, 1, 1);               /* sub_layer_ordering_info_present  */
     put_ue(&bw, 1);                    /* max_dec_pic_buffering_minus1     */
@@ -197,15 +200,16 @@ static size_t hevc_pps(uint8_t *out, size_t room)
 }
 
 size_t mock_enc_hevc_params(uint8_t *out, size_t room, uint32_t w, uint32_t h,
-                            uint32_t tpf_num, uint32_t tpf_den)
+                            uint32_t tpf_num, uint32_t tpf_den, bool main10)
 {
     unsigned lvl = hevc_level_idc(w, h);
     size_t o = 0, n;
 
-    if (!(n = hevc_vps(out, room, lvl)))
+    if (!(n = hevc_vps(out, room, lvl, main10)))
         return 0;
     o += n;
-    if (!(n = hevc_sps(out + o, room - o, w, h, lvl, tpf_num, tpf_den)))
+    if (!(n = hevc_sps(out + o, room - o, w, h, lvl, tpf_num, tpf_den,
+                           main10)))
         return 0;
     o += n;
     if (!(n = hevc_pps(out + o, room - o)))

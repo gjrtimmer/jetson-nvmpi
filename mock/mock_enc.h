@@ -67,6 +67,7 @@ struct enc_model {
     uint32_t held;                 /* consumed OUTPUT buffers not returned   */
     uint32_t seq;                  /* AU payload counter (content varies)    */
     bool     insert_vui;           /* INSERT_VUI: SPS carries timing_info    */
+    bool     main10;               /* H265_PROFILE = Main10: SPS says 10-bit */
     uint8_t *scratch;              /* AU build buffer, calloc'd in on_fmt,
                                     * freed in enc_on_close/on_fmt resize    */
     size_t   scratch_cap;          /* bytes in scratch; 0 = picture refused  */
@@ -80,6 +81,7 @@ struct mock_enc_au {
     bool     idr;                  /* IDR slice (else P, or I when key)      */
     bool     key;                  /* key frame (IDR, or periodic I)         */
     bool     headers;              /* prepend SPS+PPS (+VPS for HEVC)        */
+    bool     main10;               /* HEVC: Main10 profile, 10-bit SPS       */
     uint32_t seq;                  /* varies slice bytes frame to frame      */
     uint32_t poc;                  /* frames since the last IDR (HEVC POC)   */
     uint32_t tpf_num, tpf_den;     /* timeperframe; VUI emitted when both
@@ -132,9 +134,11 @@ size_t mock_enc_h264_au(const struct mock_enc_au *au, uint8_t *out, size_t cap,
  * slice header and CABAC slice data. Both return the bytes written, 0 when
  * room (or the rbsp scratch) is too small. tpf_num/tpf_den (timeperframe)
  * non-zero add VUI timing_info to the SPS: vui_num_units_in_tick = tpf_num,
- * vui_time_scale = tpf_den. */
+ * vui_time_scale = tpf_den. main10 writes general_profile_idc 2 and 10-bit
+ * luma/chroma in the SPS (the PCM sample depth stays 8: legal, and it keeps
+ * the slice data of the 8-bit key frames valid). */
 size_t mock_enc_hevc_params(uint8_t *out, size_t room, uint32_t w, uint32_t h,
-                            uint32_t tpf_num, uint32_t tpf_den);
+                            uint32_t tpf_num, uint32_t tpf_den, bool main10);
 size_t mock_enc_hevc_slice(const struct mock_enc_au *au, uint8_t *out,
                            size_t room, uint8_t *rbsp, size_t rbsp_cap);
 

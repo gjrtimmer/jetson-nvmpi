@@ -38,7 +38,8 @@ size_t mock_enc_build_au(const struct mock_enc_au *au, uint8_t *out, size_t cap,
     if (au->pixfmt == PIX_H265 || au->pixfmt == V4L2_PIX_FMT_HEVC) {
         if (au->headers) {
             if (!(o = mock_enc_hevc_params(out, cap, au->width, au->height,
-                                              au->tpf_num, au->tpf_den)))
+                                              au->tpf_num, au->tpf_den,
+                                           au->main10)))
                 return 0;
         }
         n = mock_enc_hevc_slice(au, out + o, cap - o, rbsp, rbsp_cap);
