@@ -254,7 +254,8 @@ int jpegFdPutPacket(nvmpictx_jpeg *ctx, nvPacket *packet)
 		dr = sr;
 		NvBufSurfTransformParams tp;
 		memset(&tp, 0, sizeof(tp));
-		tp.transform_flag = NVBUFSURF_TRANSFORM_FILTER;
+		/* CROP flags: crop the padded decode to w x h, don't scale it */
+		tp.transform_flag = NVBUFSURF_TRANSFORM_FILTER | NVBUFSURF_TRANSFORM_CROP_SRC | NVBUFSURF_TRANSFORM_CROP_DST;
 		tp.transform_filter = NvBufSurfTransformInter_Nearest;
 		tp.src_rect = &sr;
 		tp.dst_rect = &dr;
