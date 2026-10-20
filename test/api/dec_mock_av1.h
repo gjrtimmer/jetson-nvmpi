@@ -19,8 +19,8 @@ static int decode_av1(void)
     nvmpictx *c;
     int i, w = 0, h = 0;
 
-    setenv("NVMPI_MOCK_WIDTH", "64", 1);
-    setenv("NVMPI_MOCK_HEIGHT", "64", 1);
+    setenv("NVMPI_MOCK_WIDTH", "320", 1);
+    setenv("NVMPI_MOCK_HEIGHT", "240", 1);
     memset(&p, 0, sizeof(p));
     p.codingType = NV_VIDEO_CodingAV1;
     p.pixFormat = NV_PIX_NV12;

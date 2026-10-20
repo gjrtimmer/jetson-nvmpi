@@ -388,10 +388,10 @@ if(BUILD_TESTING)
     set_tests_properties(mock_selftest PROPERTIES
       ENVIRONMENT "LD_LIBRARY_PATH=${NVMPI_MOCK_LD}"
       TIMEOUT 300)
-    # test_api's AV1 hardware case checks a 64x64 frame; the mock has no AV1
+    # test_api's AV1 hardware case checks a 320x240 frame; the mock has no AV1
     # header parser, so it takes the stream size from the environment.
     set_tests_properties(api_mock PROPERTIES
-      ENVIRONMENT "LD_LIBRARY_PATH=${NVMPI_MOCK_LD};NVMPI_MOCK_WIDTH=64;NVMPI_MOCK_HEIGHT=64"
+      ENVIRONMENT "LD_LIBRARY_PATH=${NVMPI_MOCK_LD};NVMPI_MOCK_WIDTH=320;NVMPI_MOCK_HEIGHT=240"
       TIMEOUT 300)
   else()
     add_test(NAME api COMMAND test_api)

@@ -1,7 +1,7 @@
 /*
  * av1_case.h - hardware case for AV1 decode (#7), included by test_api.c.
  *
- * Creates an AV1 decoder, feeds the embedded 64x64 key-frame temporal unit
+ * Creates an AV1 decoder, feeds the embedded 320x240 key-frame temporal unit
  * and waits for one frame. Needs a real NVDEC with AV1 support (Orin; Xavier
  * has none). Outside strict mode (stubs, JetPack 5 builds, no device) it is
  * skipped; with NVMPI_TEST_STRICT=1 every shortfall is a failure. When
