@@ -13,7 +13,8 @@
  *   OBU_FRAME            32 <size> <frame header> <tile group>
  *
  * The sequence header is real: it carries the OUTPUT picture size and a
- * fixed tool set (profile 0, 8-bit 4:2:0, no order hints, CDEF and loop
+ * fixed tool set (profile 0, 8-bit 4:2:0 or, for a P010M
+ * OUTPUT plane, 10-bit via high_bitdepth, no order hints, CDEF and loop
  * restoration off, so the frame header needs no tool-specific syntax). The
  * frame header follows the spec for that sequence: a KEY_FRAME when au->key,
  * else an INTER_FRAME, single tile, base_q_idx 100, no filters. The tile
@@ -70,7 +71,8 @@ static size_t put_obu(uint8_t *out, size_t room, unsigned type,
 }
 
 /* sequence_header_obu() payload; returns bytes, 0 on overflow. */
-static size_t seq_hdr(uint8_t *b, size_t cap, uint32_t w, uint32_t h)
+static size_t seq_hdr(uint8_t *b, size_t cap, uint32_t w, uint32_t h,
+                      bool high_bd)
 {
     struct bw bw = { b, cap, 0, false };
 
@@ -102,7 +104,10 @@ static size_t seq_hdr(uint8_t *b, size_t cap, uint32_t w, uint32_t h)
     put_bits(&bw, 0, 1);               /* enable_superres                  */
     put_bits(&bw, 0, 1);               /* enable_cdef                      */
     put_bits(&bw, 0, 1);               /* enable_restoration               */
-    put_bits(&bw, 0, 1);               /* color: high_bitdepth (8-bit)     */
+    /* color_config(): seq_profile 0 has no twelve_bit bit, so high_bitdepth
+     * alone selects BitDepth 10 (P010M input, #146) over 8. Same bit count
+     * either way: nothing after it shifts. */
+    put_bits(&bw, high_bd ? 1 : 0, 1); /* high_bitdepth                    */
     put_bits(&bw, 0, 1);               /* mono_chrome                      */
     put_bits(&bw, 0, 1);               /* color_description_present_flag   */
     put_bits(&bw, 0, 1);               /* color_range                      */
@@ -189,7 +194,7 @@ static size_t av1_obus(const struct mock_enc_au *au, uint8_t *out, size_t cap)
         return 0;
     o += n;
     if (au->headers) {
-        n = seq_hdr(hdr, sizeof(hdr), au->width, au->height);
+        n = seq_hdr(hdr, sizeof(hdr), au->width, au->height, au->high_bd);
         if (!n || !(n = put_obu(out + o, cap - o, OBU_SEQ_HDR, hdr, n)))
             return 0;
         o += n;
