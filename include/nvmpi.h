@@ -29,9 +29,9 @@
 //this are dropped with an error instead of overflowing the packet buffer.
 #define NVMPI_ENC_CHUNK_SIZE 10*1024*1024
 
-/* Non-blocking encoder cannot take the frame now: no free OUTPUT-plane
- * buffer, or every empty packet is already owed an access unit. The frame
- * was NOT queued. Caller must drain get_packet (returning each packet with
+/* Encoder cannot take the frame now: no free OUTPUT-plane buffer
+ * (non-blocking mode only), or every empty packet is already owed an access
+ * unit (both modes, issue #145). The frame was NOT queued. Caller must drain get_packet (returning each packet with
  * qEmptyPacket) and retry the same frame. Matches Linux EAGAIN. */
 #define NVMPI_ERR_EAGAIN (-11)
 
@@ -405,15 +405,17 @@ extern "C" {
 	//OUTPUT-plane buffer is available — caller should drain encoded packets
 	//via get_packet and retry. frame==NULL sends EOS and puts the encoder
 	//into flushing mode (never refused for lack of packets).
-	//Non-blocking back-pressure: a frame is also refused (NVMPI_ERR_EAGAIN,
-	//not queued) while the frames in flight would outnumber the empty
+	//Back-pressure, blocking AND non-blocking mode: a frame is also refused
+	//(NVMPI_ERR_EAGAIN, not queued) while the frames in flight would outnumber the empty
 	//packets of the pool, so every accepted frame has a packet waiting for
 	//its encoded output and nothing is dropped. The caller must read
 	//packets (get_packet) and return them (qEmptyPacket), then retry the
-	//same frame. The pool must hold more packets than the encoder delays
+	//same frame. Blocking mode returns EAGAIN here too instead of waiting,
+	//because only the caller can free packets and it cannot while blocked in
+	//this call; a caller that ignored it used to lose AUs silently. The pool must hold more packets than the encoder delays
 	//frames (B-frames/reordering), or no output appears until EOS.
-	//Returns 0 on success, NVMPI_ERR_EAGAIN when
-	//non-blocking and no buffer/packet available, -2 if already flushing, -1 if
+	//Returns 0 on success, NVMPI_ERR_EAGAIN when no packet is spare (both
+	//modes) or, non-blocking, no OUTPUT buffer is available, -2 if already flushing, -1 if
 	//the encoder is in error or the blocking dequeue failed, or the negative
 	//queue (qBuffer) error code.
 	int nvmpi_encoder_put_frame(nvmpictx* ctx, nvFrame* frame);
@@ -521,8 +523,9 @@ extern "C" {
 	//dimensions. The encoder accesses the buffer directly via
 	//V4L2_MEMORY_DMABUF — no CPU memcpy. Requires use_dmabuf=1 in
 	//nvEncParam at encoder creation time. dmabuf_fd==−1 signals EOS.
-	//Returns 0 on success, NVMPI_ERR_EAGAIN when non-blocking and no
-	//buffer available, negative on error or if already flushing.
+	//Returns 0 on success, NVMPI_ERR_EAGAIN when no packet is spare (both
+	//modes) or, non-blocking, no buffer available, negative on error or if
+	//already flushing. Same back-pressure rule as nvmpi_encoder_put_frame.
 	int nvmpi_encoder_put_frame_fd(nvmpictx* ctx,
 		int dmabuf_fd, int width, int height, int pitch,
 		int64_t timestamp);

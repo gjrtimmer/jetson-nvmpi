@@ -66,9 +66,10 @@ int nvmpi_encoder_put_frame_fd(nvmpictx* h,
 	if (ctx->enc->isInError())
 		return -1;
 
-	/* Non-blocking back-pressure (issue #125), see nvmpi_encoder_put_frame.
-	 * EOS (dmabuf_fd < 0) yields no AU and is never refused here. */
-	if (dmabuf_fd >= 0 && !ctx->blocking_mode && !enc_can_admit(ctx))
+	/* Back-pressure in both modes (issues #125, #145), see
+	 * nvmpi_encoder_put_frame. EOS (dmabuf_fd < 0) yields no AU and is
+	 * never refused here. */
+	if (dmabuf_fd >= 0 && !enc_can_admit(ctx))
 		return NVMPI_ERR_EAGAIN;
 
 	/* Buffer acquisition: same index-then-dqBuffer pattern as put_frame.

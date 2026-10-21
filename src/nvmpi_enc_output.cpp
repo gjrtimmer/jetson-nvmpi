@@ -56,10 +56,9 @@ bool encoder_capture_plane_dq_callback(struct v4l2_buffer *v4l2_buf, NvBuffer * 
 
 	if(!pkt)
 	{
-		//Last resort, unreachable with a well-behaved non-blocking caller
-		//(admission in put_frame). Reached in blocking mode with a pool
-		//smaller than the frames in flight, or if the caller removed packets
-		//(dqEmptyPacket) outside teardown. The capture buffer is re-queued
+		//Last resort, unreachable with a caller that honours put_frame
+		//back-pressure (admission in both modes, #145). Reached only if the
+		//caller removed packets (dqEmptyPacket) outside teardown. The capture buffer is re-queued
 		//below like every other one; nothing is leaked.
 		if (ctx->draining.load(std::memory_order_acquire))
 		{

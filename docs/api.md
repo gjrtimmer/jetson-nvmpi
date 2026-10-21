@@ -63,8 +63,8 @@ wrap it yourself when using it in an expression: `(NVMPI_ENC_CHUNK_SIZE)`.
 
 `nvmpi.h:33` -- `#define NVMPI_ERR_EAGAIN (-11)`
 
-Returned by the non-blocking encoder submit calls when the frame cannot be
-taken now: no OUTPUT-plane buffer is free, or the pool has no spare packet for
+Returned by the encoder submit calls when the frame cannot be taken now: no
+OUTPUT-plane buffer is free (non-blocking), or (both modes) the pool has no spare packet for
 the frame's encoded output (see `nvmpi_encoder_put_frame`). The frame was not
 queued. Drain output packets with `nvmpi_encoder_get_packet`, return each with
 `nvmpi_encoder_qEmptyPacket`, and retry the same frame. The value matches Linux
@@ -355,7 +355,7 @@ blocking mode (default) it blocks waiting for a free buffer. With
 `nonblocking=1` it returns `NVMPI_ERR_EAGAIN` when none is free. `frame == NULL`
 sends EOS and puts the encoder into flushing mode.
 
-Non-blocking back-pressure (no silent drops): besides the OUTPUT-buffer check,
+Back-pressure in both modes (no silent drops): besides the OUTPUT-buffer check,
 a frame is refused with `NVMPI_ERR_EAGAIN` (and not queued) while the frames
 already in flight would outnumber the pool's empty packets. Each accepted frame
 therefore has an empty packet reserved for its encoded output, and the capture
@@ -364,13 +364,18 @@ callback never has to discard an access unit. After `EAGAIN` call
 with `nvmpi_encoder_qEmptyPacket`, then retry the same frame. EOS is never
 refused for lack of packets. The pool must hold more packets than the encoder
 holds frames back (B-frames, reordering); a pool smaller than that produces no
-output until EOS. Blocking mode is unchanged: the caller sizes the pool, and an
-access unit that finds the pool empty is dropped with an error log.
+output until EOS. Blocking mode returns `EAGAIN` for the packet condition too
+(it still blocks only for a free OUTPUT buffer). It cannot wait for pool
+capacity instead: packets free only when the caller reads and returns them,
+which the same thread cannot do while blocked in `put_frame`. A blocking caller
+that falls more than the pool size behind therefore gets an explicit `EAGAIN`
+rather than losing access units (issue #145). Callers that read after every
+put, or bound the frames in flight by the pool size, never see it.
 
 | Return | Meaning |
 | --- | --- |
 | `0` | Success. |
-| `NVMPI_ERR_EAGAIN` (-11) | Non-blocking mode and no OUTPUT buffer is free, or no empty packet is spare for the frame's output. The frame was not queued. |
+| `NVMPI_ERR_EAGAIN` (-11) | Non-blocking mode and no OUTPUT buffer is free, or (either mode) no empty packet is spare for the frame's output. The frame was not queued. |
 | `-2` | Already flushing (EOS was sent). |
 | `-1` | Encoder is in an error state, or the blocking dequeue failed. |
 | other negative | The error code from queueing the buffer on the OUTPUT plane. |
@@ -663,8 +668,8 @@ Zero-copy alternative to `nvmpi_encoder_put_frame`. The fd must reference an
 NV12 DMA-BUF surface with pitch-linear layout and matching dimensions. The
 encoder reads it directly through `V4L2_MEMORY_DMABUF`. Requires
 `nvEncParam::use_dmabuf = 1` at creation time; otherwise the call fails.
-`dmabuf_fd == -1` signals EOS. Returns `0`, `NVMPI_ERR_EAGAIN` (non-blocking,
-no buffer or no spare packet, same back-pressure rule as `nvmpi_encoder_put_frame`), or a negative value on error or if already flushing.
+`dmabuf_fd == -1` signals EOS. Returns `0`, `NVMPI_ERR_EAGAIN` (no spare packet in
+either mode, or non-blocking and no buffer; same back-pressure rule as `nvmpi_encoder_put_frame`), or a negative value on error or if already flushing.
 
 For fds you allocate yourself and pass to the encoder, use
 [`nvmpi_surface_alloc_for_enc`](#nvmpi_surface_alloc_for_enc).
@@ -775,7 +780,7 @@ Blocking behaviour at a glance:
 | --- | --- |
 | `nvmpi_decoder_put_packet` | All OUTPUT buffers are in flight. |
 | `nvmpi_decoder_get_frame` / `_fd` | `wait == true`, up to `wait_timeout`. |
-| `nvmpi_encoder_put_frame` / `_fd` | Blocking mode and no free OUTPUT buffer. Non-blocking mode returns `NVMPI_ERR_EAGAIN` instead. |
+| `nvmpi_encoder_put_frame` / `_fd` | Blocking mode and no free OUTPUT buffer. Non-blocking mode returns `NVMPI_ERR_EAGAIN` instead. Neither mode waits for packet-pool capacity: that returns `NVMPI_ERR_EAGAIN` in both. |
 | `nvmpi_encoder_get_packet` | `wait == true` (up to `wait_timeout`), or while flushing. |
 
 ## Return code cheat sheet
@@ -785,7 +790,7 @@ Blocking behaviour at a glance:
 | `create_*` | non-NULL handle | `NULL` |
 | `nvmpi_decoder_put_packet` | `0` | `-1` dequeue, `-2` queue, `-3` oversize packet |
 | `nvmpi_decoder_get_frame`, `_fd` | `0` | `-1` no frame / timeout |
-| `nvmpi_encoder_put_frame`, `_fd` | `0` | `NVMPI_ERR_EAGAIN` (-11) non-blocking, other negative on error |
+| `nvmpi_encoder_put_frame`, `_fd` | `0` | `NVMPI_ERR_EAGAIN` (-11) non-blocking or no spare packet, other negative on error |
 | `nvmpi_encoder_get_packet` | `0` | `-1` no packet / timeout, `-2` EOS while flushing |
 | `nvmpi_encoder_dqEmptyPacket` | `0` | `-1` pool empty |
 | `nvmpi_encoder_force_idr`, `_set_bitrate` | `0` | `-1` |

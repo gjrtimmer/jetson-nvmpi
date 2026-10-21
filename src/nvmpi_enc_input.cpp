@@ -150,11 +150,14 @@ int nvmpi_encoder_put_frame(nvmpictx* h,nvFrame* frame)
 	if(frame && enc_check_frame(frame, *ctx->enc->output_plane.getNthBuffer(0)) < 0)
 		return NVMPI_ERR_INVAL;
 
-	/* Non-blocking back-pressure (issue #125): refuse a frame whose AU
+	/* Back-pressure (issues #125, #145), both modes: refuse a frame whose AU
 	 * could find no packet. Checked before any OUTPUT buffer is taken, so
-	 * EAGAIN leaves the encoder untouched. EOS (frame==NULL) yields no AU
-	 * and is never refused here. */
-	if(frame && !ctx->blocking_mode && !enc_can_admit(ctx))
+	 * EAGAIN leaves the encoder untouched. Blocking mode cannot wait here
+	 * instead: packets free only when the caller reads (get_packet) and
+	 * returns them (qEmptyPacket), which this thread cannot do while blocked,
+	 * so a wait would deadlock a single-threaded caller. EOS (frame==NULL)
+	 * yields no AU and is never refused here. */
+	if(frame && !enc_can_admit(ctx))
 		return NVMPI_ERR_EAGAIN;
 
 	if(ctx->index < ctx->enc->output_plane.getNumBuffers())
