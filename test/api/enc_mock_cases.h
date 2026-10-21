@@ -41,6 +41,7 @@ static const struct tcase k_cases[] = {
     { "teardown_pool_empty_drop", NULL, teardown_pool_empty_drop, 0 },
     { "vbr_peak_bitrate", NULL, vbr_peak_bitrate, 0 },
     { "p010_hevc_main10", NULL, p010_hevc_main10, 0 },
+    { "hevc8_main", NULL, hevc8_main, 0 },
     { "p010_hevc_main", NULL, p010_hevc_main, 0 },
     /* dqbuf@9999 never fires: it only marks the logged refusals as expected */
     { "p010_frame_bounds", "dqbuf@9999", p010_frame_bounds, 0 },

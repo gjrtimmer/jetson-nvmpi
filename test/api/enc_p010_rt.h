@@ -1,14 +1,15 @@
 /*
- * enc_p010_rt.h - HEVC Main10 encode from P010 input (#126), shared by the
- * hardware case in test_api.c (enc_p010_case.h) and the encoder mock suite
- * (enc_mock_p010.h). Header-only; needs <nvmpi.h>, <stdio.h>, <stdlib.h>,
+ * enc_p010_rt.h - HEVC encode round trip with an SPS check: Main10 from P010
+ * input (#126) and 8-bit Main (#144). Shared by the hardware cases in
+ * test_api.c (enc_p010_case.h) and the encoder mock suite (enc_mock_p010.h). Header-only; needs <nvmpi.h>, <stdio.h>, <stdlib.h>,
  * <string.h> included first.
  *
- * p010_enc_run() encodes P010_FRAMES 320x240 P010 frames as HEVC, checks
- * that the first access unit carries an SPS that says Main10 and 10-bit
- * (general_profile_idc 2, bit_depth_luma/chroma 10), and optionally decodes
- * every packet back through the HEVC decoder (P010 output) expecting one
- * 320x240 frame per packet. Return: 0 pass, 77 skipped (create failed and
+ * hevc_enc_run() encodes P010_FRAMES 320x240 frames as HEVC, checks that the
+ * first access unit carries an SPS with the expected general_profile_idc and
+ * bit depth (Main10: 2 / 10 for P010 input; Main: 1 / 8 for YUV420 input),
+ * and optionally decodes every packet back through the HEVC decoder (P010 or
+ * NV12 output) expecting one 320x240 frame per packet. p010_enc_run() is the
+ * Main10 instance. Return: 0 pass, 77 skipped (create failed and
  * the caller says that is acceptable), 1 fail; every failure names the check
  * on stderr.
  */
@@ -98,7 +99,37 @@ static void p010_frame(nvFrame *f, uint16_t *y, uint16_t *uv, int n)
     f->timestamp = 1000 + n;
 }
 
-static int p010_enc_run(int skip_ok, int decode)
+/* 8-bit planar 4:2:0 frame (NV_PIX_YUV420): y is W*H bytes, u and v W*H/4
+ * each, carved out of the caller's uv buffer (W*H bytes). */
+static void p010_frame8(nvFrame *f, unsigned char *y, unsigned char *uv, int n)
+{
+    unsigned i;
+
+    for (i = 0; i < P010_W * P010_H; i++)
+        y[i] = (unsigned char)(16 + (i % P010_W + (unsigned)n * 8) % 200);
+    memset(uv, 128, P010_W * P010_H / 2);
+    memset(f, 0, sizeof(*f));
+    f->payload[0] = y;
+    f->payload[1] = uv;
+    f->payload[2] = uv + P010_W * P010_H / 4;
+    f->linesize[0] = P010_W;
+    f->linesize[1] = f->linesize[2] = P010_W / 2;
+    f->payload_size[0] = P010_W * P010_H;
+    f->payload_size[1] = f->payload_size[2] = P010_W * P010_H / 4;
+    f->type = NV_PIX_YUV420;
+    f->width = P010_W;
+    f->height = P010_H;
+    f->timestamp = 1000 + n;
+}
+
+/* What one run asks for and expects. */
+struct hevc_rt {
+    nvPixFormat pix;                  /* NV_PIX_P010 or NV_PIX_YUV420      */
+    unsigned profile;                 /* nvEncParam.profile (0 = default)  */
+    unsigned idc, depth;              /* expected SPS profile_idc / depth  */
+};
+
+static int hevc_enc_run(const struct hevc_rt *c, int skip_ok, int decode)
 {
     static uint16_t y[P010_W * P010_H], uv[P010_W * P010_H / 2];
     static unsigned char *store[P010_FRAMES];
@@ -111,7 +142,7 @@ static int p010_enc_run(int skip_ok, int decode)
     int rc = 0, i, tries, eos = 0;
 
     memset(pool, 0, sizeof(pool));
-    p010_fill_param(&ep, NV_VIDEO_CodingHEVC, NV_PIX_P010, NVMPI_HEVC_PROFILE_MAIN10);
+    p010_fill_param(&ep, NV_VIDEO_CodingHEVC, c->pix, c->profile);
     enc = nvmpi_create_encoder(&ep);
     if (!enc)
         return skip_ok ? 77 : 1;
@@ -124,7 +155,10 @@ static int p010_enc_run(int skip_ok, int decode)
     for (i = 0; i < P010_FRAMES; i++) {
         nvPacket *g = NULL;
 
-        p010_frame(&f, y, uv, i);
+        if (c->pix == NV_PIX_P010)
+            p010_frame(&f, y, uv, i);
+        else
+            p010_frame8(&f, (unsigned char *)y, (unsigned char *)uv, i);
         if (nvmpi_encoder_put_frame(enc, &f) != 0)
             P010_FAIL("put_frame");
         for (tries = 0; tries < 50 && nvmpi_encoder_get_packet(enc, &g, true) != 0; tries++)
@@ -138,10 +172,10 @@ static int p010_enc_run(int skip_ok, int decode)
                 P010_FAIL("first packet has no SPS");
             fprintf(stderr, "p010_rt SPS profile_idc=%u bit_depth=%u/%u\n",
                     s.profile_idc, s.bit_luma, s.bit_chroma);
-            if (s.profile_idc != 2)
-                P010_FAIL("SPS general_profile_idc is not Main10 (2)");
-            if (s.bit_luma != 10 || s.bit_chroma != 10)
-                P010_FAIL("SPS bit depth is not 10");
+            if (s.profile_idc != c->idc)
+                P010_FAIL("SPS general_profile_idc is not the expected profile");
+            if (s.bit_luma != c->depth || s.bit_chroma != c->depth)
+                P010_FAIL("SPS bit depth is not the expected depth");
         }
         store[i] = malloc(g->payload_size);
         if (!store[i])
@@ -164,7 +198,7 @@ static int p010_enc_run(int skip_ok, int decode)
 
     memset(&dp, 0, sizeof(dp));
     dp.codingType = NV_VIDEO_CodingHEVC;
-    dp.pixFormat = NV_PIX_P010;
+    dp.pixFormat = c->pix == NV_PIX_P010 ? NV_PIX_P010 : NV_PIX_NV12;
     dp.frame_pool_size = 4;
     dp.wait_timeout = 2000;
     dec = nvmpi_create_decoder(&dp);
@@ -214,6 +248,24 @@ out:
         store[i] = NULL;
     }
     return rc;
+}
+
+/* Main10 from P010 input (#126). */
+static int p010_enc_run(int skip_ok, int decode)
+{
+    static const struct hevc_rt c = { NV_PIX_P010, NVMPI_HEVC_PROFILE_MAIN10, 2, 10 };
+
+    return hevc_enc_run(&c, skip_ok, decode);
+}
+
+/* 8-bit Main from YUV420 input (#144); profile 0 = default, 77 = what
+ * jetson-ffmpeg passes for -profile main. */
+static int hevc8_enc_run(unsigned profile, int skip_ok, int decode)
+{
+    struct hevc_rt c = { NV_PIX_YUV420, 0, 1, 8 };
+
+    c.profile = profile;
+    return hevc_enc_run(&c, skip_ok, decode);
 }
 
 #endif /* NVMPI_TEST_ENC_P010_RT_H */

@@ -37,6 +37,23 @@ static int p010_hevc_main10(void)
     return 0;
 }
 
+/* #144: 8-bit HEVC programs the H.265 Main profile control (not the H.264
+ * enum value 2 = MAINSTILLPICTURE) and the SPS declares Main, 8-bit, for the
+ * default profile and for 77 (jetson-ffmpeg "-profile main"). */
+static int hevc8_main(void)
+{
+    static const unsigned profs[] = { 0, 77 };
+    uint32_t prof = 99;
+    size_t i;
+
+    REQUIRE(mock_enc_last_h265_profile);
+    for (i = 0; i < sizeof(profs) / sizeof(profs[0]); i++) {
+        REQUIRE(hevc8_enc_run(profs[i], 0, 0) == 0);   /* SPS checked inside */
+        REQUIRE(mock_enc_last_h265_profile(&prof) == 0 && prof == P010_HEVC_MAIN);
+    }
+    return 0;
+}
+
 /* 8-bit HEVC stays Main (and a Main request with P010 is overridden). */
 static int p010_hevc_main(void)
 {

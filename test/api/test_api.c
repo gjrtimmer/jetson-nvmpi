@@ -288,6 +288,8 @@ int main(void)
     fail += RUN_TEST(test_encoder_av1_roundtrip);
     /* HEVC Main10 from P010 input (#126). */
     fail += RUN_TEST(test_encoder_hevc_p010_roundtrip);
+    /* 8-bit HEVC declares Main (#144). */
+    fail += RUN_TEST(test_encoder_hevc_main8_roundtrip);
     /* Zero-copy lifetime: resolution change + release after close (#137). */
     fail += RUN_TEST(test_decoder_res_change_borrowed);
     /* get_frame_fd2 layout vs the allocator's planeParams (#138). */
