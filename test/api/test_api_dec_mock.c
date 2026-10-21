@@ -274,6 +274,7 @@ static int fault_case(const struct tcase *t)
 
 #include "dec_mock_latency.h"
 #include "dec_mock_av1.h"
+#include "dec_mock_av1_seq.h"
 #include "dec_mock_fd.h"
 #include "dec_mock_fd2.h"
 #include "dec_mock_reschange.h"
@@ -283,6 +284,11 @@ static const struct tcase k_cases[] = {
     { "decode_hint", NULL, decode_hint, 0, 0 },
     { "decode_batched", NULL, decode_batched, 0, 0 },
     { "av1", "dqbuf@9999", av1_case, 0, 0 },   /* decode + reject; expected [E] logs */
+    /* AV1 without an in-band sequence header (#147) */
+    { "av1_noseq_first", NULL, av1s_noseq_first, 0, 0 },
+    { "av1_seq_only", NULL, av1s_seq_only, 0, 0 },
+    { "av1_td_only", NULL, av1s_td_only, 0, 0 },
+    { "av1_never_seq", NULL, av1s_never_seq, 0, 0 },
     { "resolution_change", NULL, resolution_change, 0, 0 },
     { "teardown_undrained", NULL, teardown_undrained, 0, 0 },
     { "teardown_no_data", NULL, teardown_no_data, 0, 0 },

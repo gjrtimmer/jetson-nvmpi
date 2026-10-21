@@ -266,6 +266,7 @@ static int test_encoder_hevc_create_close(void)
 
 #include "jpeg_fd_case.h"
 #include "av1_case.h"
+#include "av1_noseq_case.h"
 #include "av1_enc_case.h"
 #include "enc_p010_case.h"
 #include "dec_fd_case.h"
@@ -285,6 +286,8 @@ int main(void)
     fail += RUN_TEST(test_decoder_all_codecs);
     fail += RUN_TEST(test_encoder_hevc_create_close);
     fail += RUN_TEST(test_decoder_av1_frame);
+    /* AV1 without an in-band sequence header: probe lines, hang/crash only (#147). */
+    fail += RUN_TEST(test_decoder_av1_no_seqhdr);
     fail += RUN_TEST(test_encoder_av1_roundtrip);
     /* AV1 + P010 is refused up front (#146). */
     fail += RUN_TEST(test_encoder_av1_p010_refused);
