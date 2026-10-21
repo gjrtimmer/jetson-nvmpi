@@ -15,13 +15,15 @@
  *   d  never_seq    a stream that never sends a header: no frame, no hang,
  *                   close() (also after an EOS marker) stays within bound.
  *
- * MODEL ASSUMPTION: the mock decoder (mock_dec.c) models "no sequence header
- * yet" as NVDEC most plausibly behaves: no RESOLUTION_CHANGE and no frame
- * until a sequence header OBU arrived, input consumed and dropped, TD-only
- * ignored. The real driver may differ (error, garbage, hold); the test_api
- * case av1_noseq_case.h records what the Orin does. What these cases pin is
- * libnvmpi's side: no crash or hang, put_packet never blocks, frames flow
- * once a header plus key frame arrive, and close() latency.
+ * The mock decoder (mock_dec.c) models what the Orin does (measured by
+ * av1_noseq_case.h, MR !58): AV1 data before the first sequence header is
+ * HELD (OUTPUT buffer never returned) and poisons the session. libnvmpi must
+ * therefore drop such packets itself (src/nvmpi_dec_av1.cpp); without that
+ * every case here fails: frames never come (a, b, c, flush) or put_packet
+ * blocks on the 11th buffer (d, caught by the case alarm). What these cases
+ * pin: header-less packets are accepted (return 0) and yield no frame, put
+ * never blocks, frames flow once a header plus key frame arrive, the header
+ * state is cleared by flush, and close() latency.
  *
  * Negative checks poll non-blocking after a short settle instead of waiting
  * out wait_timeout: the model is deterministic, so a late frame can only mean
@@ -33,10 +35,11 @@
 #include "av1_obu.h"
 #include "av1_split.h"
 
-/* close() after data was fed but no stream event ever came: the capture
- * thread's pre-event slice (50 ms) plus the race-guard dqEvent (500 ms,
- * nvmpi_dec_capture.cpp) is the DESIGNED latency (~0.6 s), so the
- * no-data bound (400 ms) does not apply. 2 s catches a stuck join. */
+/* close() bound for streams that never got a stream event. Dropped
+ * header-less packets are not counted as fed, so the plain case closes like
+ * the no-data one; the EOS-marker variant counts as fed and pays the capture
+ * thread's race-guard dqEvent (500 ms, nvmpi_dec_capture.cpp), ~0.6 s by
+ * design. 2 s catches a stuck join. */
 #define AV1S_CLOSE_MAX_MS 2000
 #define AV1S_SETTLE_MS 50
 
@@ -148,10 +151,23 @@ static int av1s_td_only(void)
     return 0;
 }
 
+/* Flush clears the "header seen" state: header-less data after a flush is
+ * dropped again (not held by the driver) and a new header restarts decoding. */
+static int av1s_flush_resets(void)
+{
+    AV1S_BEGIN(c);
+    REQUIRE(av1s_expect_frame(c, AV1_PKT_FULL, 70) == 0);
+    REQUIRE(nvmpi_decoder_flush(c) == 0);
+    REQUIRE(av1s_expect_none(c, AV1_PKT_NOSEQ, 71) == 0);
+    REQUIRE(av1s_expect_frame(c, AV1_PKT_FULL, 72) == 0);
+    REQUIRE(av1s_close(c) == 0);
+    return 0;
+}
+
 /* Never a sequence header: headless TUs plus TD-only, then close; and the
  * same ended by an EOS marker (empty payload). More packets than the 10
- * OUTPUT buffers would prove put_packet never blocks on a decoder that
- * drops them; 12 covers that. */
+ * OUTPUT buffers prove put_packet never blocks on a decoder that holds
+ * them (the Orin does); 12 covers that. */
 static int av1s_never_seq(void)
 {
     uint8_t eos = 0;

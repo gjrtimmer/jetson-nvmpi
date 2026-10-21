@@ -17,20 +17,23 @@
  *            NVDEC HELD header-less input instead of consuming it,
  *            put_packet would block in output_plane.dqBuffer(-1)
  *   frames   total frames received      err    first put_packet error (0 none)
- *   pre      frames received for the header-less part (informational)
+ *   pre      frames received for the header-less part (must be 0)
  *   post     frames received once a header + key frame were fed
  *   close_ms nvmpi_decoder_close() latency
  *
- * The frame counts are INFORMATIONAL: until hardware data exists we do not
- * know whether NVDEC errors, waits or emits garbage for these inputs. The
- * case fails only on what libnvmpi must always guarantee: no crash (the
- * harness sees the signal), no hang, a clean close() that returns 0 within
- * the bound. Hang detection: every blocking step (put, get, close) arms
+ * Orin R36.4 (MR !58) showed NVDEC HOLDS header-less AV1 input and never
+ * returns its OUTPUT buffer (pattern d blocked at put 10, pattern a never
+ * recovered), so libnvmpi drops AV1 data until the first sequence header
+ * (nvmpi_dec_av1.cpp). The case now asserts that: err=0, pre=0 (no frame for
+ * header-less data) and post >= the pattern's minimum (a, b, c decode once a
+ * header + key frame arrive; d never gets one: post=0, all 12 puts return).
+ * It also fails on a crash, a close() that returns non-zero or takes 5 s or
+ * more. Hang detection: every blocking step (put, get, close) arms
  * alarm(NOSEQ_STEP_S); the SIGALRM handler prints which step of which
- * pattern blocked (plus a progress line is printed before each put) and
- * exits 1, so a held OUTPUT buffer shows as a clear FAIL with the index of
- * the blocked put_packet, not an anonymous crash. Needs NVDEC with AV1 (Orin);
- * skipped outside strict mode when create fails, like test_decoder_av1_frame.
+ * pattern blocked (a progress line is printed before each put) and exits 1,
+ * so a stuck put_packet shows as a clear FAIL with its index. Needs NVDEC
+ * with AV1 (Orin); skipped outside strict mode when create fails, like
+ * test_decoder_av1_frame.
  * Against the mock (api_mock ctest) the same code runs on the mock decoder
  * model documented in mock/mock_dec.c.
  */
@@ -53,17 +56,18 @@ struct noseq_pattern {
     int npre;                    /* leading packets of the header-less part */
     int eos;                     /* send the EOS marker after the packets  */
     int wait_ms;                 /* decoder wait_timeout (pre polls block) */
+    int min_post;                /* frames required after the header       */
 };
 
 static const struct noseq_pattern noseq_patterns[] = {
-    { 'a', { AV1_PKT_NOSEQ, AV1_PKT_FULL, AV1_PKT_NOSEQ }, 3, 1, 0, 2000 },
-    { 'b', { AV1_PKT_SEQ, AV1_PKT_NOSEQ }, 2, 1, 0, 2000 },
-    { 'c', { AV1_PKT_TD, AV1_PKT_FULL }, 2, 1, 0, 2000 },
+    { 'a', { AV1_PKT_NOSEQ, AV1_PKT_FULL, AV1_PKT_NOSEQ }, 3, 1, 0, 2000, 1 },
+    { 'b', { AV1_PKT_SEQ, AV1_PKT_NOSEQ }, 2, 1, 0, 2000, 1 },
+    { 'c', { AV1_PKT_TD, AV1_PKT_FULL }, 2, 1, 0, 2000, 1 },
     /* d: shorter wait, 12 blocking polls at 2 s would only slow the job */
     { 'd', { AV1_PKT_NOSEQ, AV1_PKT_NOSEQ, AV1_PKT_TD, AV1_PKT_NOSEQ,
              AV1_PKT_NOSEQ, AV1_PKT_TD, AV1_PKT_NOSEQ, AV1_PKT_NOSEQ,
              AV1_PKT_TD, AV1_PKT_NOSEQ, AV1_PKT_NOSEQ, AV1_PKT_TD },
-      12, 12, 1, 300 },
+      12, 12, 1, 300, 0 },
 };
 
 /* Progress for the SIGALRM handler. Written by the main flow, read in the
@@ -194,6 +198,11 @@ static int noseq_run(const struct noseq_pattern *pt)
     printf("\nav1_noseq probe: pattern=%c frames=%d err=%d close_ms=%ld pre=%d post=%d\n",
            pt->id, pre + post, err, close_ms, pre, post);
     fflush(stdout);
+    if (err || pre || post < pt->min_post) {
+        fprintf(stderr, "av1_noseq FAIL pattern=%c: err=%d pre=%d post=%d (want err=0 pre=0 post>=%d)\n",
+                pt->id, err, pre, post, pt->min_post);
+        return 1;
+    }
     if (i != 0 || close_ms >= NOSEQ_CLOSE_MAX_MS) {
         fprintf(stderr, "av1_noseq FAIL pattern=%c: close ret=%d in %ld ms (bound %d)\n",
                 pt->id, i, close_ms, NOSEQ_CLOSE_MAX_MS);
