@@ -3,6 +3,32 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.5.2 - 2026-10-21
+
+### Bug Fixes
+
+
+**enc**
+
+
+- Refuse frames the packet pool cannot hold in blocking mode: put_frame returns NVMPI_ERR_EAGAIN instead of dropping the AU later (#145)
+
+
+### Testing
+
+
+**enc**
+
+
+- Wrapper-shaped encode/EOS drain regression case
+- Reader lagging past the packet pool in blocking mode (#145)
+
+
+### Scripts
+
+- Add scripts/prune-pipelines.sh (delete failed, skipped and warning pipelines)
+
+
 ## 4.5.1 - 2026-10-21
 
 ### Bug Fixes
