@@ -7,7 +7,9 @@
  * emits one low-overhead OBU temporal unit per packet (temporal delimiter,
  * sequence header on IDR frames only, frame OBU), key flag on the key frames,
  * the sequence header always inserted at IDR (even with insert_spspps_idr 0),
- * and 10-bit input rejected. The mock stream is parseable but not decodable
+ * and, since #146, 10-bit P010 input accepted: the sequence header then declares
+ * high_bitdepth 1 (seq_profile 0, BitDepth 10), while 8-bit streams keep
+ * high_bitdepth 0. The mock stream is parseable but not decodable
  * (mock/mock_enc_av1.c); the case walks the OBUs with av1_obu.h. Builds whose
  * headers lack the AV1 encode controls (NVMPI_HAVE_AV1_ENC 0) must return
  * NULL from create instead; that branch is what these cases check there.
@@ -26,6 +28,7 @@
 
 #include "av1_obu.h"
 #include "av1_enc_rt.h"
+#include "av1_p010_rt.h"
 
 /* get_packet(wait) -> parsed temporal unit; also returns flags/pts/first
  * bytes. 0 on a packet, else the get_packet result (-1 none, -2 EOS). */
@@ -61,8 +64,12 @@ static void av1_check(const struct av1_pk *p, int i, int gop, int idr, long pts)
     REQUIRE(!!(p->flags & E_KEY) == (i % gop == 0));
     REQUIRE(p->t.key == (i % gop == 0));
     REQUIRE(p->t.n_seq == (i % idr == 0 ? 1u : 0u));
-    if (p->t.n_seq)
+    if (p->t.n_seq) {
         REQUIRE(p->t.w == EW && p->t.h == EH);
+        /* 8-bit input stays 8-bit (#146): seq_profile 0, high_bitdepth 0. */
+        REQUIRE(p->t.color_ok && p->t.profile == 0 && !p->t.high_bd &&
+                !p->t.twelve_bit);
+    }
 }
 
 /* 30 frames, key frames at 0/10/20, sequence header at IDR 0 and 20 only,
@@ -124,10 +131,20 @@ static int av1_roundtrip(void)
     return av1_enc_dec_roundtrip(0);
 }
 
-/* Create gate for a build with the AV1 encode controls: 10-bit input is
- * refused before any device is opened. Run with open@1+ (every open fails),
- * so the logged error is expected and any open failure in the log would mean
- * create reached the device. */
+/* 10-bit input (#146): the mock accepts P010M on the AV1 encoder, every
+ * packet is a valid temporal unit and the first sequence header declares
+ * seq_profile 0 with high_bitdepth 1 (checked inside av1_p010_run, which
+ * also prints the probe line the hardware job log relies on). The mock
+ * decoder has no 10-bit model, so the decode half is off. */
+static int av1_p010_stream(void)
+{
+    return av1_p010_run(0, 0) == 0 ? 0 : 1;
+}
+
+/* Create with P010 must reach the device now (no up-front rejection) and,
+ * when the device cannot be opened (open@1+), fail cleanly: NULL, no crash,
+ * and none of the former "P010 rejected" / HEVC-only gate messages. This is
+ * the same path a driver refusing the 10-bit format takes. */
 static int av1_create_gate(void)
 {
     char buf[4096];
@@ -149,11 +166,10 @@ static int av1_create_gate(void)
     REQUIRE(fd >= 0);
     n = read(fd, buf, sizeof(buf) - 1);
     close(fd);
-    REQUIRE(n > 0);
+    REQUIRE(n >= 0);
     buf[n] = '\0';
-    REQUIRE(strstr(buf, "P010 rejected") != NULL);
-    REQUIRE(strstr(buf, "Encoder factory") == NULL);
-    REQUIRE(strstr(buf, "Could not create encoder") == NULL);
+    REQUIRE(strstr(buf, "P010 rejected") == NULL);
+    REQUIRE(strstr(buf, "supported for HEVC") == NULL);
     return 0;
 }
 

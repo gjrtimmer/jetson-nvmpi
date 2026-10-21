@@ -7,7 +7,8 @@
  *   - HEVC + NV_PIX_P010 encodes, programs the Main10 profile control and
  *     the stream says Main10 / 10-bit (SPS parsed from the first packet);
  *   - HEVC with 8-bit input programs Main;
- *   - H.264 + P010 and AV1 + P010 are refused by create, and Main10 without
+ *   - H.264 + P010 is refused by create (AV1 + P010 is accepted since #146,
+ *     see enc_mock_av1.h), and Main10 without
  *     P010 too, all before any device is opened (run with open@1+: every
  *     open fails, so any open error in the log means create got that far);
  *   - a P010 frame whose planes are too small is refused with
@@ -111,7 +112,7 @@ static int p010_expect_reject(nvCodingType codec, nvPixFormat pix, unsigned prof
 static int p010_create_gate(void)
 {
     REQUIRE(p010_expect_reject(NV_VIDEO_CodingH264, NV_PIX_P010, 77,
-                               "P010 (10-bit) encode input is supported for HEVC only") == 0);
+                               "P010 (10-bit) encode input is supported for HEVC and AV1 only") == 0);
     REQUIRE(p010_expect_reject(NV_VIDEO_CodingHEVC, NV_PIX_NV12,
                                NVMPI_HEVC_PROFILE_MAIN10,
                                "HEVC Main10 requires NV_PIX_P010") == 0);
