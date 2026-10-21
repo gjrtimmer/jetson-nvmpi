@@ -18,6 +18,7 @@ struct mock_ctx;
 struct mock_scan {
     bool     has_vcl;                 /* at least one slice/VCL NAL          */
     bool     has_dims;                /* an SPS was parsed successfully      */
+    bool     has_seq;                 /* AV1 only: a sequence header OBU     */
     uint32_t width, height;           /* displayed size from the SPS         */
 };
 
@@ -32,6 +33,7 @@ struct dec_model {
     bool poll_int;                 /* SET_POLL_INTERRUPT state              */
     uint32_t off_epoch;            /* ++ on every STREAMOFF (wakes polls)   */
     int last_idx;                  /* newest frame buffer, -1 none          */
+    bool seq_seen;                 /* AV1: a sequence header arrived (#147) */
     bool env_dims;                 /* NVMPI_MOCK_WIDTH/HEIGHT given         */
     uint32_t env_w, env_h;
 };
@@ -50,5 +52,8 @@ int mock_dec_ioctl(struct mock_ctx *ctx, unsigned long req, void *arg, int *ret)
  * 0 feeds complete Annex-B access units. */
 void mock_scan_h264(const uint8_t *p, size_t n, struct mock_scan *out);
 void mock_scan_h265(const uint8_t *p, size_t n, struct mock_scan *out);
+/* AV1: OBU walk. has_vcl = frame header / tile group / frame OBU, has_seq =
+ * sequence header OBU. Needs no start code (OBUs carry their size). */
+void mock_scan_av1(const uint8_t *p, size_t n, struct mock_scan *out);
 
 #endif /* NVMPI_MOCK_DEC_H */

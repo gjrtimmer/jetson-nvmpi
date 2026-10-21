@@ -18,6 +18,19 @@
  *                        application tore the CAPTURE queue down (STREAMOFF)
  *                        and set it up again, like the real driver.
  *   CAPTURE (frames)     DMABUF/MMAP buffers are filled with gray (0x80).
+ *   AV1 (#147)           MODEL ASSUMPTION, not measured on hardware: the
+ *                        decoder needs a sequence header OBU before it can
+ *                        size the stream. Until one arrives no
+ *                        RESOLUTION_CHANGE is pushed and no frame is made;
+ *                        the buffers are consumed (completed) and dropped,
+ *                        so put_packet never blocks on them. A buffer with
+ *                        only a temporal delimiter / sequence header / other
+ *                        non-picture OBUs completes without a frame. Once a
+ *                        sequence header was seen (same or earlier buffer)
+ *                        the state is sticky until the OUTPUT queue is
+ *                        streamed off (flush), so later units without a
+ *                        header decode, as in a normal stream. The test_api
+ *                        hardware case prints the real driver's behaviour.
  *   EOS                  Frames already decoded are delivered first; the
  *                        newest undelivered one is flagged V4L2_BUF_FLAG_LAST.
  *                        Afterwards DQBUF on the empty CAPTURE queue reports
@@ -58,6 +71,10 @@
 #define MOCK_EVENT_RES_CHANGE V4L2_EVENT_SOURCE_CHANGE
 /* NVIDIA fourcc for HEVC (v4l2_nv_extensions.h); mainline uses 'HEVC'. */
 #define MOCK_PIX_FMT_H265 v4l2_fourcc('H', '2', '6', '5')
+/* AV1: NVIDIA fourcc ('AV10', V4L2_PIX_FMT_AV1 in its headers) and mainline's
+ * 'AV01'; both are accepted so the model follows whichever header built it. */
+#define MOCK_PIX_FMT_AV1_NV v4l2_fourcc('A', 'V', '1', '0')
+#define MOCK_PIX_FMT_AV1    v4l2_fourcc('A', 'V', '0', '1')
 
 #define DEC_DEFAULT_W   320u
 #define DEC_DEFAULT_H   240u
@@ -231,6 +248,7 @@ static bool step(struct mock_ctx *ctx, struct dec_model *m, int oi)
     void *map;
     size_t n = mb->bytesused[0];
     int ci;
+    bool av1 = pixfmt == MOCK_PIX_FMT_AV1_NV || pixfmt == MOCK_PIX_FMT_AV1;
 
     if (n == 0) {
         step_eos(ctx, m, oi);
@@ -251,10 +269,22 @@ static bool step(struct mock_ctx *ctx, struct dec_model *m, int oi)
         mock_scan_h264(data, n, &sc);
     else if (data && (pixfmt == MOCK_PIX_FMT_H265 || pixfmt == V4L2_PIX_FMT_HEVC))
         mock_scan_h265(data, n, &sc);
+    else if (data && av1)
+        mock_scan_av1(data, n, &sc);
     else if (data)
         sc.has_vcl = true;             /* other codecs: every buffer = frame */
     if (map)
         munmap(map, n);
+
+    if (av1) {
+        /* Model assumption (#147): no sequence header yet = nothing to size
+         * the stream with, so no event and no frame; the data is consumed. */
+        m->seq_seen = m->seq_seen || sc.has_seq;
+        if (!m->seq_seen) {
+            finish_out(ctx, oi, 0);
+            return true;
+        }
+    }
 
     if (m->env_dims) {
         if (!m->announced)
@@ -320,6 +350,7 @@ static void dec_on_streamoff(struct mock_ctx *ctx, int qi)
     m->last_idx = -1;
     if (qi == MOCK_Q_OUTPUT) {         /* flush: start over, drop events    */
         m->announced = m->reconfig = m->eos_seen = m->eos_last = false;
+        m->seq_seen = false;           /* AV1: next stream sends its own header */
         ctx->ev_head = ctx->ev_count = 0;
     } else {                           /* CAPTURE torn down: re-armed next  */
         m->reconfig = false;

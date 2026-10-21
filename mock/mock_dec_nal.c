@@ -225,3 +225,50 @@ void mock_scan_h265(const uint8_t *p, size_t n, struct mock_scan *out)
 {
     walk(p, n, out, h265_nal);
 }
+
+/* AV1 OBU walk (low-overhead format, one temporal unit per buffer, #147).
+ * OBU types: 1 sequence header, 3 frame header, 4 tile group, 6 frame;
+ * 2 (temporal delimiter), 5 (metadata), 8 (tile list), 15 (padding) carry no
+ * picture. A malformed OBU ends the walk: what was found before it still
+ * counts, nothing after it does (a truncated unit must not crash the mock).
+ * The picture size is not parsed (env/default, like H.264 without an SPS). */
+void mock_scan_av1(const uint8_t *p, size_t n, struct mock_scan *out)
+{
+    size_t o = 0;
+
+    while (o < n) {
+        uint8_t h = p[o++];
+        unsigned type = (h >> 3) & 0x0f, sh = 0;
+        size_t sz = 0;
+
+        if (h & 0x80)                 /* forbidden bit set: not an OBU      */
+            return;
+        if (h & 0x04) {               /* extension byte (temporal/spatial id) */
+            if (o >= n)
+                return;
+            o++;
+        }
+        if (h & 0x02) {               /* obu_size leb128, 4 bytes at most   */
+            for (;;) {
+                uint8_t b;
+
+                if (o >= n || sh > 21)
+                    return;
+                b = p[o++];
+                sz |= (size_t)(b & 0x7f) << sh;
+                sh += 7;
+                if (!(b & 0x80))
+                    break;
+            }
+        } else {
+            sz = n - o;               /* no size field: OBU runs to the end */
+        }
+        if (sz > n - o)               /* payload past the buffer: truncated */
+            return;
+        if (type == 1)
+            out->has_seq = true;
+        else if (type == 3 || type == 4 || type == 6)
+            out->has_vcl = true;
+        o += sz;
+    }
+}
