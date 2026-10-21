@@ -276,6 +276,7 @@ static int fault_case(const struct tcase *t)
 #include "dec_mock_av1.h"
 #include "dec_mock_fd.h"
 #include "dec_mock_fd2.h"
+#include "dec_mock_reschange.h"
 
 static const struct tcase k_cases[] = {
     { "decode_plain", NULL, decode_plain, 0, 0 },
@@ -298,6 +299,10 @@ static const struct tcase k_cases[] = {
     { "fd2_args", NULL, fd2_args, 0, 0 },
     { "fd2_v1_equal", NULL, fd2_v1_equal, 0, 0 },
     { "fd2_after_close", NULL, fd2_after_close, 0, 0 },
+    /* resolution change while the frame pool is full (#143) */
+    { "res_change_backpressure", NULL, res_change_backpressure, 0, 0 },
+    { "res_change_backpressure_pool1", NULL, res_change_backpressure_pool1, 0, 0 },
+    { "res_change_backpressure_close", NULL, res_change_backpressure_close, 0, 0 },
     /* allocation failure during a resolution change with borrows held. The
      * allocator calls are counted per surface: 1-9 capture plane + 10-13
      * pool at the first event, 14-22 capture plane + 23-26 pool at the
