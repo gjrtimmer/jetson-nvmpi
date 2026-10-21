@@ -3,6 +3,26 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.5.1 - 2026-10-21
+
+### Bug Fixes
+
+
+**dec**
+
+
+- Service resolution change while the frame pool is full (#143)
+
+
+### Testing
+
+
+**dec**
+
+
+- Resolution change with a full frame pool (#143)
+
+
 ## 4.5.0 - 2026-10-21
 
 ### Features
