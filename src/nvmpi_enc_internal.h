@@ -226,9 +226,9 @@ int nvmpi_enc_apply_stream_ctrls(nvmpi_enc_ctx* ctx, const nvEncParam* param);
 //(no IVF headers) before the planes are set up and returns 0 or -1.
 uint32_t nvmpi_enc_av1_pixfmt(void);
 bool nvmpi_enc_av1_check(const nvEncParam* param);
-//Raw-input-format vs codec/profile gate (P010 = HEVC Main10 or AV1); defined in
+//Raw-input-format vs codec/profile gate (P010 = HEVC Main10 only); defined in
 //nvmpi_enc_params.cpp, run before any allocation or device access.
 bool nvmpi_enc_check_input(const nvEncParam* param);
-void nvmpi_enc_av1_translate(nvmpi_enc_ctx* ctx, const nvEncParam* param);
+void nvmpi_enc_av1_translate(nvmpi_enc_ctx* ctx);
 int nvmpi_enc_av1_apply_ctrls(nvmpi_enc_ctx* ctx);
 size_t nvmpi_enc_av1_ivf_skip(const nvmpi_enc_ctx* ctx, const unsigned char* p, size_t n);

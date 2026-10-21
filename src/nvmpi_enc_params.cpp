@@ -22,9 +22,9 @@
 //Validate the raw input format against the codec/profile before anything
 //is allocated or any device is opened (same stage as the codec gate in
 //nvmpi_create_encoder). Returns true when the request is valid.
-//  - P010 (16-bit samples) is encodable as HEVC Main10 or AV1 (#146, the
-//    driver arbitrates AV1 10-bit at plane setup); H.264 has no 10-bit path
-//    on the Tegra encoder. Silently encoding it as 8-bit would misread
+//  - P010 (16-bit samples) is only encodable as HEVC Main10; H.264 has no
+//    10-bit path on the Tegra encoder, and AV1 is rejected in
+//    nvmpi_enc_av1_check(). Silently encoding it as 8-bit would misread
 //    every sample, so it is refused.
 //  - Main10 needs P010M input: the driver cannot take 8-bit NV12M/YUV420M
 //    into a 10-bit profile and this layer does not convert samples.
@@ -36,9 +36,8 @@ bool nvmpi_enc_check_input(const nvEncParam* param)
 	bool main10 = (param->codingType == NV_VIDEO_CodingHEVC &&
 	               param->profile == NVMPI_HEVC_PROFILE_MAIN10);
 
-	if (p010 && param->codingType != NV_VIDEO_CodingHEVC &&
-	    param->codingType != NV_VIDEO_CodingAV1) {
-		NVMPI_LOG(NVMPI_LOG_ERROR, "P010 (10-bit) encode input is supported for HEVC and AV1 only (not H.264)");
+	if (p010 && param->codingType != NV_VIDEO_CodingHEVC) {
+		NVMPI_LOG(NVMPI_LOG_ERROR, "P010 (10-bit) encode input is supported for HEVC only (not H.264 or AV1)");
 		return false;
 	}
 	if (main10 && !p010) {

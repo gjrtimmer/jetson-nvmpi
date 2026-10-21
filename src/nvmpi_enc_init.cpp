@@ -62,7 +62,7 @@ nvmpictx* nvmpi_create_encoder(nvEncParam* param)
 		NVMPI_LOG(NVMPI_LOG_ERROR, "Unsupported encoder codingType %d (H.264, HEVC and AV1 only)", (int)param->codingType);
 		return NULL;
 	}
-	/* P010 / Main10 vs codec (P010: HEVC Main10 or AV1, #146). */
+	/* P010 / Main10 vs codec (AV1 already rejected P010 above). */
 	if(!nvmpi_enc_check_input(param))
 		return NULL;
 	nvmpi_enc_ctx *ctx=new nvmpi_enc_ctx;
@@ -70,7 +70,7 @@ nvmpictx* nvmpi_create_encoder(nvEncParam* param)
 	/* Scalar nvEncParam -> ctx translation (profile/level/preset maps). */
 	nvmpi_enc_translate_params(ctx, param);
 	if(param->codingType==NV_VIDEO_CodingAV1)
-		nvmpi_enc_av1_translate(ctx, param);	/* drop H.264/HEVC-only settings */
+		nvmpi_enc_av1_translate(ctx);	/* drop H.264/HEVC-only settings */
 	ctx->pktPool = new NVMPI_bufPool<nvPacket*>();
 	/* Always allocate the output-plane fd array: used by both compile-time
 	 * DMA mode (OUTPLANE_MEMTYPE_DMA) and runtime external DMABUF mode
@@ -169,7 +169,7 @@ nvmpictx* nvmpi_create_encoder(nvEncParam* param)
 	}
 
 	//pick the raw input format. Priority: lossless (YUV444M, set below) >
-	//HEVC Main10 / AV1 P010 (10-bit P010M) > requested 8-bit layout (NV12M vs YUV420M).
+	//HEVC Main10 (10-bit P010M) > requested 8-bit layout (NV12M vs YUV420M).
 	//NV12 only affects the 8-bit default branch; it never overrides the
 	//10-bit or lossless paths.
 	switch (ctx->profile)
