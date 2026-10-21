@@ -13,6 +13,7 @@
 #include "enc_mock_rc.h"
 #include "enc_mock_av1.h"
 #include "enc_mock_p010.h"
+#include "enc_mock_drain.h"
 
 static const struct tcase k_cases[] = {
     { "blocking_h264", NULL, blocking_h264, 0 },
@@ -26,6 +27,8 @@ static const struct tcase k_cases[] = {
     { "nonblock_eagain", NULL, nonblock_eagain, 0 },
     { "nonblock_backpressure", NULL, nonblock_backpressure, 0 },
     { "nonblock_backpressure_latency", NULL, nonblock_backpressure_latency, 0 },
+    { "drain_wrapper_blocking", NULL, drain_wrapper_blocking, 0 },
+    { "drain_wrapper_nonblock", NULL, drain_wrapper_nonblock, 0 },
     { "lowdelay_loop", NULL, lowdelay_loop, 0 },
     { "lowdelay_idle", NULL, lowdelay_idle, 0 },
     { "lowdelay_latency", NULL, lowdelay_latency, 0 },
