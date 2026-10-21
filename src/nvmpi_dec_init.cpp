@@ -100,6 +100,7 @@ nvmpictx* nvmpi_create_decoder(nvDecParam* param)
 
 	NvmpiTimer tm("dec_create");       /* NVMPI_TIMING=1 only (#105) */
 	nvmpi_dec_ctx* ctx=new nvmpi_dec_ctx();
+	ctx->is_av1 = (param->codingType == NV_VIDEO_CodingAV1);
 
 	/* Open the V4L2 decoder device. Retry up to 3 times with 100ms
 	 * backoff. Before each factory call, probe the device node ourselves

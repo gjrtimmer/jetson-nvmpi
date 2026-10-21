@@ -122,7 +122,14 @@ API for MJPEG. `NV_VIDEO_CodingAV1` was appended last, so existing enum values
 are unchanged. AV1 needs `V4L2_PIX_FMT_AV1` in the L4T headers (JetPack 6);
 a build without it returns `NULL` with "AV1 decode not supported by this L4T
 build". Feed one temporal unit (low-overhead OBU format, starting with the
-temporal delimiter) per `nvmpi_decoder_put_packet` call. The video encoder
+temporal delimiter) per `nvmpi_decoder_put_packet` call. AV1 data that
+arrives before the first sequence header OBU is discarded (`put_packet`
+returns 0, no frame, one INFO log line): NVDEC on the Orin holds such input
+and never returns the buffer, which would block `put_packet`. A caller that
+keeps the sequence header out of band (MP4/MKV `av1C`) must send the config
+OBUs first, as a packet of its own or in front of the first temporal unit.
+`nvmpi_decoder_flush` re-arms this gate, so a restarted stream must send its
+header again. The video encoder
 supports only `NV_VIDEO_CodingH264` and `NV_VIDEO_CodingHEVC`.
 
 ## Structures

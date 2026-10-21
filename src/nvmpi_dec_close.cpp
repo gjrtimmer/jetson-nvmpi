@@ -45,6 +45,10 @@ int nvmpi_decoder_flush(nvmpictx* h)
 		ctx->framePool->qEmptyBuf(slot);
 
 	ctx->eos.store(false);
+	/* AV1: the restarted stream must send its own sequence header; until it
+	 * does, data is dropped again instead of poisoning the driver (#147). */
+	ctx->av1_seq_seen = false;
+	ctx->av1_drop_logged = false;
 	/* Clear shutdown so the pool blocks again after flush/restart. */
 	ctx->framePool->reset();
 	ctx->index = 0;

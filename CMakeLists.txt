@@ -197,6 +197,7 @@ set(JETSON_MULTIMEDIA_API_SRC
 set(NVMPI_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_init.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_api.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_av1.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_capture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_planes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_pool.cpp

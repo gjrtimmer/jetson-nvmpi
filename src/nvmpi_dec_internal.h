@@ -138,6 +138,12 @@ struct nvmpi_dec_ctx : nvmpictx
 
 	nvPixFormat out_pixfmt;             //user-requested output layout (NV12/YUV420)
 	unsigned int decoder_pixfmt{0};     //V4L2 fourcc of the compressed input
+	/* AV1 input gate (nvmpi_dec_av1.cpp, #147). User thread only: put_packet
+	 * and flush are the same caller thread, so plain fields suffice. */
+	bool is_av1{false};                 //codingType is AV1
+	bool av1_seq_seen{false};           //a sequence header was queued; cleared by flush
+	bool av1_drop_logged{false};        //INFO line printed for this stream start
+	uint32_t av1_dropped{0};            //packets dropped before the first header
 	std::thread dec_capture_loop;       //runs dec_capture_loop_fcn()
 
 	int frame_pool_size{12};            //number of nvmpi_frame_buffer's to allocate
@@ -174,6 +180,8 @@ struct nvmpi_dec_ctx : nvmpictx
 //codingType -> V4L2 compressed fourcc; 0 (after logging) when unsupported
 unsigned int nvmpi_dec_codec_pixfmt(nvCodingType codec);
 NvBufferColorFormat getNvColorFormatFromV4l2Format(v4l2_format &format, bool want_10bit);
+//true: drop this AV1 packet (no sequence header seen yet); see nvmpi_dec_av1.cpp
+bool nvmpi_dec_av1_drop(nvmpi_dec_ctx* ctx, const nvPacket* packet);
 void dec_capture_loop_fcn(void *arg);
 void respondToResolutionEvent(v4l2_format &format, v4l2_crop &crop, nvmpi_dec_ctx* ctx);
 int copyNvBufToFrame(const dec_gen* g, nvmpi_frame_buffer *nvmpiBuf, nvFrame* frame);

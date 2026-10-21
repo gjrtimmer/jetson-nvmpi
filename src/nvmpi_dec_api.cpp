@@ -33,6 +33,7 @@
 //A zero-sized payload is the EOS marker and flips ctx->eos.
 //Returns 0 on success, -1 on dequeue failure, -2 on queue failure,
 //-3 when the packet exceeds chunk_size (packet dropped, decoder usable).
+//AV1: packets before the first sequence header are dropped and report 0.
 int nvmpi_decoder_put_packet(nvmpictx* h,nvPacket* packet)
 {
 	nvmpi_dec_ctx* ctx = static_cast<nvmpi_dec_ctx*>(h);
@@ -50,6 +51,12 @@ int nvmpi_decoder_put_packet(nvmpictx* h,nvPacket* packet)
 		NVMPI_LOG(NVMPI_LOG_ERROR, "input packet (%zu bytes) exceeds chunk_size (%u); dropping. Increase the chunk_size option.", packet->payload_size, ctx->chunk_size);
 		return -3;
 	}
+
+	//AV1 before the first sequence header: consume without queueing. The
+	//Orin driver would hold the buffer forever and block this call (#147).
+	//A zero-sized payload is the EOS marker and always goes through.
+	if (packet->payload_size != 0 && nvmpi_dec_av1_drop(ctx, packet))
+		return 0;
 
 	memset(&v4l2_buf, 0, sizeof(v4l2_buf));
 	memset(planes, 0, sizeof(planes));
