@@ -35,31 +35,34 @@ uint32_t nvmpi_enc_av1_pixfmt(void)
 
 /* Reject requests the AV1 encoder cannot honour, before any device is
  * opened or anything allocated. Returns true when the request is valid.
- * Only 8-bit 4:2:0 input (NV12M / YUV420M) is supported: a 10-bit request
- * would otherwise be silently encoded as 8-bit by the generic raw-format
- * switch, which hides a caller bug. */
+ * 8-bit 4:2:0 input (NV12M / YUV420M) is the default. P010 (10-bit, #146)
+ * is accepted here and goes to the driver as a P010M OUTPUT plane, exactly
+ * like HEVC Main10 (#126); whether the Orin's AV1 encoder takes it is
+ * decided by the driver at setOutputPlaneFormat()/setupPlane(), where a
+ * refusal ends in a clean NULL from nvmpi_create_encoder() (cleanup path),
+ * never a crash. The 8-bit path is unchanged. */
 bool nvmpi_enc_av1_check(const nvEncParam* param)
 {
-	if (param->pixFormat == NV_PIX_P010) {
-		NVMPI_LOG(NVMPI_LOG_ERROR, "AV1 encode supports 8-bit 4:2:0 input only (P010 rejected)");
-		return false;
-	}
+	(void)param;   /* every raw layout is forwarded; the driver arbitrates P010 */
 	return true;
 }
 
 /* Neutralize the ctx fields that carry H.264/HEVC-only settings, after
  * nvmpi_enc_translate_params() filled them. Not forwarded for AV1:
  *   - profile/level: NvVideoEncoder::setProfile() returns -1 for AV1; the
- *     hardware picks Main and the level itself. The profile is pinned to
- *     the HEVC "Main" enum so the generic raw-format switch stays 8-bit.
+ *     hardware picks Main and the level itself. ctx->profile is never sent
+ *     to the driver for AV1; it only steers the generic raw-format switch
+ *     in nvmpi_create_encoder(): the HEVC "Main" enum keeps 8-bit input,
+ *     "Main10" selects the P010M OUTPUT plane for NV_PIX_P010 input (#146).
  *   - lossless, B-frames, POC type, VUI, AUD, CABAC: no AV1 equivalent.
  *   - qmin/qmax: the H.264 QP scale differs from AV1 qindex and the
  *     mapping is unverified, so rate control alone drives quality.
  * Sequence headers must accompany every key frame (a consumer can join at
  * any IDR), so SPS/PPS insertion is always requested. */
-void nvmpi_enc_av1_translate(nvmpi_enc_ctx* ctx)
+void nvmpi_enc_av1_translate(nvmpi_enc_ctx* ctx, const nvEncParam* param)
 {
-	ctx->profile = V4L2_MPEG_VIDEO_H265_PROFILE_MAIN;
+	ctx->profile = (param->pixFormat == NV_PIX_P010) ?
+		V4L2_MPEG_VIDEO_H265_PROFILE_MAIN10 : V4L2_MPEG_VIDEO_H265_PROFILE_MAIN;
 	ctx->enableLossless = false;
 	ctx->num_b_frames = (uint32_t) -1;   /* "unset": the B-frame control is skipped */
 	ctx->poc_type = 0;

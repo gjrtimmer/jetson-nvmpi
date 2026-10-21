@@ -48,8 +48,9 @@ typedef struct nvmpictx nvmpictx;
 //input. NV_PIX_P010 is 10-bit 4:2:0 semi-planar (matches FFmpeg P010LE:
 //16-bit little-endian samples, 10 significant bits in the high bits, one
 //Y plane plus one interleaved CbCr plane). Decode: HEVC Main10 only and
-//requires the NvUtils buffer API. Encode: HEVC only (implies Main10; H.264
-//and AV1 reject it at create time).
+//requires the NvUtils buffer API. Encode: HEVC (implies Main10) and AV1
+//(10-bit, P010M OUTPUT plane; the driver decides, a refusal makes create
+//return NULL); H.264 rejects it at create time.
 typedef enum {
 	NV_PIX_NV12,
 	NV_PIX_YUV420,
@@ -58,7 +59,8 @@ typedef enum {
 
 //Compressed bitstream codec selector. Decode supports all entries (AV1 only
 //where the L4T headers define V4L2_PIX_FMT_AV1, i.e. JetPack 6; create returns
-//NULL otherwise); encode supports H.264, HEVC and AV1 (AV1 encode: 8-bit 4:2:0 only, JetPack 6 headers; create returns
+//NULL otherwise); encode supports H.264, HEVC and AV1 (AV1 encode: 8-bit 4:2:0 by default, P010 10-bit input if the
+//driver takes it, JetPack 6 headers; create returns
 //NULL otherwise; one OBU temporal unit per packet, see https://github.com/gjrtimmer/jetson-ffmpeg/wiki/Development-Guide).
 typedef enum {
 	NV_VIDEO_CodingUnused,
@@ -102,8 +104,9 @@ typedef struct _NVENCPARAM{
 	char insert_spspps_idr;        //non-zero: repeat SPS/PPS at every IDR frame
 	char insert_vui;               //non-zero: embed VUI timing_info (fps) in the bitstream
 	nvPixFormat pixFormat;         //raw input layout: NV_PIX_YUV420 (default), NV_PIX_NV12, or
-	                               //NV_PIX_P010 (HEVC only, 10-bit Main10; create returns NULL
-	                               //for H.264/AV1, or when profile is Main10 without P010)
+	                               //NV_PIX_P010 (HEVC Main10 or AV1 10-bit; create returns NULL
+	                               //for H.264, when profile is Main10 without P010, or when
+	                               //the AV1 driver refuses the 10-bit format)
 	unsigned int iframe_interval;  //I-frame period in frames
 	unsigned int idr_interval;     //IDR period in frames
 	unsigned int fps_n;            //framerate numerator

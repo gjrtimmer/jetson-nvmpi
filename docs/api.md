@@ -90,7 +90,7 @@ encoder input.
 | --- | --- |
 | `NV_PIX_NV12` | 8-bit 4:2:0 semi-planar: Y plane plus interleaved UV (2 planes). |
 | `NV_PIX_YUV420` | 8-bit 4:2:0 planar: separate Y, U, V planes (3 planes). |
-| `NV_PIX_P010` | 10-bit 4:2:0 semi-planar (matches FFmpeg `P010LE`). Decode: HEVC Main10 only, requires the NvUtils buffer API (JetPack 5 and later). Encode: HEVC only, implies Main10 (see `nvEncParam`); H.264 and AV1 reject it. |
+| `NV_PIX_P010` | 10-bit 4:2:0 semi-planar (matches FFmpeg `P010LE`). Decode: HEVC Main10 only, requires the NvUtils buffer API (JetPack 5 and later). Encode: HEVC (implies Main10, see `nvEncParam`) and AV1 (10-bit, `high_bitdepth` 1 in the sequence header); H.264 rejects it. AV1 10-bit depends on the driver: `nvmpi_create_encoder()` returns NULL when it refuses the format. |
 
 Note: `NV_PIX_NV12` is enum value 0, and the encoder selects the NV12 input
 format whenever `pixFormat == NV_PIX_NV12`, so a zero-initialised `nvEncParam`
@@ -150,7 +150,7 @@ internally.
 | `mode_vbr` | `char` | Non-zero: VBR rate control instead of CBR. |
 | `insert_spspps_idr` | `char` | Non-zero (the code tests `== 1`): repeat SPS/PPS at every IDR frame. |
 | `insert_vui` | `char` | Non-zero: embed VUI timing info (fps) in the bitstream. |
-| `pixFormat` | `nvPixFormat` | Raw input layout: `NV_PIX_YUV420`, `NV_PIX_NV12`, or `NV_PIX_P010` (HEVC only; 16-bit little-endian samples, Y plane + interleaved CbCr plane, `linesize` in bytes; implies Main10). `nvmpi_create_encoder()` returns NULL for P010 with H.264 or AV1, and for Main10 without P010. |
+| `pixFormat` | `nvPixFormat` | Raw input layout: `NV_PIX_YUV420`, `NV_PIX_NV12`, or `NV_PIX_P010` (HEVC and AV1; 16-bit little-endian samples, Y plane + interleaved CbCr plane, `linesize` in bytes; implies Main10 for HEVC; AV1 stays profile 0 and declares 10-bit through `high_bitdepth`). `nvmpi_create_encoder()` returns NULL for P010 with H.264, for Main10 without P010, and for AV1 P010 when the driver refuses the format. |
 | `iframe_interval` | `unsigned int` | I-frame period in frames. |
 | `idr_interval` | `unsigned int` | IDR period in frames. |
 | `fps_n`, `fps_d` | `unsigned int` | Framerate numerator / denominator. |
