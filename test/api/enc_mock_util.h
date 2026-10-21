@@ -70,10 +70,10 @@ static inline uint64_t e_now_ms(void)
     return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
 }
 
-/* Create an encoder and fill its packet pool (E_NPKT packets, owned by the
+/* Create an encoder and fill its packet pool (npkt / E_NPKT packets, owned by the
  * caller exactly like the FFmpeg wrapper owns them). NULL when creation
  * fails. Pool packets are released by e_destroy(). */
-static inline nvmpictx *e_create(const struct ecfg *c)
+static inline nvmpictx *e_create_n(const struct ecfg *c, int npkt)
 {
     nvEncParam p;
     nvmpictx *ctx;
@@ -100,7 +100,7 @@ static inline nvmpictx *e_create(const struct ecfg *c)
     ctx = nvmpi_create_encoder(&p);
     if (!ctx)
         return NULL;
-    for (i = 0; i < E_NPKT; i++) {
+    for (i = 0; i < npkt; i++) {
         nvPacket *pk = calloc(1, sizeof(*pk));
 
         REQUIRE(pk);
@@ -109,6 +109,11 @@ static inline nvmpictx *e_create(const struct ecfg *c)
         nvmpi_encoder_qEmptyPacket(ctx, pk);
     }
     return ctx;
+}
+
+static inline nvmpictx *e_create(const struct ecfg *c)
+{
+    return e_create_n(c, E_NPKT);
 }
 
 /* Pop every pool packet, free it, close the encoder. Returns the close

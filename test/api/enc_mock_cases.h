@@ -29,6 +29,8 @@ static const struct tcase k_cases[] = {
     { "nonblock_backpressure_latency", NULL, nonblock_backpressure_latency, 0 },
     { "drain_wrapper_blocking", NULL, drain_wrapper_blocking, 0 },
     { "drain_wrapper_nonblock", NULL, drain_wrapper_nonblock, 0 },
+    { "drain_lag_blocking", NULL, drain_lag_blocking, 0 },
+    { "drain_lag_nonblock", NULL, drain_lag_nonblock, 0 },
     { "lowdelay_loop", NULL, lowdelay_loop, 0 },
     { "lowdelay_idle", NULL, lowdelay_idle, 0 },
     { "lowdelay_latency", NULL, lowdelay_latency, 0 },

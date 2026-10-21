@@ -13,6 +13,7 @@
 #define NVMPI_TEST_ENC_MOCK_DRAIN_H
 
 #define DR_FRAMES 30
+#define DR_LAG 20                        /* frames put between reads (> pool) */
 #define DR_POOL 10                       /* FFmpeg packet_pool_size default */
 
 /* Extradata encoder like +global_header: blocking, one frame, get, EOS,
@@ -41,23 +42,20 @@ static void dr_jitter(unsigned max_us)
 }
 
 /* One stream; returns delivered packets, *drops = pool-empty log lines. */
-static int dr_stream(int nonblock, int extradata, unsigned jitter_us)
+static int dr_stream(int nonblock, int extradata, unsigned jitter_us, int lag)
 {
     struct ecfg c = { NV_VIDEO_CodingH264, 0, 0, 0, nonblock, 0 };
     int i, r, got = 0;
     nvmpictx *ctx;
     struct epkt p;
-    nvPacket *pk;
 
     if (extradata)
         dr_extradata();
-    ctx = e_create(&c);
+    /* Pool like the FFmpeg default. Seeded directly: shrinking it with
+     * dqEmptyPacket would set the teardown-only `draining` flag, which turns
+     * a pool-empty drop into an uncounted DEBUG line. */
+    ctx = e_create_n(&c, DR_POOL);
     REQUIRE(ctx);
-    for (i = DR_POOL; i < E_NPKT; i++) {     /* pool like FFmpeg default */
-        REQUIRE(nvmpi_encoder_dqEmptyPacket(ctx, &pk) == 0);
-        free(pk->payload);
-        free(pk);
-    }
     for (i = 0; i < DR_FRAMES; i++) {
         while ((r = e_put(ctx, 100 + i)) == NVMPI_ERR_EAGAIN) {
             while (e_get(ctx, 0, 1, &p) == 0)   /* send_eagain: wait=1 */
@@ -65,6 +63,11 @@ static int dr_stream(int nonblock, int extradata, unsigned jitter_us)
         }
         REQUIRE(r == 0);
         dr_jitter(jitter_us);
+        if (lag) {                           /* reader falls behind the pool */
+            if (i % DR_LAG != DR_LAG - 1)
+                continue;
+            usleep(20000);                   /* let the hw finish the batch */
+        }
         while (e_get(ctx, 0, 0, &p) == 0)
             got++;
     }
@@ -102,7 +105,7 @@ static int dr_count_drops(FILE *cap)
     return drops;
 }
 
-static int dr_run(int nonblock, int extradata)
+static int dr_run(int nonblock, int extradata, int lag)
 {
     const char *e = getenv("NVMPI_DRAIN_ITERS");
     const char *j = getenv("NVMPI_DRAIN_JITTER_US");
@@ -121,7 +124,7 @@ static int dr_run(int nonblock, int extradata)
 
         rewind(cap);
         REQUIRE(ftruncate(fileno(cap), 0) == 0);
-        got = dr_stream(nonblock, extradata, jitter);
+        got = dr_stream(nonblock, extradata, jitter, lag);
         fflush(stderr);
         drops = dr_count_drops(cap);
         if (got != DR_FRAMES) {
@@ -134,12 +137,16 @@ static int dr_run(int nonblock, int extradata)
     dup2(saved, 2);
     close(saved);
     fclose(cap);
-    dprintf(2, "drain nb=%d extradata=%d: %d iters, %d lossy, %d with drops\n",
-            nonblock, extradata, iters, lost, drop_runs);
+    dprintf(2, "drain nb=%d extradata=%d lag=%d: %d iters, %d lossy, %d with drops\n",
+            nonblock, extradata, lag, iters, lost, drop_runs);
     return lost != 0 || drop_runs != 0;
 }
 
-static int drain_wrapper_blocking(void) { return dr_run(0, 1); }
-static int drain_wrapper_nonblock(void) { return dr_run(1, 1); }
+static int drain_wrapper_blocking(void) { return dr_run(0, 1, 0); }
+static int drain_wrapper_nonblock(void) { return dr_run(1, 1, 0); }
+/* Reader reads once per DR_LAG puts: more than the pool holds. Blocking mode
+ * must answer NVMPI_ERR_EAGAIN (caller drains, retries) and never drop (#145). */
+static int drain_lag_blocking(void) { return dr_run(0, 0, 1); }
+static int drain_lag_nonblock(void) { return dr_run(1, 0, 1); }
 
 #endif /* NVMPI_TEST_ENC_MOCK_DRAIN_H */
