@@ -82,7 +82,6 @@ struct mock_enc_au {
     bool     key;                  /* key frame (IDR, or periodic I)         */
     bool     headers;              /* prepend SPS+PPS (+VPS for HEVC)        */
     bool     main10;               /* HEVC: Main10 profile, 10-bit SPS       */
-    bool     high_bd;              /* AV1: P010M OUTPUT, 10-bit sequence hdr */
     uint32_t seq;                  /* varies slice bytes frame to frame      */
     uint32_t poc;                  /* frames since the last IDR (HEVC POC)   */
     uint32_t tpf_num, tpf_den;     /* timeperframe; VUI emitted when both
@@ -122,8 +121,7 @@ size_t mock_enc_build_au(const struct mock_enc_au *au, uint8_t *out, size_t cap,
 /* mock_enc_av1.c: one low-overhead OBU temporal unit (#8): temporal
  * delimiter, sequence header when au->headers, OBU_FRAME (KEY_FRAME when
  * au->key), in the driver's IVF framing (file header on au->seq == 0, frame
- * header always). au->high_bd (P010M OUTPUT plane, #146) sets high_bitdepth in
- * the sequence header (seq_profile 0, BitDepth 10). Parseable, not decodable. Returns the size, 0 when out is
+ * header always). Parseable, not decodable. Returns the size, 0 when out is
  * too small or the size is invalid. */
 size_t mock_enc_av1_au(const struct mock_enc_au *au, uint8_t *out, size_t cap);
 

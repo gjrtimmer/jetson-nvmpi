@@ -268,7 +268,6 @@ static int test_encoder_hevc_create_close(void)
 #include "av1_case.h"
 #include "av1_enc_case.h"
 #include "enc_p010_case.h"
-#include "av1_p010_case.h"
 #include "dec_fd_case.h"
 #include "dec_fd2_case.h"
 
@@ -287,12 +286,12 @@ int main(void)
     fail += RUN_TEST(test_encoder_hevc_create_close);
     fail += RUN_TEST(test_decoder_av1_frame);
     fail += RUN_TEST(test_encoder_av1_roundtrip);
+    /* AV1 + P010 is refused up front (#146). */
+    fail += RUN_TEST(test_encoder_av1_p010_refused);
     /* HEVC Main10 from P010 input (#126). */
     fail += RUN_TEST(test_encoder_hevc_p010_roundtrip);
     /* 8-bit HEVC declares Main (#144). */
     fail += RUN_TEST(test_encoder_hevc_main8_roundtrip);
-    /* AV1 10-bit from P010 input; strict mode fails if the driver refuses (#146). */
-    fail += RUN_TEST(test_encoder_av1_p010_roundtrip);
     /* Zero-copy lifetime: resolution change + release after close (#137). */
     fail += RUN_TEST(test_decoder_res_change_borrowed);
     /* get_frame_fd2 layout vs the allocator's planeParams (#138). */

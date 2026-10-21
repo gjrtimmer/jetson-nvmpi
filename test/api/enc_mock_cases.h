@@ -56,9 +56,8 @@ static const struct tcase k_cases[] = {
     { "av1_stream", NULL, av1_stream, 0 },
     { "av1_force_idr", NULL, av1_force_idr, 0 },
     { "av1_roundtrip", NULL, av1_roundtrip, 0 },
-    { "av1_p010_stream", NULL, av1_p010_stream, 0 },
 #endif
-    /* open@1+: AV1 + P010 reaches the device and fails cleanly (see the case) */
+    /* open@1+: create must fail before the device is touched (see the case) */
     { "av1_create_gate", "open@1+", av1_create_gate, 0 },
     /* fault matrix: fn == NULL -> fault_case() */
     { "fault_none_control", "dqbuf@9999", NULL, 0 },

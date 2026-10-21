@@ -252,7 +252,6 @@ static void encode_frame(struct mock_ctx *ctx, struct enc_model *m, int oi, int 
     au.key = key;
     au.headers = idr && (m->frames == 0 || m->headers_at_idr);
     au.main10 = m->main10;
-    au.high_bd = raw->pixelformat == MOCK_PIX_FMT_P010M;   /* AV1 10-bit (#146) */
     au.seq = m->seq++;
     au.poc = idr ? 0 : m->since_idr;     /* since_idr counts the last IDR */
     if (m->insert_vui) {                 /* timeperframe from S_PARM      */

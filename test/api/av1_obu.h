@@ -9,10 +9,6 @@
  * first fields after the fixed 38-bit prefix when the sequence uses 16-bit
  * size fields, which both the mock and the hardware encoder emit for sizes
  * that fit; see seq_dims()) and whether the frame header is a KEY_FRAME.
- * av1_seq_color() (#146) walks the whole sequence header (timing info,
- * decoder model, operating points, tool flags) to the color_config and
- * reports seq_profile, high_bitdepth and twelve_bit, i.e. the stream bit
- * depth: 8 (high_bitdepth 0), 10 (1) or 12 (profile 2 with twelve_bit).
  */
 #ifndef NVMPI_TEST_AV1_OBU_H
 #define NVMPI_TEST_AV1_OBU_H
@@ -26,8 +22,6 @@ struct av1_tu {
     unsigned n_td, n_seq, n_frame;
     int key;                   /* first frame OBU is a shown KEY_FRAME      */
     unsigned w, h;             /* from the sequence header (0 = none)       */
-    int color_ok;              /* av1_seq_color() parsed the header         */
-    unsigned profile, high_bd, twelve_bit;  /* color_config (valid if color_ok) */
 };
 
 static inline unsigned av1_bits(const uint8_t *p, size_t n, size_t at, unsigned c)
@@ -63,115 +57,6 @@ static inline int av1_seq_dims(const uint8_t *p, size_t n, unsigned *w, unsigned
         return 0;
     *w = av1_bits(p, n, at, wb) + 1;
     *h = av1_bits(p, n, at + wb, hb) + 1;
-    return 1;
-}
-
-/* Cursor over a bit string with an overrun flag: reads past the end return
- * 0 and set bad, so a truncated or hostile header can never read outside the
- * buffer (av1_bits() itself is already bounds-safe). */
-struct av1_rd {
-    const uint8_t *p;
-    size_t n, at;
-    int bad;
-};
-
-static inline unsigned av1_rd_u(struct av1_rd *r, unsigned c)
-{
-    unsigned v;
-
-    if (r->at + c > r->n * 8) {
-        r->bad = 1;
-        r->at = r->n * 8;
-        return 0;
-    }
-    v = av1_bits(r->p, r->n, r->at, c > 32 ? 32 : c);
-    r->at += c;
-    return v;
-}
-
-/* Sequence header payload -> seq_profile / high_bitdepth / twelve_bit.
- * Follows sequence_header_obu() of the AV1 spec field by field. Returns 1
- * when color_config was reached without overrun, else 0 (outputs untouched).
- * A reduced still-picture header has no operating points; it is parsed too. */
-static inline int av1_seq_color(const uint8_t *p, size_t n, unsigned *profile,
-                                unsigned *high_bd, unsigned *twelve_bit)
-{
-    struct av1_rd r = { p, n, 0, 0 };
-    unsigned prof, reduced, i, ops, dm = 0, dly = 0, ord = 0, hb, tw = 0, v;
-    unsigned idd = 0, fid, sct, imv;
-
-    prof = av1_rd_u(&r, 3);
-    av1_rd_u(&r, 1);                           /* still_picture            */
-    reduced = av1_rd_u(&r, 1);
-    if (reduced) {
-        av1_rd_u(&r, 5);                       /* seq_level_idx[0]         */
-    } else {
-        if (av1_rd_u(&r, 1)) {                 /* timing_info_present_flag */
-            av1_rd_u(&r, 32);                  /* num_units_in_display_tick */
-            av1_rd_u(&r, 32);                  /* time_scale               */
-            if (av1_rd_u(&r, 1)) {             /* equal_picture_interval   */
-                for (v = 0; v < 32 && !av1_rd_u(&r, 1) && !r.bad; v++)
-                    ;                          /* uvlc leadingZeros        */
-                if (v < 32)
-                    av1_rd_u(&r, v);           /* num_ticks_per_picture    */
-            }
-            if (av1_rd_u(&r, 1)) {             /* decoder_model_info_present */
-                dm = av1_rd_u(&r, 5) + 1;      /* buffer_delay_length      */
-                av1_rd_u(&r, 32);              /* num_units_in_decoding_tick */
-                av1_rd_u(&r, 10);              /* removal / presentation len */
-            }
-        }
-        idd = av1_rd_u(&r, 1);                 /* initial_display_delay_present */
-        ops = av1_rd_u(&r, 5) + 1;
-        for (i = 0; i < ops && !r.bad; i++) {
-            av1_rd_u(&r, 12);                  /* operating_point_idc      */
-            if (av1_rd_u(&r, 5) > 7)           /* seq_level_idx            */
-                av1_rd_u(&r, 1);               /* seq_tier                 */
-            if (dm && av1_rd_u(&r, 1)) {       /* decoder_model_present    */
-                av1_rd_u(&r, dm);              /* decoder_buffer_delay     */
-                av1_rd_u(&r, dm);              /* encoder_buffer_delay     */
-                av1_rd_u(&r, 1);               /* low_delay_mode_flag      */
-            }
-            if (idd && av1_rd_u(&r, 1))        /* initial_display_delay_present_for_this_op */
-                av1_rd_u(&r, 4);
-        }
-    }
-    {
-        unsigned wb = av1_rd_u(&r, 4) + 1, hbits = av1_rd_u(&r, 4) + 1;
-
-        av1_rd_u(&r, wb);                      /* max_frame_width_minus_1  */
-        av1_rd_u(&r, hbits);                   /* max_frame_height_minus_1 */
-    }
-    if (!reduced) {
-        fid = av1_rd_u(&r, 1);                 /* frame_id_numbers_present */
-        if (fid)
-            av1_rd_u(&r, 7);                   /* delta / additional id len */
-    }
-    av1_rd_u(&r, 3);                           /* 128x128, filter_intra, edge */
-    if (!reduced) {
-        av1_rd_u(&r, 4);                       /* interintra .. dual_filter */
-        if (av1_rd_u(&r, 1)) {                 /* enable_order_hint        */
-            av1_rd_u(&r, 2);                   /* jnt_comp, ref_frame_mvs  */
-            ord = 1;
-        }
-        sct = av1_rd_u(&r, 1) ? 2 : av1_rd_u(&r, 1);  /* seq_force_screen_content_tools */
-        if (sct > 0) {
-            imv = av1_rd_u(&r, 1);             /* seq_choose_integer_mv    */
-            if (!imv)
-                av1_rd_u(&r, 1);               /* seq_force_integer_mv     */
-        }
-        if (ord)
-            av1_rd_u(&r, 3);                   /* order_hint_bits_minus_1  */
-    }
-    av1_rd_u(&r, 3);                           /* superres, cdef, restoration */
-    hb = av1_rd_u(&r, 1);                      /* high_bitdepth            */
-    if (prof == 2 && hb)
-        tw = av1_rd_u(&r, 1);                  /* twelve_bit               */
-    if (r.bad)
-        return 0;
-    *profile = prof;
-    *high_bd = hb;
-    *twelve_bit = tw;
     return 1;
 }
 
@@ -214,9 +99,6 @@ static inline void av1_parse_tu(const uint8_t *p, size_t n, struct av1_tu *t)
             t->n_seq++;
             if (!t->w)
                 (void)av1_seq_dims(p + o, sz, &t->w, &t->h);
-            if (!t->color_ok)
-                t->color_ok = av1_seq_color(p + o, sz, &t->profile,
-                                            &t->high_bd, &t->twelve_bit);
         } else if (type == 6 || type == 3) {
             /* OBU_FRAME, or OBU_FRAME_HEADER followed by OBU_TILE_GROUPs
              * (equally valid; an encoder may split them). Both start with
