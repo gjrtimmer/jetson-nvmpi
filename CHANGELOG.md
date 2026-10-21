@@ -3,6 +3,33 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.5.0 - 2026-10-21
+
+### Features
+
+
+**encoder**
+
+
+- Accept P010 input and HEVC Main10 profile; map HEVC profiles to the H.265 enum (#126)
+
+
+### Testing
+
+
+**api**
+
+
+- Cover P010 input and HEVC Main10 encode (#126)
+- Check 8-bit HEVC programs and declares Main (#144)
+
+
+**mock**
+
+
+- Model HEVC Main10 in the encoder
+
+
 ## 4.4.1 - 2026-10-20
 
 ### Testing
