@@ -61,8 +61,9 @@ struct mock_buf {
     uint32_t sequence;
     uintptr_t userptr[MOCK_MAX_PLANES];   /* USERPTR: caller memory given
                                            * at QBUF (never owned/freed)    */
-    struct timeval ts;                    /* QBUF timestamp, copied to the
-                                           * DQ'd buffer by the model       */
+    uint64_t ts_ns;                       /* QBUF timestamp as the kernel
+                                           * stores it (u64 ns), copied to
+                                           * the DQ'd buffer by the model   */
 };
 
 struct mock_queue {

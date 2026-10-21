@@ -267,7 +267,7 @@ static void encode_frame(struct mock_ctx *ctx, struct enc_model *m, int oi, int 
     flags = n ? 0 : V4L2_BUF_FLAG_ERROR;
     flags |= key ? V4L2_BUF_FLAG_KEYFRAME : V4L2_BUF_FLAG_PFRAME;
     used[0] = n ? (uint32_t)n : 1;       /* never 0: 0 means EOS to libnvmpi */
-    cap->bufs[ci].ts = out->bufs[oi].ts; /* timestamp copy (pts passthrough) */
+    cap->bufs[ci].ts_ns = out->bufs[oi].ts_ns; /* timestamp copy (pts passthrough) */
     if (ci < (int)sizeof(m->key))
         m->key[ci] = key;
     (void)mock_complete_buf(ctx, MOCK_Q_CAPTURE, (uint32_t)ci, used, flags);

@@ -194,7 +194,7 @@ static void produce(struct mock_ctx *ctx, struct dec_model *m, int ci,
     }
     if (fill_gray(fd) < 0)
         flags |= V4L2_BUF_FLAG_ERROR;  /* USERPTR or a foreign fd: no data */
-    cb->ts = mb->ts;                   /* timestamp copy (pts passthrough)  */
+    cb->ts_ns = mb->ts_ns;                 /* timestamp copy (pts passthrough)  */
     (void)mock_complete_buf(ctx, MOCK_Q_CAPTURE, (uint32_t)ci, used, flags);
     m->last_idx = ci;
 }

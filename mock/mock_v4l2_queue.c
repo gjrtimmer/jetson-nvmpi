@@ -20,6 +20,8 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
+#include "mock_ts.h"
+
 int mock_qidx(uint32_t type)
 {
     if (type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)
@@ -174,7 +176,7 @@ static void fill_buffer(struct v4l2_buffer *b, const struct mock_queue *q,
     b->flags = mb->flags | (mb->state == MB_QUEUED ? V4L2_BUF_FLAG_QUEUED : 0)
              | (mb->state == MB_DONE ? V4L2_BUF_FLAG_DONE : 0);
     b->sequence = mb->sequence;
-    b->timestamp = mb->ts;
+    b->timestamp = mock_ns_to_timeval(mb->ts_ns);
     b->length = mb->n_planes;
     if (!b->m.planes)
         return;
@@ -257,7 +259,7 @@ int mock_do_qbuf(struct mock_ctx *ctx, struct v4l2_buffer *b)
         if (!ret && mock_fault_hit(MFP_QBUF))
             ret = EIO;
         if (!ret) {
-            mb->ts = b->timestamp;
+            mb->ts_ns = mock_timeval_to_ns(&b->timestamp);
             for (p = 0; p < mb->n_planes; p++)
                 mb->bytesused[p] = qi == MOCK_Q_OUTPUT
                     ? b->m.planes[p].bytesused : 0;
