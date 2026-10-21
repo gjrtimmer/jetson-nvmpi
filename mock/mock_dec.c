@@ -18,19 +18,18 @@
  *                        application tore the CAPTURE queue down (STREAMOFF)
  *                        and set it up again, like the real driver.
  *   CAPTURE (frames)     DMABUF/MMAP buffers are filled with gray (0x80).
- *   AV1 (#147)           MODEL ASSUMPTION, not measured on hardware: the
- *                        decoder needs a sequence header OBU before it can
- *                        size the stream. Until one arrives no
- *                        RESOLUTION_CHANGE is pushed and no frame is made;
- *                        the buffers are consumed (completed) and dropped,
- *                        so put_packet never blocks on them. A buffer with
- *                        only a temporal delimiter / sequence header / other
- *                        non-picture OBUs completes without a frame. Once a
- *                        sequence header was seen (same or earlier buffer)
- *                        the state is sticky until the OUTPUT queue is
- *                        streamed off (flush), so later units without a
- *                        header decode, as in a normal stream. The test_api
- *                        hardware case prints the real driver's behaviour.
+ *   AV1 (#147)           MODEL OF THE ORIN (R36.4, measured by the test_api
+ *                        hardware case, MR !58): until a sequence header
+ *                        OBU arrived, AV1 data is HELD - its OUTPUT buffer
+ *                        is never returned - and the session is poisoned:
+ *                        every later buffer queues behind it, so no event,
+ *                        no frame, even when a header follows. put_packet
+ *                        then blocks once the OUTPUT buffers are used up.
+ *                        libnvmpi must drop header-less data itself
+ *                        (nvmpi_dec_av1.cpp). Cleared by an OUTPUT
+ *                        streamoff (flush/close). After a header, buffers
+ *                        with no picture OBU (TD/header only) complete
+ *                        without a frame and the state is sticky.
  *   EOS                  Frames already decoded are delivered first; the
  *                        newest undelivered one is flagged V4L2_BUF_FLAG_LAST.
  *                        Afterwards DQBUF on the empty CAPTURE queue reports
@@ -277,12 +276,13 @@ static bool step(struct mock_ctx *ctx, struct dec_model *m, int oi)
         munmap(map, n);
 
     if (av1) {
-        /* Model assumption (#147): no sequence header yet = nothing to size
-         * the stream with, so no event and no frame; the data is consumed. */
+        /* Orin behaviour (#147): header-less data before the first sequence
+         * header is held and poisons the session (see the file header). The
+         * buffer stays QUEUED, so everything behind it waits too. */
         m->seq_seen = m->seq_seen || sc.has_seq;
         if (!m->seq_seen) {
-            finish_out(ctx, oi, 0);
-            return true;
+            MOCK_TRACE("decoder: hold AV1 data before the sequence header");
+            return false;
         }
     }
 
