@@ -301,10 +301,50 @@ void dec_capture_loop_fcn(void *arg)
 				 * empty-queue CV (100 ms timeout) instead of the previous
 				 * 500 µs busy-spin — eliminates ~2000 wakeups/s while
 				 * back-pressured. The V4L2 capture buffer is held back
-				 * meanwhile, eventually stalling the decoder hardware. */
+				 * meanwhile, eventually stalling the decoder hardware.
+				 *
+				 * Events are serviced here too (#143). A single-threaded
+				 * caller only drains frames between put_packet calls, and
+				 * put_packet blocks until the decoder consumes an OUTPUT
+				 * buffer. The decoder holds every AU of a new stream size
+				 * until the capture plane is torn down and re-armed
+				 * (respondToResolutionEvent), which only this thread can
+				 * do. Waiting for a free slot while ignoring the pending
+				 * RESOLUTION_CHANGE deadlocked: caller in put_packet ->
+				 * decoder waiting for us -> us waiting for the caller to
+				 * drain. */
+				bool res_change_handled = false;
 				while(!ctx->eos.load())
 				{
 					slot = ctx->framePool->dqEmptyBuf(std::chrono::milliseconds(100));
+					if(!slot)
+					{
+						/* No slot within the slice: poll for the event
+						 * (0 ms, non-blocking). Only this thread dequeues
+						 * events, so each is consumed exactly once. Other
+						 * event types are ignored, as in the outer loop. */
+						if (dec->dqEvent(v4l2Event, false) == 0 &&
+						    v4l2Event.type == V4L2_EVENT_RESOLUTION_CHANGE)
+						{
+							/* The held old-size CAPTURE buffer is dropped
+							 * without a transform and NOT re-queued:
+							 * respondToResolutionEvent does STREAMOFF +
+							 * REQBUFS(0) on the capture plane, the single
+							 * release point for it. Old-size frames still
+							 * waiting in the pool are discarded by
+							 * retireFramePool() in the same call anyway
+							 * (#137), so this adds no new kind of frame
+							 * loss. The decoder is re-armed afterwards,
+							 * which frees OUTPUT buffers for put_packet. */
+							NVMPI_LOG(NVMPI_LOG_INFO,
+							          "resolution change while back-pressured: dropping held CAPTURE buffer %d",
+							          v4l2_buf.index);
+							respondToResolutionEvent(v4l2Format, v4l2Crop, ctx);
+							res_change_handled = true;
+							break;
+						}
+						continue;
+					}
 					if(slot)
 					{
 #ifdef WITH_NVUTILS
@@ -324,6 +364,11 @@ void dec_capture_loop_fcn(void *arg)
 						break;
 					}
 				}
+				/* Change handled: the held buffer no longer exists in the
+				 * rebuilt capture plane, skip the re-queue below and go
+				 * back to the outer loop for the new stream. */
+				if (res_change_handled)
+					break;
 			}
 
 			//return the DMA buffer to the decoder so it can be refilled

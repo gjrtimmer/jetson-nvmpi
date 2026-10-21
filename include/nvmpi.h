@@ -256,6 +256,11 @@ extern "C" {
 
 	//Feed one compressed packet (Annex-B for H.264/HEVC). May block waiting
 	//for a free V4L2 OUTPUT-plane buffer once all buffers are in flight.
+	//Decoded frames must be drained (get_frame / get_frame_fd) by the
+	//caller or another thread: with the frame pool full the decoder stalls
+	//and this call waits. A mid-stream resolution change is serviced even
+	//while the pool is full (frames of the old size not yet taken are
+	//discarded), so it never leaves put_packet waiting on its own caller.
 	//A packet with payload_size==0 signals end-of-stream (starts flushing).
 	//Returns 0 on success, -1 on dequeue failure, -2 on queue failure,
 	//-3 when the packet exceeds chunk_size (invalid input — the packet is
