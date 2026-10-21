@@ -14,6 +14,7 @@
 #include "enc_mock_av1.h"
 #include "enc_mock_p010.h"
 #include "enc_mock_drain.h"
+#include "enc_mock_pts.h"
 
 static const struct tcase k_cases[] = {
     { "blocking_h264", NULL, blocking_h264, 0 },
@@ -59,6 +60,10 @@ static const struct tcase k_cases[] = {
 #endif
     /* open@1+: create must fail before the device is touched (see the case) */
     { "av1_create_gate", "open@1+", av1_create_gate, 0 },
+    /* pts round trip through the u64 ns kernel timestamp (#148) */
+    { "pts_roundtrip_enc", NULL, pts_roundtrip_enc, 0 },
+    { "pts_roundtrip_enc_fd", NULL, pts_roundtrip_enc_fd, 0 },
+    { "pts_roundtrip_enc_long", NULL, pts_roundtrip_enc_long, 0 },
     /* fault matrix: fn == NULL -> fault_case() */
     { "fault_none_control", "dqbuf@9999", NULL, 0 },
     { "fault_open@1", "open@1", NULL, 0 },        /* factory retry recovers */

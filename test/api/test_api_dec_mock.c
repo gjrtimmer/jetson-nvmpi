@@ -278,6 +278,7 @@ static int fault_case(const struct tcase *t)
 #include "dec_mock_fd.h"
 #include "dec_mock_fd2.h"
 #include "dec_mock_reschange.h"
+#include "dec_mock_pts.h"
 
 static const struct tcase k_cases[] = {
     { "decode_plain", NULL, decode_plain, 0, 0 },
@@ -318,6 +319,10 @@ static const struct tcase k_cases[] = {
     { "res_change_alloc@22", "alloc@22", res_change_alloc_fault, 0, 1 },
     { "res_change_alloc@23", "alloc@23", res_change_alloc_fault, 0, 1 },
     { "res_change_alloc@24", "alloc@24", res_change_alloc_fault, 0, 1 },
+    /* pts round trip through the u64 ns kernel timestamp (#148) */
+    { "pts_roundtrip_copy", NULL, pts_roundtrip_copy, 0, 0 },
+    { "pts_roundtrip_fd", NULL, pts_roundtrip_fd, 0, 0 },
+    { "pts_roundtrip_long", NULL, pts_roundtrip_long, 0, 0 },
     /* fault matrix: fn == NULL -> fault_case() */
     { "fault_none_control", "dqbuf@9999", NULL, 0, 0 },
     { "fault_dqbuf@1", "dqbuf@1", NULL, 0, 1 },
