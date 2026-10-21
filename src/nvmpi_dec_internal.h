@@ -6,6 +6,7 @@
 #include "NVMPI_bufPool.hpp"
 #include "nvmpi_frame_buffer.hpp"
 #include "nvmpi_fd_geometry.h"
+#include "nvmpi_pts.h"
 #include <vector>
 #include "nvmpi_log.h"
 #include <thread>
@@ -111,6 +112,7 @@ struct nvmpi_dec_ctx : nvmpictx
 	 * orders the counter before the eos flag. Never reset (flush keeps it):
 	 * the capture thread's race guard keys on "was ever fed". */
 	std::atomic<uint32_t> packets_put{0};
+	nvmpi_pts_map pts_map;              //int64 pts <-> V4L2 timeval (put thread -> capture thread)
 	unsigned int coded_width{0};        //stream resolution reported by the decoder (crop)
 	unsigned int coded_height{0};
 	unsigned int output_width{0};       //resolution delivered to the user (resized or coded)

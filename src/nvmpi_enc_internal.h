@@ -4,6 +4,7 @@
 #include "NvVideoEncoder.h"
 #include "nvUtils2NvBuf.h"
 #include "NVMPI_bufPool.hpp"
+#include "nvmpi_pts.h"
 #include <fcntl.h>
 #include <errno.h>
 #include <string.h>
@@ -43,6 +44,7 @@ using namespace std;
 struct nvmpi_enc_ctx : nvmpictx
 {
 	uint32_t index;                //next OUTPUT-plane buffer index until all used once
+	nvmpi_pts_map pts_map;         //int64 pts <-> V4L2 timeval (put thread -> DQ thread)
 	uint32_t width;
 	uint32_t height;
 	uint32_t profile;              //V4L2 H.264/H.265 profile enum value

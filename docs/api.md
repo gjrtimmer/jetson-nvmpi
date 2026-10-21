@@ -202,7 +202,7 @@ internally.
 | `flags` | `unsigned long` | Encoder sets the keyframe flag (value matches `AV_PKT_FLAG_KEY`). |
 | `payload_size` | `unsigned long` | Valid bytes in `payload`. |
 | `payload` | `unsigned char*` | Bitstream data. |
-| `pts` | `unsigned long` | Presentation timestamp in microseconds. |
+| `pts` | `unsigned long` | Presentation timestamp in microseconds. Any 64-bit value round-trips unchanged (see [pts round trip](#pts-round-trip)). |
 | `privData` | `void*` | Encoder pool back-pointer to the caller's own packet object (the FFmpeg layer stores its `AVPacket` here; see `src/nvmpi_enc_output.cpp`). |
 
 Ownership:
@@ -226,12 +226,35 @@ Ownership:
 | `linesize[3]` | `unsigned int` | Per-plane stride in bytes. |
 | `type` | `nvPixFormat` | Pixel layout. |
 | `width`, `height` | `unsigned int` | Frame size. |
-| `timestamp` | `time_t` | Microseconds, carried through the V4L2 buffer timestamp. |
+| `timestamp` | `time_t` | Microseconds. Any 64-bit value round-trips unchanged (see [pts round trip](#pts-round-trip)). |
 
 Payload pointers always reference caller-owned memory. The decoder copies into
 them (`get_frame`), the encoder copies out of them (`put_frame`); ownership
 never changes. `get_frame` fills the planes and `timestamp`; it does not fill
 `width`/`height`, so take the geometry from your stream (or `nvDecParam`).
+
+### pts round trip
+
+Any 64-bit pts passed to `nvmpi_decoder_put_packet` (`nvPacket.pts`) or to
+`nvmpi_encoder_put_frame` / `nvmpi_encoder_put_frame_fd` (`nvFrame.timestamp`,
+`timestamp`) is returned unchanged by `get_frame`, `get_frame_fd`,
+`get_frame_fd2` and `get_packet`. This includes `AV_NOPTS_VALUE` (`INT64_MIN`),
+other negative values and values up to `INT64_MAX`; values are read as `int64`
+(`nvPacket.pts` is `unsigned long`, the same 64 bits).
+
+Why this needs work: libnvmpi carries the pts in the V4L2 buffer timestamp, and
+the Tegra kernel stores that as u64 nanoseconds, which holds a microsecond value
+exactly only in `0 ..= 9223372036854775` (`INT64_MAX / 1000`, about 292 000
+years). libnvmpi passes values in that range (minus a reserved top block of 256)
+through unchanged and maps every other value to a reserved sentinel in the block,
+keeping the original in a side table of 256 entries that restores it on output.
+Normal pts never use the table.
+
+Limits: the table tracks 256 distinct out-of-range values at a time. A repeated
+value (a stream of `AV_NOPTS_VALUE`) reuses one entry. When the table is full the
+oldest entry is recycled, so a frame still in flight after 256 newer distinct
+out-of-range pts returns the newer value. A decoder or encoder holds far fewer
+frames in flight.
 
 ### `nvmpi_frame_release_cb`
 

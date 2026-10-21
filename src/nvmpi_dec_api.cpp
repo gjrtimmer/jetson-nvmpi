@@ -84,8 +84,9 @@ int nvmpi_decoder_put_packet(nvmpictx* h,nvPacket* packet)
 	v4l2_buf.m.planes[0].bytesused = nvBuffer->planes[0].bytesused;
 
 	v4l2_buf.flags |= V4L2_BUF_FLAG_TIMESTAMP_COPY;
-	v4l2_buf.timestamp.tv_sec = packet->pts / 1000000;
-	v4l2_buf.timestamp.tv_usec = packet->pts % 1000000;
+	//total round trip for any 64-bit pts (AV_NOPTS_VALUE, negatives, huge):
+	//the kernel keeps the timeval as u64 ns, see nvmpi_pts.h
+	ctx->pts_map.encode((int64_t)packet->pts, &v4l2_buf.timestamp);
 
 	ret = ctx->dec->output_plane.qBuffer(v4l2_buf, NULL);
 	if (ret < 0)

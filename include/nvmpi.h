@@ -147,6 +147,18 @@ typedef struct _NVDECPARAM{
 	unsigned int height;     //stream height from container headers (0 = unknown/use resolution-change events)
 } nvDecParam;
 
+//pts contract (video decoder and encoder): any 64-bit value given as
+//nvPacket.pts to nvmpi_decoder_put_packet, or as the frame timestamp to
+//nvmpi_encoder_put_frame / _put_frame_fd, comes back bit for bit from
+//get_frame / get_frame_fd / get_frame_fd2, or from get_packet. That includes
+//AV_NOPTS_VALUE (INT64_MIN), other negative values and values near
+//INT64_MAX, read as int64 (nvPacket.pts is unsigned long, same bits). The
+//Tegra kernel keeps the V4L2 timestamp as u64 ns, which is exact only for
+//0..9223372036854775 us, so libnvmpi maps values outside that range to
+//reserved in-range sentinels and restores them on output. It tracks 256
+//distinct out-of-range values at a time (a repeated value reuses its slot);
+//a frame still in flight after 256 newer distinct out-of-range puts comes
+//back with a newer value. The callers' pipelines hold far fewer frames.
 //Compressed packet exchanged across the API boundary.
 //Decoder direction: caller owns 'payload' (it is memcpy'd into a V4L2
 //buffer inside put_packet, so it may be freed on return).
@@ -157,7 +169,7 @@ typedef struct _NVPACKET{
 	unsigned long flags;        //encoder sets keyframe flag (matches AV_PKT_FLAG_KEY)
 	unsigned long payload_size; //valid bytes in payload
 	unsigned char *payload;     //bitstream data
-	unsigned long  pts;         //presentation timestamp in microseconds
+	unsigned long  pts;         //presentation timestamp in microseconds, any 64-bit value (see pts contract)
 	//NVMPI_pkt pointer. used by encoder
 	void* privData;
 } nvPacket;
@@ -174,7 +186,7 @@ typedef struct _NVFRAME{
 	nvPixFormat type;
 	unsigned int width;
 	unsigned int height;
-	time_t timestamp;              //microseconds (carried via the V4L2 buffer timestamp)
+	time_t timestamp;              //microseconds, any 64-bit value (see pts contract)
 }nvFrame;
 
 //Release callback for borrowed DMA-BUF fds returned by get_frame_fd.

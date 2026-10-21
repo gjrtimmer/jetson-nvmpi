@@ -87,7 +87,7 @@ bool encoder_capture_plane_dq_callback(struct v4l2_buffer *v4l2_buf, NvBuffer * 
 	}
 	else
 	{
-		pkt->pts = (v4l2_buf->timestamp.tv_usec % 1000000) + (v4l2_buf->timestamp.tv_sec * 1000000UL);
+		pkt->pts = (unsigned long)ctx->pts_map.decode(v4l2_buf->timestamp);
 		//AV_PKT_FLAG_KEY 0x0001. if current packet is keyframe then enc_metadata.KeyFrame should be 0x1, so it should be OK to just assign value
 		pkt->flags = enc_metadata.KeyFrame;
 		//AV1: drop the IVF framing the driver may add (#8); 0 for H.264/HEVC.

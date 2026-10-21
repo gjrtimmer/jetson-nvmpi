@@ -202,8 +202,8 @@ int nvmpi_encoder_put_frame(nvmpictx* h,nvFrame* frame)
 		//normal frame: copy planes in and carry the pts on the buffer
 		copyFrameToNvBuf(frame, *nvBuffer);
 		v4l2_buf.flags |= V4L2_BUF_FLAG_TIMESTAMP_COPY;
-		v4l2_buf.timestamp.tv_usec = frame->timestamp % 1000000;
-		v4l2_buf.timestamp.tv_sec = frame->timestamp / 1000000;
+		//total round trip for any 64-bit timestamp, see nvmpi_pts.h
+		ctx->pts_map.encode((int64_t)frame->timestamp, &v4l2_buf.timestamp);
 	}
 	else
 	{

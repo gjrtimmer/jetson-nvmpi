@@ -301,8 +301,8 @@ int nvmpi_encoder_put_frame_fd(nvmpictx* h,
 		}
 
 		v4l2_buf.flags |= V4L2_BUF_FLAG_TIMESTAMP_COPY;
-		v4l2_buf.timestamp.tv_sec = timestamp / 1000000;
-		v4l2_buf.timestamp.tv_usec = timestamp % 1000000;
+		//total round trip for any 64-bit timestamp, see nvmpi_pts.h
+		ctx->pts_map.encode(timestamp, &v4l2_buf.timestamp);
 	}
 	else
 	{

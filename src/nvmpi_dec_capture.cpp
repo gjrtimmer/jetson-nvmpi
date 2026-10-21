@@ -287,8 +287,8 @@ void dec_capture_loop_fcn(void *arg)
 				pthread_mutex_unlock(&nvmpi_transform_mutex);
 #endif
 				TEST_ERROR(ret==-1, "Transform failed",ret);
-				//carry the pts through (V4L2 timeval -> microseconds)
-				slot->fb->timestamp = (v4l2_buf.timestamp.tv_usec % 1000000) + (v4l2_buf.timestamp.tv_sec * 1000000UL);
+				//carry the pts through (V4L2 timeval -> original int64 microseconds)
+				slot->fb->timestamp = (unsigned long long)ctx->pts_map.decode(v4l2_buf.timestamp);
 
 				//hand the filled frame to the consumer (user thread)
 				ctx->framePool->qFilledBuf(slot);
@@ -358,7 +358,7 @@ void dec_capture_loop_fcn(void *arg)
 						pthread_mutex_unlock(&nvmpi_transform_mutex);
 #endif
 						TEST_ERROR(ret==-1, "Transform failed",ret);
-						slot->fb->timestamp = (v4l2_buf.timestamp.tv_usec % 1000000) + (v4l2_buf.timestamp.tv_sec * 1000000UL);
+						slot->fb->timestamp = (unsigned long long)ctx->pts_map.decode(v4l2_buf.timestamp);
 
 						ctx->framePool->qFilledBuf(slot);
 						break;
