@@ -10,8 +10,10 @@
  *
  *   odd_chroma probe: fmt=NV12 psnr_u=.. psnr_v=.. lastcol=ok|bad
  *
- * lastcol is "ok" when the mean absolute difference over the last column and
- * the last row stays below ODD_EDGE_MAX (lossy coding, so not exact). Strict
+ * lastcol is "ok" when at most ODD_EDGE_LOST_MAX of the last-column/last-row
+ * samples decode nearer their interior neighbour than the source sentinel:
+ * an encoder that ignores the edge replicates the interior there, while lossy
+ * coding only blurs a one-sample sentinel (edge_diff is printed too). Strict
  * mode (NVMPI_TEST_STRICT=1) fails on "bad"; outside it the probe line is the
  * result. The encoder output of YUV420 vs NV12 input is compared the same way.
  * The mock cannot run this (its decoder does not reproduce pixels): the
@@ -23,7 +25,7 @@
 #include "../mock/nal_scan.h"
 #include "enc_odd_fixture.h"
 
-#define ODD_EDGE_MAX 24.0                 /* mean |diff| of last col + row */
+#define ODD_EDGE_LOST_MAX 0.10            /* share of edge samples lost    */
 #define ODD_POOL 8
 #define ODD_FRAMES 10
 
@@ -287,9 +289,9 @@ static int odd_chroma_run(nvPixFormat pix, const char *name)
         return r;
     oc_compare(u, v, &c);
     odd_edges(name, u, v);
-    ok = c.edge_diff <= ODD_EDGE_MAX;
-    printf("odd_chroma probe: fmt=%s psnr_u=%.1f psnr_v=%.1f lastcol=%s edge_diff=%.1f dec=%ux%u frames=%d %s\n",
-           name, c.psnr_u, c.psnr_v, ok ? "ok" : "bad", c.edge_diff, dw, dh, frames, info);
+    ok = c.edge_lost <= ODD_EDGE_LOST_MAX;
+    printf("odd_chroma probe: fmt=%s psnr_u=%.1f psnr_v=%.1f lastcol=%s edge_lost=%.2f edge_diff=%.1f dec=%ux%u frames=%d %s\n",
+           name, c.psnr_u, c.psnr_v, ok ? "ok" : "bad", c.edge_lost, c.edge_diff, dw, dh, frames, info);
     fflush(stdout);        /* the case child _exit()s: unflushed output is lost */
     return (!ok && strict_mode) ? 1 : 0;
 }

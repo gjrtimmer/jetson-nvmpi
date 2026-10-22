@@ -104,6 +104,9 @@ static int oc_build(struct oc_pic *p, nvPixFormat pix, enum oc_mode mode, long p
 struct oc_cmp {
     double psnr_u, psnr_v;      /* over all chroma samples                  */
     double edge_diff;           /* mean |diff| of last column + last row    */
+    double edge_lost;           /* share of edge samples nearer the interior
+                                 * neighbour than the source (the encoder
+                                 * replicating the interior, #154)          */
 };
 
 /* log10 without libm (the test binaries do not link it): scale x into
@@ -140,7 +143,7 @@ static double oc_psnr(double sse, unsigned n)
 static void oc_compare(const unsigned char *u, const unsigned char *v, struct oc_cmp *c)
 {
     double su = 0, sv = 0, ed = 0;
-    unsigned n = 0;
+    unsigned n = 0, lost = 0;
 
     for (unsigned y = 0; y < OC_CH; y++)
         for (unsigned x = 0; x < OC_CW; x++) {
@@ -150,13 +153,25 @@ static void oc_compare(const unsigned char *u, const unsigned char *v, struct oc
             su += du * du;
             sv += dv * dv;
             if (x == OC_CW - 1 || y == OC_CH - 1) {
+                /* Interior neighbour: what an encoder that ignores the
+                 * edge replicates into it. Lossy coding blurs a one-sample
+                 * sentinel, so judge "arrived" by which value the decoded
+                 * sample is nearer to, not by an absolute threshold. */
+                unsigned nx = x == OC_CW - 1 ? x - 1 : x;
+                unsigned ny = x == OC_CW - 1 ? y : y - 1;
+
                 ed += oc_abs(du) + oc_abs(dv);
                 n += 2;
+                if (oc_abs(du) >= oc_abs((double)u[y * OC_CW + x] - oc_u(nx, ny)))
+                    lost++;
+                if (oc_abs(dv) >= oc_abs((double)v[y * OC_CW + x] - oc_v(nx, ny)))
+                    lost++;
             }
         }
     c->psnr_u = oc_psnr(su, OC_CW * OC_CH);
     c->psnr_v = oc_psnr(sv, OC_CW * OC_CH);
     c->edge_diff = ed / n;
+    c->edge_lost = (double)lost / n;
 }
 
 #endif /* NVMPI_TEST_ENC_ODD_FIXTURE_H */
