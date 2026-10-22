@@ -498,6 +498,15 @@ extern "C" {
 	//declared": accepted, the caller must guarantee the plane is large
 	//enough (an undersized plane is then read out of bounds). A plane the
 	//pixel format does not use (the third of NV12/P010) is not checked.
+	//Odd sizes (#154): the chroma of a 4:2:0 frame has ceil(w/2) columns and
+	//ceil(h/2) rows (NV12/P010 interleaved: ceil(w/2) CbCr pairs per row).
+	//The full chroma is copied when the plane holds it: linesize >= the ceil
+	//row bytes and payload_size[p] is 0 or covers (ceil rows-1)*linesize +
+	//ceil row bytes. A caller that sized chroma with floored rows (payload_size
+	//= linesize*(h/2), as older wrappers do) is accepted and gets the floored
+	//copy (last chroma column/row not encoded from its data); declaring less
+	//than that is refused. With payload_size 0 the linesize decides (below the
+	//ceil row bytes = floored copy) and the caller guarantees the rows.
 	int nvmpi_encoder_put_frame(nvmpictx* ctx, nvFrame* frame);
 	//get filled packet from encoder
 	//When wait=false: non-blocking, returns -1 immediately if no packet ready.
