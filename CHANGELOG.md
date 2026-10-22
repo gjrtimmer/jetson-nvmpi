@@ -3,6 +3,26 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.6.2 - 2026-10-22
+
+### Bug Fixes
+
+
+**jpeg**
+
+
+- nvmpi_jpeg_encoder_put_frame refuses a linesize below the row bytes, or a non-zero payload_size[p] smaller than the bytes it reads, with NVMPI_ERR_INVAL before anything is copied or encoded. Before, a frame smaller than the configured size was read past the caller's buffer. payload_size 0 stays accepted (#151)
+
+
+### Testing
+
+
+**api**
+
+
+- JPEG encoder plane size cases, with a mock NvJPEGEncoder for mock builds (#151)
+
+
 ## 4.6.1 - 2026-10-22
 
 ### Bug Fixes
