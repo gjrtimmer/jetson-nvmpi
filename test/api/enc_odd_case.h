@@ -4,7 +4,9 @@
  * chroma) as H.264 with a sentinel in the last chroma column and row
  * (enc_odd_fixture.h), feeds the packets one by one to the libnvmpi decoder
  * (as enc_p010_rt.h does; a single-frame stream is not decoded by NVDEC), and
- * compares the chroma of the first decoded frame:
+ * compares the chroma of the first decoded frame (the stream is the
+ * even-rounded 642x358, 4:2:0 cannot signal odd sizes; the encoder pads the
+ * last luma column/row and takes the chroma as given, #154):
  *
  *   odd_chroma probe: fmt=NV12 psnr_u=.. psnr_v=.. lastcol=ok|bad
  *

@@ -24,7 +24,8 @@
  * Every sample access is bounds-checked against the plane length and the row
  * stride; a sample outside the mapping is replaced by the pattern. Samples
  * beyond the picture (macroblock padding) repeat the nearest edge sample.
- * Lifecycle: mock_enc_pic_map() maps, mock_enc_pic_unmap() unmaps; the
+ * An odd configured size models the hardware's edge substitution (see
+ * mock_enc_pic_row()). Lifecycle: mock_enc_pic_map() maps, mock_enc_pic_unmap() unmaps; the
  * mapping lives for one frame (encode_frame()), under ctx->mu.
  */
 #define _GNU_SOURCE
@@ -172,9 +173,19 @@ void mock_enc_pic_row(const struct mock_enc_pic *p, unsigned comp, uint32_t x0,
     uint32_t sy = y < ch ? y : ch - 1;     /* padding rows repeat the edge  */
     unsigned i;
 
+    /* Hardware (Orin, #154): configured at an ODD size the encoder does not
+     * use the last chroma column/row it was given but substitutes the
+     * neighbouring interior sample (4:2:0 cannot signal an odd size; it
+     * codes the even-rounded picture anyway). An even configured size is
+     * read as given. */
+    if (comp && (p->h & 1) && ch > 1 && sy == ch - 1)
+        sy = ch - 2;
     for (i = 0; i < n; i++) {
         uint32_t sx = x0 + i < cw ? x0 + i : cw - 1;
         int ok;
+
+        if (comp && (p->w & 1) && cw > 1 && sx == cw - 1)
+            sx = cw - 2;
         uint8_t v = pic_sample(p, comp, sx, sy, &ok);
 
         if (!ok)

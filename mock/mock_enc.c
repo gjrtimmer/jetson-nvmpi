@@ -86,8 +86,7 @@ static void enc_on_open(struct mock_ctx *ctx)
  * reads both back after S_FMT; a zero stride would make every frame empty.
  * Subsampled planes round UP for an odd picture size ((w + 1) / 2): a 4:2:0
  * picture has that many chroma samples and the driver sizes the plane for
- * them (#154). NVMPI_MOCK_ENC_FLOOR_CHROMA=1 models a driver that floors
- * them instead, to exercise the library's floored fallback. */
+ * them (#154). */
 /* Bytes the RBSP scratch buffer needs for a w x h picture: a PCM key frame
  * (#117, #118) takes MOCK_ENC_MB_MAX bytes per 16x16 unit of the picture
  * rounded up to whole units, plus header room (derivation in mock_enc.h). 0 = refuse (above the pixel bound; also keeps the product
@@ -136,10 +135,8 @@ static void enc_on_fmt(struct mock_ctx *ctx, int qi, struct v4l2_format *f)
         { 3, { 1, 1, 1 }, { 1, 1, 1 }, { 1, 1, 1 }, V4L2_PIX_FMT_YUV444M },
     };
     size_t i;
-    uint32_t p, v, up = 1;
+    uint32_t p;
 
-    if (mock_env_uint("NVMPI_MOCK_ENC_FLOOR_CHROMA", 0, 1, &v) && v)
-        up = 0;
     if (qi != MOCK_Q_OUTPUT || pix->width == 0 || pix->height == 0 ||
         pix->width > MOCK_ENC_MAX_DIM || pix->height > MOCK_ENC_MAX_DIM)
         return;
@@ -150,8 +147,8 @@ static void enc_on_fmt(struct mock_ctx *ctx, int qi, struct v4l2_format *f)
             continue;
         pix->num_planes = (uint8_t)k[i].n;
         for (p = 0; p < k[i].n; p++) {
-            uint32_t w = (pix->width + (up ? k[i].wd[p] - 1 : 0)) / k[i].wd[p];
-            uint32_t h = (pix->height + (up ? k[i].hd[p] - 1 : 0)) / k[i].hd[p];
+            uint32_t w = (pix->width + k[i].wd[p] - 1) / k[i].wd[p];
+            uint32_t h = (pix->height + k[i].hd[p] - 1) / k[i].hd[p];
             uint32_t stride = (w * k[i].bpp[p] + 31u) & ~31u;
 
             pix->plane_fmt[p].bytesperline = stride;

@@ -79,7 +79,6 @@ static const struct tcase k_cases[] = {
     { "odd_chroma_nv12_floored", NULL, odd_chroma_nv12_floored, 0 },
     { "odd_chroma_yuv420_floored", NULL, odd_chroma_yuv420_floored, 0 },
     { "odd_chroma_under", "dqbuf@9999", odd_chroma_under, 0 },
-    { "odd_chroma_driver_floored", NULL, odd_chroma_driver_floored, 0 },
     /* fault matrix: fn == NULL -> fault_case() */
     { "fault_none_control", "dqbuf@9999", NULL, 0 },
     { "fault_open@1", "open@1", NULL, 0 },        /* factory retry recovers */

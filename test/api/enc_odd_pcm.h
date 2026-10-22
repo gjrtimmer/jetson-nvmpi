@@ -7,9 +7,16 @@
 #ifndef NVMPI_TEST_ENC_ODD_PCM_H
 #define NVMPI_TEST_ENC_ODD_PCM_H
 
-/* Extract the chroma of the 641x357 IDR slice into u/v (OC_CW x OC_CH each,
- * stride OC_CW). Returns 1 on success, 0 when the slice does not parse. */
-static int oc_pcm_chroma(const uint8_t *au, size_t n, unsigned char *u, unsigned char *v)
+/* The encoder codes the even-rounded picture of an odd size (4:2:0 cannot
+ * signal odd sizes): 642x358, luma stride OC_YW. */
+#define OC_YW ((OC_W + 1) & ~1u)
+#define OC_YH ((OC_H + 1) & ~1u)
+
+/* Extract the planes of the IDR slice: y (OC_YW x OC_YH, stride OC_YW), u/v
+ * (OC_CW x OC_CH each, stride OC_CW). Returns 1 on success, 0 when the slice
+ * does not parse. */
+static int oc_pcm_planes(const uint8_t *au, size_t n, unsigned char *y,
+                         unsigned char *u, unsigned char *v)
 {
     unsigned mbw = (OC_W + 15) / 16, nmb = mbw * ((OC_H + 15) / 16), m, r, c;
     uint8_t *rb = malloc(n + 16);
@@ -39,13 +46,20 @@ static int oc_pcm_chroma(const uint8_t *au, size_t n, unsigned char *u, unsigned
         if (b.pos / 8 + 384 > len)
             goto out;
         mb = rb + b.pos / 8;
+        for (r = 0; r < 16; r++)
+            for (c = 0; c < 16; c++) {
+                unsigned x = m % mbw * 16 + c, yy = m / mbw * 16 + r;
+
+                if (x < OC_YW && yy < OC_YH)
+                    y[yy * OC_YW + x] = mb[r * 16 + c];
+            }
         for (r = 0; r < 8; r++)
             for (c = 0; c < 8; c++) {
-                unsigned x = m % mbw * 8 + c, y = m / mbw * 8 + r;
+                unsigned x = m % mbw * 8 + c, yc = m / mbw * 8 + r;
 
-                if (x < OC_CW && y < OC_CH) {     /* rest is edge padding  */
-                    u[y * OC_CW + x] = mb[256 + r * 8 + c];
-                    v[y * OC_CW + x] = mb[320 + r * 8 + c];
+                if (x < OC_CW && yc < OC_CH) {     /* rest is edge padding  */
+                    u[yc * OC_CW + x] = mb[256 + r * 8 + c];
+                    v[yc * OC_CW + x] = mb[320 + r * 8 + c];
                 }
             }
         b.pos += 384 * 8;
