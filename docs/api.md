@@ -434,6 +434,16 @@ blocking mode (default) it blocks waiting for a free buffer. With
 `nonblocking=1` it returns `NVMPI_ERR_EAGAIN` when none is free. `frame == NULL`
 sends EOS and puts the encoder into flushing mode.
 
+Frame size check (#150): per plane the copy reads `(rows-1)*linesize + row
+bytes` from `payload[p]`, with rows and row bytes taken from the encoder's
+configured size. When `payload_size[p]` is non-zero it is the size of that
+allocation, and a frame that needs more (smaller or cropped buffer) is refused
+with `NVMPI_ERR_INVAL`: it is not queued, no OUTPUT buffer is used and the
+caller's memory is not read past `payload_size[p]`. `payload_size[p] == 0`
+means "not declared": the frame is accepted and the caller guarantees the plane
+is large enough. Set `payload_size[]` for every plane you pass. Planes the
+format does not use (the third plane of NV12/P010) are ignored.
+
 Back-pressure in both modes (no silent drops): besides the OUTPUT-buffer check,
 a frame is refused with `NVMPI_ERR_EAGAIN` (and not queued) while the frames
 already in flight would outnumber the pool's empty packets. Each accepted frame

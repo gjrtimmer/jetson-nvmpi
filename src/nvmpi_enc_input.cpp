@@ -30,6 +30,7 @@
  *                           setup_output_dmabuf (OUTPUT-plane DMA path).
  */
 #include "nvmpi_enc_internal.h"
+#include "nvmpi_frame_fit.h"
 
 //Bytes per row actually copied for one plane. bytesperpixel comes from the
 //negotiated NvBuffer format: 1 for 8-bit Y/U/V, 2 for 8-bit interleaved
@@ -46,8 +47,12 @@ static inline size_t enc_row_bytes(const NvBuffer::NvBufferPlane &plane)
 //Source side: every plane needs a payload pointer and a linesize of at
 //least one copied row (the copy reads row_bytes per row, so a smaller
 //stride would read into the next row's tail, or past the plane for the
-//last row). The source plane size is not passed in nvFrame reliably
-//(payload_size may be 0), so it cannot be bounds-checked beyond that.
+//last row). Source capacity (#150): when payload_size[i] is non-zero it is
+//the caller's allocation size of plane i, and the copy reads
+//(rows-1)*linesize + row bytes from it; a larger need (frame smaller than
+//the encoder's configured size, cropped or stale buffer) would read past the
+//caller's buffer, so it is refused. payload_size[i] == 0 means "not
+//declared" (legacy callers): accepted, the caller guarantees the size.
 //Destination side: a copied row must fit the negotiated stride and the
 //whole plane (stride * height) must fit the buffer length reported by the
 //driver (length 0 = not reported, e.g. a not-yet-mapped buffer: skipped).
@@ -70,6 +75,14 @@ static int enc_check_frame(const nvFrame *frame, const NvBuffer &buffer)
 		{
 			NVMPI_LOG(NVMPI_LOG_ERROR, "put_frame: plane %u linesize %u < %zu bytes per row "
 			          "(wrong pixel format for this encoder?)", i, frame->linesize[i], row);
+			return -1;
+		}
+		size_t need;
+		if (!nvmpi_plane_need(plane.fmt.height, frame->linesize[i], (unsigned int)row, &need) ||
+		    (frame->payload_size[i] && need > frame->payload_size[i]))
+		{
+			NVMPI_LOG(NVMPI_LOG_ERROR, "put_frame: plane %u needs %zu bytes but payload_size is %lu",
+			          i, need, frame->payload_size[i]);
 			return -1;
 		}
 		if (row > plane.fmt.stride ||

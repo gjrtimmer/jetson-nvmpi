@@ -484,6 +484,14 @@ extern "C" {
 	//modes) or, non-blocking, no OUTPUT buffer is available, -2 if already flushing, -1 if
 	//the encoder is in error or the blocking dequeue failed, or the negative
 	//queue (qBuffer) error code.
+	//Frame size contract (#150): the copy reads, per plane, the encoder's
+	//configured rows: (rows-1)*linesize + row bytes from payload[p]. When
+	//payload_size[p] != 0 it is taken as the byte size of that allocation
+	//and a frame needing more is refused with NVMPI_ERR_INVAL (not queued,
+	//no OUTPUT buffer used, nothing read). payload_size[p] == 0 means "not
+	//declared": accepted, the caller must guarantee the plane is large
+	//enough (an undersized plane is then read out of bounds). A plane the
+	//pixel format does not use (the third of NV12/P010) is not checked.
 	int nvmpi_encoder_put_frame(nvmpictx* ctx, nvFrame* frame);
 	//get filled packet from encoder
 	//When wait=false: non-blocking, returns -1 immediately if no packet ready.
