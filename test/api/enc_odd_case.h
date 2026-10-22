@@ -238,6 +238,29 @@ out:
     return rc;
 }
 
+/* Source vs decoded chroma around the last column and row (U then V): is the
+ * edge a constant, a stale value or interpolated? */
+static void odd_edges(const char *name, const unsigned char *u, const unsigned char *v)
+{
+    static const unsigned xs[4] = { OC_CW - 4, OC_CW - 3, OC_CW - 2, OC_CW - 1 };
+    static const unsigned ys[4] = { OC_CH - 4, OC_CH - 3, OC_CH - 2, OC_CH - 1 };
+
+    for (int pl = 0; pl < 2; pl++) {
+        const unsigned char *d = pl ? v : u;
+        char c[64] = "", r[64] = "";
+
+        for (int k = 0; k < 4; k++) {
+            snprintf(c + strlen(c), sizeof(c) - strlen(c), " %u/%u", pl ? oc_v(xs[k], 10) : oc_u(xs[k], 10),
+                     d[10 * OC_CW + xs[k]]);
+            snprintf(r + strlen(r), sizeof(r) - strlen(r), " %u/%u", pl ? oc_v(10, ys[k]) : oc_u(10, ys[k]),
+                     d[ys[k] * OC_CW + 10]);
+        }
+        printf("odd_chroma edge: fmt=%s plane=%c row10_cols%u-%u(src/dec)=%s col10_rows%u-%u(src/dec)=%s\n",
+               name, pl ? 'V' : 'U', xs[0], xs[3], c, ys[0], ys[3], r);
+    }
+    fflush(stdout);
+}
+
 static int odd_chroma_run(nvPixFormat pix, const char *name)
 {
     static unsigned char u[OC_CW * OC_CH], v[OC_CW * OC_CH];
@@ -261,9 +284,11 @@ static int odd_chroma_run(nvPixFormat pix, const char *name)
     if (r)
         return r;
     oc_compare(u, v, &c);
+    odd_edges(name, u, v);
     ok = c.edge_diff <= ODD_EDGE_MAX;
     printf("odd_chroma probe: fmt=%s psnr_u=%.1f psnr_v=%.1f lastcol=%s edge_diff=%.1f dec=%ux%u frames=%d %s\n",
            name, c.psnr_u, c.psnr_v, ok ? "ok" : "bad", c.edge_diff, dw, dh, frames, info);
+    fflush(stdout);        /* the case child _exit()s: unflushed output is lost */
     return (!ok && strict_mode) ? 1 : 0;
 }
 
@@ -274,8 +299,11 @@ static int test_encoder_odd_chroma(void)
 #ifdef NVMPI_MOCK_JPEG
     return 77;                    /* mock decoder: no pixels, see header */
 #else
-    int a = odd_chroma_run(NV_PIX_NV12, "NV12");
-    int b = odd_chroma_run(NV_PIX_YUV420, "YUV420");
+    int a, b;
+
+    setenv("NVMPI_ENC_TRACE", "1", 1);        /* libnvmpi prints the copy decision */
+    a = odd_chroma_run(NV_PIX_NV12, "NV12");
+    b = odd_chroma_run(NV_PIX_YUV420, "YUV420");
 
     if (a == 1 || b == 1)
         return 1;

@@ -46,7 +46,7 @@ struct oc_pic {
     unsigned char *mem[3];
 };
 
-static void oc_free(struct oc_pic *p)
+static inline void oc_free(struct oc_pic *p)
 {
     for (int i = 0; i < 3; i++) {
         free(p->mem[i]);
