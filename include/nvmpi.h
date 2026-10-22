@@ -39,6 +39,11 @@
  * created by the API family the function belongs to. Matches Linux EINVAL. */
 #define NVMPI_ERR_INVAL (-22)
 
+/* The decoded frame does not fit the caller's buffers (nvmpi_decoder_get_frame2,
+ * nvmpi_decoder_get_frame, nvmpi_jpeg_decoder_get_frame). Nothing was written
+ * into the caller's planes. See nvmpi_decoder_get_frame2 for the recovery. */
+#define NVMPI_ERR_FRAME_SIZE (-90)
+
 //Opaque context handle. Note: the decoder and encoder each define their own
 //(different) struct nvmpictx internally; a handle must only be passed back
 //to the API family (decoder_* or encoder_*) that created it.
@@ -180,7 +185,8 @@ typedef struct _NVPACKET{
 //so no plane buffer ever changes ownership.
 typedef struct _NVFRAME{
 	unsigned long flags;
-	unsigned long payload_size[3]; //per-plane byte size
+	unsigned long payload_size[3]; //per-plane byte size: IN capacity of payload[p]
+	                               //(get_frame2, see there), OUT bytes the frame needs
 	unsigned char *payload[3];     //per-plane data pointers (caller-owned)
 	unsigned int linesize[3];      //per-plane stride in bytes
 	nvPixFormat type;
@@ -239,6 +245,7 @@ typedef struct {
 #if defined(NVMPI_STATIC_ASSERT) && defined(__LP64__)
 NVMPI_STATIC_ASSERT(sizeof(nvPixFormat) == 4, "nvPixFormat ABI");
 NVMPI_STATIC_ASSERT(NVMPI_ERR_INVAL == -22, "NVMPI_ERR_INVAL ABI");
+NVMPI_STATIC_ASSERT(NVMPI_ERR_FRAME_SIZE == -90, "NVMPI_ERR_FRAME_SIZE ABI");
 NVMPI_STATIC_ASSERT(sizeof(nvmpi_fd_frame) == 72, "nvmpi_fd_frame size ABI");
 NVMPI_STATIC_ASSERT(offsetof(nvmpi_fd_frame, struct_size) == 0, "struct_size ABI");
 NVMPI_STATIC_ASSERT(offsetof(nvmpi_fd_frame, fd) == 4, "fd ABI");
@@ -294,7 +301,42 @@ extern "C" {
 	//or shutdown), or the non-zero result of the failed CPU buffer-map call
 	//(NvBufSurfaceMap / NvBufferMemMap) if the frame could not be copied;
 	//the buffer is still recycled to the pool in that case.
+	//
+	//Buffer size (#149): this call does not know how large the caller's
+	//planes are unless payload_size[] says so. If payload_size[p] is non-zero
+	//for every plane of the format, the frame is copied only when it fits
+	//exactly as nvmpi_decoder_get_frame2 defines. If payload_size[] is not
+	//set (all zero), the caller promises the planes hold a frame of the
+	//"expected size": the resize target (nvDecParam.resized) if one was set,
+	//else the container size (nvDecParam.width/height) if given, else the
+	//first frame this call delivered; with linesize >= the row bytes and the
+	//pixel format of nvDecParam.pixFormat. A frame that is larger, has a
+	//wider sample size, or has a linesize/payload that cannot hold a row is
+	//NOT copied: it is dropped and NVMPI_ERR_FRAME_SIZE is returned (smaller
+	//frames are copied as before). Use nvmpi_decoder_get_frame2 to learn the
+	//new size and keep the frame.
 	int nvmpi_decoder_get_frame(nvmpictx* ctx, nvFrame* frame,bool wait);
+
+	//get_frame with a buffer capacity. IN per plane p of the format (2 for
+	//NV12/P010, 3 for YUV420): payload[p] non-NULL, payload_size[p] = bytes
+	//available at payload[p] (non-zero), linesize[p] = the stride you want.
+	//A NULL payload or zero payload_size gives NVMPI_ERR_INVAL (frame stays
+	//queued). The frame fits when, for every plane, linesize[p] >= the bytes
+	//of one row and (rows-1)*linesize[p] + row bytes <= payload_size[p].
+	//
+	//Returns 0: copied; width/height/type/timestamp are set and
+	//payload_size[p] = rows*row bytes (the packed size of the frame).
+	//NVMPI_ERR_FRAME_SIZE: nothing was copied and no caller byte was
+	//written. width/height/type are the frame's size and payload_size[p] =
+	//rows*row bytes; reallocate (use linesize >= row bytes) and call again
+	//with the same wait: the SAME frame is delivered next, with its
+	//timestamp. The frame stays held by the decoder until a call succeeds,
+	//the decoder is flushed (it is discarded) or closed; while it is held,
+	//no new frame is taken from the pool. -1: no frame (timeout/shutdown).
+	//Threads: all get_frame/get_frame2/get_frame_fd/get_frame_fd2 calls (and
+	//flush/close) must come from one thread at a time; the held frame is not
+	//locked. get_frame_fd/_fd2 also deliver a held frame first.
+	int nvmpi_decoder_get_frame2(nvmpictx* ctx, nvFrame* frame, bool wait);
 
 	//Reset the decoder pipeline for seek / stream restart: stops the
 	//capture thread, drains in-flight frames, and restarts. The caller

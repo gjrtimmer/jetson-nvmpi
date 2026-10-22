@@ -164,6 +164,21 @@ struct nvmpi_dec_ctx : nvmpictx
 	 * reach their generation through the slot / borrow cookie. */
 	std::shared_ptr<dec_gen> gen;
 
+	/* Consumer-side state of the copy path (#149). Touched ONLY by the
+	 * thread calling get_frame/get_frame2/get_frame_fd/get_frame_fd2 and, for
+	 * the release, by flush/close (documented single-consumer rule in
+	 * nvmpi.h): no lock. */
+	/* A frame get_frame2 refused for lack of capacity and keeps for the next
+	 * call. It is a slot owned by the consumer (not in either queue), so it
+	 * still holds its generation reference in slot->self. Released by
+	 * nvmpi_decoder_flush (discarded) and nvmpi_decoder_close. */
+	dec_slot *pending{nullptr};
+	/* Size the legacy get_frame (no payload_size) assumes the caller's
+	 * buffers hold when neither a resize target nor a container size exists:
+	 * the first generation it delivered. 0 = not recorded yet. */
+	unsigned int base_w{0}, base_h{0};
+	uint32_t size_drops{0};             //frames refused by the legacy get_frame (log rate limit)
+
 	//retire the current generation (no-op without one): see nvmpi_dec_pool.cpp
 	void retireFramePool();
 	//allocate a new generation of frame_pool_size buffers at output_width x
@@ -187,3 +202,9 @@ bool nvmpi_dec_av1_drop(nvmpi_dec_ctx* ctx, const nvPacket* packet);
 void dec_capture_loop_fcn(void *arg);
 void respondToResolutionEvent(v4l2_format &format, v4l2_crop &crop, nvmpi_dec_ctx* ctx);
 int copyNvBufToFrame(const dec_gen* g, nvmpi_frame_buffer *nvmpiBuf, nvFrame* frame);
+//Next frame for any consumer: the held (pending) one first, else the pool
+//(wait = block up to wait_timeout_ms). nullptr when none. The slot is the
+//caller's, with its generation reference in slot->self.
+dec_slot* dec_next_slot(nvmpi_dec_ctx* ctx, bool wait);
+//Give the held frame back (flush, close). Safe when none is held.
+void dec_drop_pending(nvmpi_dec_ctx* ctx);

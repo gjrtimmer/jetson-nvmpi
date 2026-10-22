@@ -202,6 +202,7 @@ set(NVMPI_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_planes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_pool.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_fd.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_fd_geometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_codec.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_close.cpp

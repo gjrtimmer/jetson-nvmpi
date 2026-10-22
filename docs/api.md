@@ -71,6 +71,14 @@ queued. Drain output packets with `nvmpi_encoder_get_packet`, return each with
 `EAGAIN`. The JPEG decoder in DMA-BUF mode also returns it from
 `nvmpi_jpeg_decoder_put_packet` when its pool is empty.
 
+### `NVMPI_ERR_FRAME_SIZE`
+
+`nvmpi.h` -- `#define NVMPI_ERR_FRAME_SIZE (-90)`
+
+The decoded frame does not fit the caller's planes (`nvmpi_decoder_get_frame2`,
+`nvmpi_decoder_get_frame`, `nvmpi_jpeg_decoder_get_frame`). Nothing was written
+into the caller's memory. Pinned by a static assert.
+
 ### `NVMPI_ERR_INVAL`
 
 `nvmpi.h` -- `#define NVMPI_ERR_INVAL (-22)`
@@ -317,6 +325,19 @@ allocated with sufficient size and `linesize[]` set; the copy is line by line,
 so your stride may differ from the hardware's. The number of planes written is
 2 for `NV_PIX_NV12` / `NV_PIX_P010` and 3 for `NV_PIX_YUV420`.
 
+**Buffer size.** The call does not know how big your planes are unless
+`payload_size[]` says so. With `payload_size[p]` non-zero for every plane the
+frame is copied only if it fits (rules under
+[`nvmpi_decoder_get_frame2`](#nvmpi_decoder_get_frame2)). With `payload_size[]`
+all zero you promise the planes hold the *expected size*: the resize target
+(`nvDecParam.resized`) if set, else the container size (`nvDecParam.width` /
+`height`), else the first frame this call delivered; `linesize[p]` must hold a
+row, and samples may not be wider than `nvDecParam.pixFormat` implies. A
+frame that is larger, has wider samples or a layout that cannot hold a row is
+**not copied**: it is dropped and `NVMPI_ERR_FRAME_SIZE` is returned (logged,
+rate limited). Smaller frames are copied as before. This call cannot keep the
+frame; use `get_frame2` to learn the new size and retry.
+
 | `wait` | Behaviour |
 | --- | --- |
 | `false` | Non-blocking; returns `-1` immediately when no frame is ready. |
@@ -326,9 +347,37 @@ so your stride may differ from the hardware's. The number of planes written is
 | --- | --- |
 | `0` | Success. |
 | `-1` | No frame available (non-blocking), or timeout / shutdown (blocking). |
+| `NVMPI_ERR_FRAME_SIZE` | The frame did not fit your buffers; dropped, nothing copied. |
 | other non-zero | The result of the failed CPU buffer-map call (`NvBufSurfaceMap` on NvUtils, `NvBufferMemMap` on the legacy API), passed through unchanged. The pool buffer is still recycled and `frame->timestamp` is set, but the planes are not valid. |
 
 Threading: user thread only.
+
+### `nvmpi_decoder_get_frame2`
+
+`nvmpi.h` -- `int nvmpi_decoder_get_frame2(nvmpictx* ctx, nvFrame* frame, bool wait);`
+
+`get_frame` with a buffer capacity, for streams whose size can change. Set,
+for every plane of the format (2 for NV12/P010, 3 for YUV420): `payload[p]`
+non-NULL, `payload_size[p]` = bytes available at `payload[p]` (non-zero) and
+`linesize[p]` = the stride you want. A NULL payload or zero capacity returns
+`NVMPI_ERR_INVAL` and takes no frame.
+
+A plane fits when `linesize[p]` >= bytes of one row and
+`(rows - 1) * linesize[p] + row_bytes <= payload_size[p]` (checked with
+overflow guards). All planes must fit or nothing is copied.
+
+| Return | Meaning |
+| --- | --- |
+| `0` | Copied. `width`, `height`, `type`, `timestamp` are set; `payload_size[p]` = `rows * row_bytes` (packed size). |
+| `NVMPI_ERR_FRAME_SIZE` | Nothing copied, no byte of yours written. `width` / `height` / `type` are the frame's, `payload_size[p]` = `rows * row_bytes`. Reallocate (stride >= row bytes) and call again: the **same** frame comes back next, with its timestamp. |
+| `NVMPI_ERR_INVAL` | NULL argument, NULL plane or zero capacity. |
+| `-1` | No frame (non-blocking), timeout or shutdown. |
+
+The refused frame is held by the decoder until a call succeeds, `flush`
+(discards it) or `close`; while held, no newer frame is taken. It occupies one
+pool slot meanwhile. `get_frame`, `get_frame_fd` and `get_frame_fd2` deliver a
+held frame first. Threading: every `get_frame*` call, `flush` and `close` must
+come from one thread at a time (the held frame is not locked).
 
 ### `nvmpi_decoder_flush`
 

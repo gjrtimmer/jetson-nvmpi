@@ -73,15 +73,10 @@ static void dec_fd_release(void *opaque)
 static int dec_take_slot(nvmpi_dec_ctx *ctx, bool wait,
 	dec_slot **out_slot, dec_fd_borrow **out_b)
 {
-	dec_slot* slot;
-
-	/* Dequeue a filled frame — same path as get_frame. The slot is ours
-	 * now, together with the generation reference in slot->self. */
-	if (wait)
-		slot = ctx->framePool->dqFilledBuf(
-			std::chrono::milliseconds(ctx->wait_timeout_ms));
-	else
-		slot = ctx->framePool->dqFilledBuf();
+	/* A frame get_frame2 kept pending comes first, else dequeue a filled
+	 * one — same path as get_frame. The slot is ours now, together with the
+	 * generation reference in slot->self. */
+	dec_slot* slot = dec_next_slot(ctx, wait);
 
 	if (!slot) return -1;
 

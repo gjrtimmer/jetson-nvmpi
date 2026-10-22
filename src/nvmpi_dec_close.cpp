@@ -40,6 +40,11 @@ int nvmpi_decoder_flush(nvmpictx* h)
 	/* Filled-but-undelivered frames go back to the empty queue. The
 	 * generation stays current (flush keeps the pool); each slot still owns
 	 * its generation reference while queued, so nothing changes hands. */
+	/* A frame get_frame2 kept pending is discarded with the rest (the capture
+	 * thread is joined; single-consumer rule). Requeued while the generation
+	 * is current, dropped otherwise. */
+	dec_drop_pending(ctx);
+
 	dec_slot* slot;
 	while ((slot = ctx->framePool->dqFilledBuf()))
 		ctx->framePool->qEmptyBuf(slot);
@@ -108,6 +113,9 @@ int nvmpi_decoder_close(nvmpictx* h)
 	 * by the last release, possibly after this function returned. Never
 	 * waits. Flipping `current` under gen->mu happens BEFORE the pool is
 	 * deleted, so a concurrent release can never requeue into a dead pool. */
+	/* A held (pending) frame is not in either queue, so retire would not see
+	 * it: give it back first (pool still alive, queues drained below). */
+	dec_drop_pending(ctx);
 	ctx->retireFramePool();
 	delete ctx->framePool;   //allocated in nvmpi_create_decoder; both queues drained by retire
 	ctx->framePool = nullptr;

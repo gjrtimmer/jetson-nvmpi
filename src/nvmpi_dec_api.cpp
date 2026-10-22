@@ -9,7 +9,8 @@
  *   - nvmpi_decoder_put_packet()   — feed one compressed packet.
  *   - copyNvBufToFrame()           — copy a decoded DMA buffer into the
  *                                    caller's nvFrame planes.
- *   - nvmpi_decoder_get_frame()    — pop + copy the next decoded frame.
+ *
+ * nvmpi_decoder_get_frame() / _get_frame2() live in nvmpi_dec_frame.cpp.
  *
  * Companion files:
  *   nvmpi_dec_internal.h  — shared includes, defines, nvmpi_dec_ctx struct,
@@ -114,7 +115,8 @@ int nvmpi_decoder_put_packet(nvmpictx* h,nvPacket* packet)
 //then copy line by line because the source pitch (hw-chosen) and the
 //destination linesize (caller-chosen) usually differ; only
 //frame_linedatasize valid bytes per line are copied. Unmaps when done.
-//frame->payload[] must point at sufficiently large caller-owned memory.
+//The callers (nvmpi_dec_frame.cpp) have proven before this call that every
+//plane fits the caller's memory (nvmpi_frame_fit.h); it does not check.
 int copyNvBufToFrame(const dec_gen* g, nvmpi_frame_buffer *nvmpiBuf, nvFrame* frame)
 {
 	int ret;
@@ -160,36 +162,4 @@ int copyNvBufToFrame(const dec_gen* g, nvmpi_frame_buffer *nvmpiBuf, nvFrame* fr
 #endif
 	}
     return 0;
-}
-
-//Public API: fetch the next decoded frame.
-//When wait=false: non-blocking, returns -1 immediately if no frame ready.
-//When wait=true: blocks up to wait_timeout_ms using the pool's CV-based
-//tiered wait. Returns -1 on timeout or shutdown.
-//On success the frame data is copied into the caller's buffers, the pts
-//is set, and the slot is given back (requeued to the "empty" queue, or its
-//buffer freed if a resolution change retired its generation meanwhile).
-//The slot's generation reference (slot->self) keeps its buffer and geometry
-//valid for the whole copy even if the capture thread retires the pool.
-int nvmpi_decoder_get_frame(nvmpictx* h, nvFrame* frame, bool wait)
-{
-	nvmpi_dec_ctx* ctx = static_cast<nvmpi_dec_ctx*>(h);
-	int ret;
-	dec_slot* slot;
-
-	if (wait)
-		slot = ctx->framePool->dqFilledBuf(
-			std::chrono::milliseconds(ctx->wait_timeout_ms));
-	else
-		slot = ctx->framePool->dqFilledBuf();
-
-	if (!slot) return -1;
-
-	ret = copyNvBufToFrame(slot->self.get(), slot->fb, frame);
-	frame->timestamp = slot->fb->timestamp;
-	/* Hand the reference back with the slot: requeue under gen->mu if the
-	 * generation is still current, else drop (maybe freeing the buffer). */
-	dec_gen_release(std::move(slot->self), slot);
-
-	return ret;
 }
