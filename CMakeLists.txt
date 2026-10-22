@@ -408,14 +408,21 @@ if(BUILD_TESTING)
       ${JETSON_MULTIMEDIA_API_INCLUDE_DIR} ${CUDA_INCLUDE_DIR})
     target_link_libraries(test_api_dec_mock PRIVATE nvmpi ${LIB_NVBUFSURFACE} Threads::Threads)
     target_compile_definitions(test_api_dec_mock PRIVATE NVMPI_HAVE_AV1=${NVMPI_HAVE_AV1})
-    # Decoder suite in 2 shards (NVMPI_TEST_SHARD=k/n, see case_log.h).
-    set(NVMPI_DEC_SHARDS 2)
+    # Per-test timeout. Sanitizer builds run the same cases 6-7x slower (ASan
+    # dec shards ~155 s on CI vs 23 s plain) and a loaded runner doubled that
+    # past 300 s (#153): give them 600 s; the CI job limit (20 m) still covers it.
+    set(NVMPI_MOCK_TEST_TIMEOUT 300)
+    if(NVMPI_SANITIZER)
+      set(NVMPI_MOCK_TEST_TIMEOUT 600)
+    endif()
+    # Decoder suite in 4 shards (NVMPI_TEST_SHARD=k/n, see case_log.h).
+    set(NVMPI_DEC_SHARDS 4)
     math(EXPR NVMPI_DEC_LAST "${NVMPI_DEC_SHARDS} - 1")
     foreach(k RANGE ${NVMPI_DEC_LAST})
       add_test(NAME api_mock_dec_${k} COMMAND test_api_dec_mock)
       set_tests_properties(api_mock_dec_${k} PROPERTIES
         ENVIRONMENT "LD_LIBRARY_PATH=${NVMPI_MOCK_LD};NVMPI_TEST_SHARD=${k}/${NVMPI_DEC_SHARDS}"
-        TIMEOUT 300)
+        TIMEOUT ${NVMPI_MOCK_TEST_TIMEOUT})
     endforeach()
     # JPEG DMA-BUF output against the NvJPEGDecoder model (mock-only, #128).
     add_executable(test_api_jpeg_mock test/api/test_api_jpeg_mock.c)
@@ -426,7 +433,7 @@ if(BUILD_TESTING)
     add_test(NAME api_mock_jpeg COMMAND test_api_jpeg_mock)
     set_tests_properties(api_mock_jpeg PROPERTIES
       ENVIRONMENT "LD_LIBRARY_PATH=${NVMPI_MOCK_LD}"
-      TIMEOUT 300)
+      TIMEOUT ${NVMPI_MOCK_TEST_TIMEOUT})
     # Encoder data path, teardown and fault matrix (mock-only).
     add_executable(test_api_enc_mock test/api/test_api_enc_mock.c)
     target_include_directories(test_api_enc_mock PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -439,16 +446,16 @@ if(BUILD_TESTING)
       add_test(NAME api_mock_enc_${k} COMMAND test_api_enc_mock)
       set_tests_properties(api_mock_enc_${k} PROPERTIES
         ENVIRONMENT "LD_LIBRARY_PATH=${NVMPI_MOCK_LD};NVMPI_TEST_SHARD=${k}/${NVMPI_ENC_SHARDS}"
-        TIMEOUT 300)
+        TIMEOUT ${NVMPI_MOCK_TEST_TIMEOUT})
     endforeach()
     set_tests_properties(mock_selftest PROPERTIES
       ENVIRONMENT "LD_LIBRARY_PATH=${NVMPI_MOCK_LD}"
-      TIMEOUT 300)
+      TIMEOUT ${NVMPI_MOCK_TEST_TIMEOUT})
     # test_api's AV1 hardware case checks a 320x240 frame; the mock has no AV1
     # header parser, so it takes the stream size from the environment.
     set_tests_properties(api_mock PROPERTIES
       ENVIRONMENT "LD_LIBRARY_PATH=${NVMPI_MOCK_LD};NVMPI_MOCK_WIDTH=320;NVMPI_MOCK_HEIGHT=240"
-      TIMEOUT 300)
+      TIMEOUT ${NVMPI_MOCK_TEST_TIMEOUT})
   else()
     add_test(NAME api COMMAND test_api)
   endif()
