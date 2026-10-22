@@ -663,6 +663,14 @@ encoder there.
 Encodes one YUV420 frame. `frame == NULL` signals EOS. The encoded JPEG is
 staged internally. Returns `0`, or `-1` on error.
 
+Frame size check (#151): per plane the copy reads `(rows-1)*linesize + row
+bytes` from `payload[p]` (rows and row bytes of the YUV420 frame of
+`width` x `height`). A `linesize` below the row bytes, or a non-zero
+`payload_size[p]` smaller than that span, is refused with `NVMPI_ERR_INVAL`
+before anything is read or encoded. `payload_size[p] == 0` means "not
+declared": the frame is accepted and the caller guarantees the plane is large
+enough. Set `payload_size[]` for all three planes.
+
 ### `nvmpi_jpeg_encoder_get_packet`
 
 `nvmpi.h:246` -- `int nvmpi_jpeg_encoder_get_packet(nvmpictx* ctx, nvPacket* packet);`

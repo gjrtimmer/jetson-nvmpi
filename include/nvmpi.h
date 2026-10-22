@@ -443,6 +443,12 @@ extern "C" {
 	//Encode one YUV420 frame to JPEG. frame==NULL signals EOS.
 	//Returns 0 on success, -1 on error. The encoded JPEG is staged
 	//internally for retrieval via nvmpi_jpeg_encoder_get_packet().
+	//Frame size contract (#151): per plane the copy reads (rows-1)*linesize +
+	//row bytes from payload[p] (rows/row bytes of the YUV420 frame of
+	//width x height). A linesize below the row bytes, or a non-zero
+	//payload_size[p] smaller than that, is refused with NVMPI_ERR_INVAL before
+	//anything is read or encoded. payload_size[p] == 0 means "not declared":
+	//accepted, the caller guarantees the plane is large enough.
 	int nvmpi_jpeg_encoder_put_frame(nvmpictx* ctx, nvFrame* frame);
 
 	//Retrieve the encoded JPEG packet. Copies JPEG data into

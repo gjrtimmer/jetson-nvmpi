@@ -22,6 +22,7 @@
  * Allocated by nvmpi_create_jpeg_encoder(); freed by nvmpi_jpeg_encoder_close().
  */
 #include "nvmpi_enc_jpeg_internal.h"
+#include "nvmpi_frame_fit.h"
 
 /* ------------------------------------------------------------------ */
 /* Input DMA buffer management                                         */
@@ -239,7 +240,8 @@ nvmpictx* nvmpi_create_jpeg_encoder(int quality)
  *   4. Call encodeFromFd() — NVJPG engine produces baseline JPEG.
  *   5. Stage the JPEG output for retrieval via get_packet().
  *
- * Returns 0 on success, -1 on error.
+ * Returns 0 on success, NVMPI_ERR_INVAL when a plane is too small for the
+ * encoder's frame size (#151), -1 on other errors.
  */
 int nvmpi_jpeg_encoder_put_frame(nvmpictx *handle, nvFrame *frame)
 {
@@ -285,6 +287,26 @@ int nvmpi_jpeg_encoder_put_frame(nvmpictx *handle, nvFrame *frame)
 		if (!ctx->allocInputBuffer(frame->width, frame->height)) {
 			NVMPI_LOG_SUB(NVMPI_LOG_ERROR, "jpegenc", "input buffer allocation failed");
 			return -1;
+		}
+	}
+
+	/* ---- Caller plane check (#151) ----
+	 * The copy reads (rows-1)*linesize + row bytes from every plane, rows and
+	 * row bytes being the encoder's own geometry (frame size, not the caller's
+	 * allocation). A linesize below the row length would overlap rows; a
+	 * payload_size[p] smaller than the span would read past the caller's
+	 * buffer. Refuse both before anything is copied or encoded.
+	 * payload_size[p] == 0 means "not declared": the caller guarantees it. */
+	for (unsigned int p = 0; p < ctx->num_planes && p < 3; p++) {
+		size_t need;
+
+		if (frame->linesize[p] < ctx->plane_linedata[p] ||
+		    !nvmpi_plane_need(ctx->plane_height[p], frame->linesize[p],
+		                      ctx->plane_linedata[p], &need) ||
+		    (frame->payload_size[p] && need > frame->payload_size[p])) {
+			NVMPI_LOG_SUB(NVMPI_LOG_ERROR, "jpegenc", "put_frame: plane %u linesize %u / payload_size %lu too small for %ux%u",
+			              p, frame->linesize[p], frame->payload_size[p], ctx->width, ctx->height);
+			return NVMPI_ERR_INVAL;
 		}
 	}
 
