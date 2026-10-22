@@ -162,7 +162,20 @@ nvmpictx* nvmpi_create_encoder(nvEncParam* param)
 
 	//CAPTURE plane carries the compressed bitstream; each buffer is sized
 	//NVMPI_ENC_CHUNK_SIZE — the same constant the wrapper uses for packets
-	ret = ctx->enc->setCapturePlaneFormat(ctx->encoder_pixfmt, ctx->width,ctx->height, NVMPI_ENC_CHUNK_SIZE);
+	//4:2:0 cannot signal an odd size: the encoder codes the even-rounded
+	//picture anyway, and configured at an odd size it substitutes its own
+	//values for the last chroma column/row instead of ours (#154). So memory
+	//input is configured at the even-rounded size and put_frame pads the
+	//extra column/row. Not for lossless (4:4:4, no subsampling) and not for
+	//external DMA-BUF input (surfaces of the caller's w x h, put_frame_fd).
+	ctx->coded_width = ctx->width;
+	ctx->coded_height = ctx->height;
+	if (!ctx->dmabuf_external && !(ctx->enableLossless && param->codingType == NV_VIDEO_CodingH264))
+	{
+		ctx->coded_width = (ctx->width + 1) & ~1u;
+		ctx->coded_height = (ctx->height + 1) & ~1u;
+	}
+	ret = ctx->enc->setCapturePlaneFormat(ctx->encoder_pixfmt, ctx->coded_width, ctx->coded_height, NVMPI_ENC_CHUNK_SIZE);
 	if (ret < 0) {
 		NVMPI_LOG(NVMPI_LOG_ERROR, "Could not set capture plane format");
 		goto cleanup;
@@ -187,11 +200,11 @@ nvmpictx* nvmpi_create_encoder(nvEncParam* param)
 	if (ctx->enableLossless && param->codingType == NV_VIDEO_CodingH264)
 	{
 		ctx->profile = V4L2_MPEG_VIDEO_H264_PROFILE_HIGH_444_PREDICTIVE;
-		ret = ctx->enc->setOutputPlaneFormat(V4L2_PIX_FMT_YUV444M, ctx->width,ctx->height);
+		ret = ctx->enc->setOutputPlaneFormat(V4L2_PIX_FMT_YUV444M, ctx->coded_width, ctx->coded_height);
 	}
 	else
 	{
-		ret = ctx->enc->setOutputPlaneFormat(ctx->raw_pixfmt, ctx->width,ctx->height);
+		ret = ctx->enc->setOutputPlaneFormat(ctx->raw_pixfmt, ctx->coded_width, ctx->coded_height);
 	}
 	if (ret < 0) {
 		NVMPI_LOG(NVMPI_LOG_ERROR, "Could not set output plane format");

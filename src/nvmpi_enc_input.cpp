@@ -32,74 +32,70 @@
 #include "nvmpi_enc_internal.h"
 #include "nvmpi_frame_fit.h"
 
-//Copied geometry of one plane: rows of row-bytes each.
+//Geometry of one plane (#154): what is read from the caller (srow bytes x
+//srows rows) and what fills the OUTPUT plane (drow bytes x drows rows).
 struct enc_geom {
-	size_t row;
-	uint32_t rows;
+	size_t srow;
+	uint32_t srows;
+	size_t drow;
+	uint32_t drows;
+	size_t bps;                    //bytes per sample (pair) of the plane
 };
 
-//Geometry the frame has in plane i (#154). NvBuffer derives the chroma
-//plane size by flooring (width/2 x height/2), but a 4:2:0 picture of odd
-//size has ceil((w+1)/2) x ceil((h+1)/2) chroma samples: with the floored
-//geometry the last chroma column and the last chroma row of an odd-sized
-//frame are never copied. The picture size is taken from the luma plane
-//(plane 0 is the encoder's configured size); a chroma plane is the odd-size
-//case exactly when 2 * its floored size + 1 == the luma size, then it grows
-//by one. Even sizes and non-subsampled planes are unchanged. Bytes per
-//sample (bytesperpixel): 1 for 8-bit Y/U/V, 2 for interleaved 8-bit CbCr and
-//16-bit P010 Y, 4 for P010 CbCr pairs. size_t: uint32 * uint32 could wrap.
-static void enc_geoms(const NvBuffer &buffer, uint32_t i, enc_geom *flo, enc_geom *cei)
+//Source geometry the caller's w x h frame has in plane i, in full (ceil) and
+//floored form. A 4:2:0 picture of odd size has ceil(w/2) x ceil(h/2) chroma
+//samples; NvBuffer's own chroma size floors. A plane is subsampled when its
+//OUTPUT size is half the luma plane's (the encoder is configured at the
+//even-rounded size, so this is exact). Luma and non-subsampled planes are
+//identical in both forms. Bytes per sample (bytesperpixel): 1 for 8-bit
+//Y/U/V, 2 for interleaved 8-bit CbCr and 16-bit P010 Y, 4 for P010 CbCr
+//pairs. size_t: uint32 * uint32 could wrap.
+static void enc_geoms(const NvBuffer &buffer, uint32_t i, uint32_t w, uint32_t h,
+                      enc_geom *flo, enc_geom *cei)
 {
 	const NvBuffer::NvBufferPlane &plane = buffer.planes[i];
-	uint32_t w = plane.fmt.width, h = plane.fmt.height;
-	size_t bpp = plane.fmt.bytesperpixel;
+	size_t bps = plane.fmt.bytesperpixel;
+	bool sw = i > 0 && (uint64_t)plane.fmt.width * 2 == buffer.planes[0].fmt.width;
+	bool sh = i > 0 && (uint64_t)plane.fmt.height * 2 == buffer.planes[0].fmt.height;
 
-	flo->row = bpp * (size_t)w;
-	flo->rows = h;
-	if (i > 0)
-	{
-		if ((uint64_t)w * 2 + 1 == buffer.planes[0].fmt.width)
-			w++;
-		if ((uint64_t)h * 2 + 1 == buffer.planes[0].fmt.height)
-			h++;
-	}
-	cei->row = bpp * (size_t)w;
-	cei->rows = h;
+	flo->drow = cei->drow = bps * (size_t)plane.fmt.width;
+	flo->drows = cei->drows = plane.fmt.height;
+	flo->bps = cei->bps = bps;
+	flo->srow = bps * (size_t)(sw ? w / 2 : w);
+	flo->srows = sh ? h / 2 : h;
+	cei->srow = bps * (size_t)(sw ? (w + 1) / 2 : w);
+	cei->srows = sh ? (h + 1) / 2 : h;
 }
 
-//Check, before anything is copied, that the caller's frame can fill the
-//OUTPUT-plane buffer without reading or writing out of bounds, and decide
+//Check, before anything is copied, that the caller's w x h frame can fill
+//the OUTPUT-plane buffer without reading or writing out of bounds, and decide
 //the geometry to copy per plane (g, may be NULL). Runs on untrusted caller
 //input (linesize/payload come from the application).
 //Source side: every plane needs a payload pointer and a linesize of at
-//least one copied row (the copy reads row_bytes per row, so a smaller
+//least one copied row (the copy reads srow bytes per row, so a smaller
 //stride would read into the next row's tail, or past the plane for the
 //last row). Source capacity (#150): when payload_size[i] is non-zero it is
 //the caller's allocation size of plane i, and the copy reads
-//(rows-1)*linesize + row bytes from it; a larger need (frame smaller than
-//the encoder's configured size, cropped or stale buffer) would read past the
+//(srows-1)*linesize + srow bytes from it; a larger need would read past the
 //caller's buffer, so it is refused. payload_size[i] == 0 means "not
 //declared" (legacy callers): accepted, the caller guarantees the size.
-//Destination side: a copied row must fit the negotiated stride and the
+//Ceil vs floored chroma (#154), per plane: the full (ceil) geometry is used
+//when the caller's frame holds it (linesize >= ceil row bytes, payload_size
+//0 or covering it). Older callers size the chroma payload with floored rows
+//(linesize*height/2): their declared payload_size covers only the floored
+//geometry, which is then copied (the missing last column/row is padded by
+//replication, see copyFrameToNvBuf). A payload_size that covers not even
+//that is refused. With payload_size 0 the linesize decides (below the ceil
+//row bytes: floored; the caller guarantees the rows).
+//Destination side: the plane row must fit the negotiated stride and the
 //whole plane (stride * rows) must fit the buffer length reported by the
 //driver (length 0 = not reported, e.g. a not-yet-mapped buffer: skipped).
 //The CPU mapping (plane.data) is checked in copyFrameToNvBuf, not here: in
 //the DMA OUTPUT-plane variant it only exists after the buffer was mapped.
-//Ceil vs floored chroma (#154), per plane: the full (ceil) geometry is used
-//when the caller's frame holds it (linesize >= ceil row bytes, and
-//payload_size covers it or is 0) and the negotiated plane can hold it (ceil
-//row <= stride, ceil rows * stride <= length, length reported). Older
-//callers size the chroma payload with floored rows (linesize*height/2):
-//their declared payload_size covers only the floored geometry, which is then
-//copied exactly as before (no refusal). A payload_size that covers not even
-//that is refused. With payload_size 0 the linesize decides: a linesize below
-//the ceil row bytes means the floored geometry; the caller guarantees the
-//rows then. A plane that cannot hold the ceil geometry falls back to the
-//floored one (logged once) instead of overflowing.
 //Returns 0 when valid, -1 (after logging) otherwise.
-static int enc_check_frame(const nvFrame *frame, const NvBuffer &buffer, enc_geom g[3])
+static int enc_check_frame(const nvFrame *frame, const NvBuffer &buffer,
+                           uint32_t w, uint32_t h, enc_geom g[3])
 {
-	static std::atomic<bool> warned(false);
 	static std::atomic<unsigned> traced(0);
 	/* NVMPI_ENC_TRACE=1: print the copy decision of each plane once per
 	 * process (the DEBUG log below is compiled out in default builds). */
@@ -111,55 +107,43 @@ static int enc_check_frame(const nvFrame *frame, const NvBuffer &buffer, enc_geo
 		enc_geom flo, cei, use;
 		size_t need;
 
-		enc_geoms(buffer, i, &flo, &cei);
+		enc_geoms(buffer, i, w, h, &flo, &cei);
 		if (!frame->payload[i])
 		{
 			NVMPI_LOG(NVMPI_LOG_ERROR, "put_frame: plane %u has no payload", i);
 			return -1;
 		}
-		if (frame->linesize[i] < flo.row)
+		if (frame->linesize[i] < flo.srow)
 		{
 			NVMPI_LOG(NVMPI_LOG_ERROR, "put_frame: plane %u linesize %u < %zu bytes per row "
-			          "(wrong pixel format for this encoder?)", i, frame->linesize[i], flo.row);
+			          "(wrong pixel format for this encoder?)", i, frame->linesize[i], flo.srow);
 			return -1;
 		}
-		use = flo;
-		bool src_ok = false, dst_ok = false;
-		if (cei.row != flo.row || cei.rows != flo.rows)
-		{
-			src_ok = frame->linesize[i] >= cei.row &&
-			         nvmpi_plane_need(cei.rows, frame->linesize[i], (unsigned int)cei.row, &need) &&
-			         (!frame->payload_size[i] || need <= frame->payload_size[i]);
-			dst_ok = cei.row <= plane.fmt.stride && plane.length &&
-			         (uint64_t)plane.fmt.stride * cei.rows <= plane.length;
-
-			if (src_ok && dst_ok)
-				use = cei;
-			else if (src_ok && !warned.exchange(true))
-				NVMPI_LOG(NVMPI_LOG_WARN, "put_frame: OUTPUT plane %u cannot hold the %ux%u chroma "
-				          "of an odd-sized frame, last chroma column/row is dropped", i,
-				          (unsigned)(cei.row / plane.fmt.bytesperpixel), cei.rows);
-		}
+		bool cei_ok = frame->linesize[i] >= cei.srow &&
+		              nvmpi_plane_need(cei.srows, frame->linesize[i], (unsigned int)cei.srow, &need) &&
+		              (!frame->payload_size[i] || need <= frame->payload_size[i]);
+		use = cei_ok ? cei : flo;
 #define ENC_GEOM_FMT "put_frame plane %u: fmt %ux%u bpp %u stride %u length %u " \
-		             "linesize %u payload_size %lu floor %zux%u ceil %zux%u src_ok %d dst_ok %d use %s"
+		             "linesize %u payload_size %lu src %ux%u(floor %ux%u) dst %ux%u use %s"
 #define ENC_GEOM_ARGS i, plane.fmt.width, plane.fmt.height, (unsigned)plane.fmt.bytesperpixel, \
 		              (unsigned)plane.fmt.stride, (unsigned)plane.length, frame->linesize[i], \
-		              frame->payload_size[i], flo.row, flo.rows, cei.row, cei.rows, \
-		              (int)src_ok, (int)dst_ok, (use.row == cei.row && use.rows == cei.rows) ? "ceil" : "floor"
+		              frame->payload_size[i], (unsigned)use.srow, use.srows, (unsigned)flo.srow, \
+		              flo.srows, (unsigned)use.drow, use.drows, cei_ok ? "ceil" : "floor"
 		NVMPI_LOG(NVMPI_LOG_DEBUG, ENC_GEOM_FMT, ENC_GEOM_ARGS);
 		if (trace && !(traced.fetch_or(1u << i) & (1u << i)))
 			fprintf(stderr, "[libnvmpi][enc][T]: " ENC_GEOM_FMT "\n", ENC_GEOM_ARGS);
 #undef ENC_GEOM_FMT
 #undef ENC_GEOM_ARGS
-		if (!nvmpi_plane_need(use.rows, frame->linesize[i], (unsigned int)use.row, &need) ||
+		if (!nvmpi_plane_need(use.srows, frame->linesize[i], (unsigned int)use.srow, &need) ||
 		    (frame->payload_size[i] && need > frame->payload_size[i]))
 		{
 			NVMPI_LOG(NVMPI_LOG_ERROR, "put_frame: plane %u needs %zu bytes but payload_size is %lu",
 			          i, need, frame->payload_size[i]);
 			return -1;
 		}
-		if (use.row > plane.fmt.stride ||
-		    (plane.length && (uint64_t)plane.fmt.stride * use.rows > plane.length))
+		if (use.drow > plane.fmt.stride || use.srow > use.drow ||
+		    use.srows > use.drows ||
+		    (plane.length && (uint64_t)plane.fmt.stride * use.drows > plane.length))
 		{
 			NVMPI_LOG(NVMPI_LOG_ERROR, "put_frame: plane %u exceeds the OUTPUT buffer", i);
 			return -1;
@@ -170,40 +154,51 @@ static int enc_check_frame(const nvFrame *frame, const NvBuffer &buffer, enc_geo
 	return 0;
 }
 
-//Copy the caller's raw frame planes into a V4L2 OUTPUT-plane NvBuffer.
+//Copy the caller's raw w x h frame planes into a V4L2 OUTPUT-plane NvBuffer.
 //Line-by-line memcpy because the caller's linesize and the hw buffer's
 //stride generally differ; sets bytesused per plane so the driver knows the
 //payload extent. The source frame is untouched (caller keeps ownership).
-//Plane geometry is bytesperpixel * width per row, so P010M (2 and 4 bytes
-//per sample/pair) copies 16-bit samples unchanged; chroma of odd sizes
-//rounds up (see enc_check_frame, #154). The frame is validated
-//first (enc_check_frame), so nothing is written on a bad frame; returns -1
-//then, 0 on success.
-int copyFrameToNvBuf(nvFrame* frame, NvBuffer& buffer)
+//P010M (2 and 4 bytes per sample/pair) copies 16-bit samples unchanged.
+//The OUTPUT plane is the even-rounded size of an odd picture (4:2:0 cannot
+//signal odd sizes; the encoder codes (w+1)&~1 x (h+1)&~1): the extra last
+//column and row are filled by replicating the last copied sample/row, so no
+//stale bytes reach the encoder and the hardware does not substitute its own
+//edge (#154). Chroma at the ceil geometry needs no padding. The frame is
+//validated first (enc_check_frame), so nothing is written on a bad frame;
+//returns -1 then, 0 on success.
+int copyFrameToNvBuf(nvFrame* frame, NvBuffer& buffer, uint32_t w, uint32_t h)
 {
 	uint32_t i, j;
 	char *dataDst;
 	char *dataSrc;
 	enc_geom g[3];
-	if (enc_check_frame(frame, buffer, g) < 0)
+	if (enc_check_frame(frame, buffer, w, h, g) < 0)
 		return -1;
 	for (i = 0; i < buffer.n_planes; i++)
 	{
 		NvBuffer::NvBufferPlane &plane = buffer.planes[i];
 		unsigned int &frameLineSize = frame->linesize[i];
-		size_t copySz = g[i].row;
 		dataDst = (char *) plane.data;
 		dataSrc = (char *) frame->payload[i];
 		if (!dataDst)
 			return -1;       /* buffer not CPU-mapped: nothing to copy into */
 		plane.bytesused = 0;
-		for (j = 0; j < g[i].rows; j++)
+		for (j = 0; j < g[i].srows; j++)
 		{
-			memcpy(dataDst, dataSrc, copySz);
+			memcpy(dataDst, dataSrc, g[i].srow);
+			/* replicate the last sample into the padding column(s) */
+			for (size_t k = g[i].srow; g[i].srow >= g[i].bps && k + g[i].bps <= g[i].drow; k += g[i].bps)
+				memcpy(dataDst + k, dataDst + g[i].srow - g[i].bps, g[i].bps);
 			dataDst += plane.fmt.stride;
 			dataSrc += frameLineSize;
 		}
-		plane.bytesused = plane.fmt.stride * g[i].rows;
+		/* replicate the last copied row into the padding row(s) */
+		for (j = g[i].srows; g[i].srows > 0 && j < g[i].drows; j++)
+		{
+			memcpy(dataDst, dataDst - plane.fmt.stride, g[i].drow);
+			dataDst += plane.fmt.stride;
+		}
+		plane.bytesused = plane.fmt.stride * g[i].drows;
 	}
 	return 0;
 }
@@ -237,7 +232,7 @@ int nvmpi_encoder_put_frame(nvmpictx* h,nvFrame* frame)
 	/* Validate the frame geometry BEFORE a buffer is taken: a rejected frame
 	 * must not consume an OUTPUT slot (it would never be queued back). All
 	 * OUTPUT buffers share one format, so buffer 0 stands for every slot. */
-	if(frame && enc_check_frame(frame, *ctx->enc->output_plane.getNthBuffer(0), NULL) < 0)
+	if(frame && enc_check_frame(frame, *ctx->enc->output_plane.getNthBuffer(0), ctx->width, ctx->height, NULL) < 0)
 		return NVMPI_ERR_INVAL;
 
 	/* Back-pressure (issues #125, #145), both modes: refuse a frame whose AU
@@ -290,7 +285,7 @@ int nvmpi_encoder_put_frame(nvmpictx* h,nvFrame* frame)
 	if(frame)
 	{
 		//normal frame: copy planes in and carry the pts on the buffer
-		copyFrameToNvBuf(frame, *nvBuffer);
+		copyFrameToNvBuf(frame, *nvBuffer, ctx->width, ctx->height);
 		v4l2_buf.flags |= V4L2_BUF_FLAG_TIMESTAMP_COPY;
 		//total round trip for any 64-bit timestamp, see nvmpi_pts.h
 		ctx->pts_map.encode((int64_t)frame->timestamp, &v4l2_buf.timestamp);

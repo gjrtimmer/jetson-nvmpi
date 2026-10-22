@@ -45,8 +45,10 @@ struct nvmpi_enc_ctx : nvmpictx
 {
 	uint32_t index;                //next OUTPUT-plane buffer index until all used once
 	nvmpi_pts_map pts_map;         //int64 pts <-> V4L2 timeval (put thread -> DQ thread)
-	uint32_t width;
+	uint32_t width;                //caller's picture size (frames are w x h)
 	uint32_t height;
+	uint32_t coded_width;          //OUTPUT/CAPTURE plane size: w/h rounded up to even for
+	uint32_t coded_height;         //4:2:0 memory input (#154), else equal to width/height
 	uint32_t profile;              //V4L2 H.264/H.265 profile enum value
 	uint32_t bitrate;              //target bitrate (bit/s)
 	uint32_t peak_bitrate{0};      //VBR peak bitrate (bit/s)
@@ -208,7 +210,7 @@ static inline nvPacket* enc_wait_packet(nvmpi_enc_ctx* ctx)
 bool encoder_capture_plane_dq_callback(struct v4l2_buffer *v4l2_buf, NvBuffer *buffer, NvBuffer *shared_buffer, void *arg);
 //copyFrameToNvBuf: defined in nvmpi_enc_input.cpp; copies a caller raw frame
 //into a V4L2 OUTPUT-plane NvBuffer (used by nvmpi_encoder_put_frame()).
-int copyFrameToNvBuf(nvFrame* frame, NvBuffer& buffer);
+int copyFrameToNvBuf(nvFrame* frame, NvBuffer& buffer, uint32_t w, uint32_t h);
 //nvmpi_enc_stop_dq_thread: defined in nvmpi_enc_api.cpp; stops and joins the
 //capture DQ thread safely (see definition). Returns 0 ok, -1 join timed out.
 int nvmpi_enc_stop_dq_thread(nvmpi_enc_ctx* ctx);

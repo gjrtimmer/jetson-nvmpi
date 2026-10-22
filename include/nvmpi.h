@@ -498,15 +498,22 @@ extern "C" {
 	//declared": accepted, the caller must guarantee the plane is large
 	//enough (an undersized plane is then read out of bounds). A plane the
 	//pixel format does not use (the third of NV12/P010) is not checked.
-	//Odd sizes (#154): the chroma of a 4:2:0 frame has ceil(w/2) columns and
-	//ceil(h/2) rows (NV12/P010 interleaved: ceil(w/2) CbCr pairs per row).
-	//The full chroma is copied when the plane holds it: linesize >= the ceil
-	//row bytes and payload_size[p] is 0 or covers (ceil rows-1)*linesize +
-	//ceil row bytes. A caller that sized chroma with floored rows (payload_size
-	//= linesize*(h/2), as older wrappers do) is accepted and gets the floored
-	//copy (last chroma column/row not encoded from its data); declaring less
-	//than that is refused. With payload_size 0 the linesize decides (below the
-	//ceil row bytes = floored copy) and the caller guarantees the rows.
+	//Odd sizes (#154): create the encoder at the real size and pass frames of
+	//that size. 4:2:0 cannot signal an odd size, so with memory input (not
+	//use_dmabuf, not lossless 4:4:4) the encoder is configured at the
+	//even-rounded size ((w+1)&~1 x (h+1)&~1) and the bitstream is that size:
+	//641x357 is coded as 642x358 (cropping back to the real size is up to
+	//the container). put_frame fills the extra last luma column and row
+	//by replicating the last real one. Chroma of a w x h frame has ceil(w/2)
+	//columns and ceil(h/2) rows (NV12/P010 interleaved: ceil(w/2) CbCr pairs
+	//per row) and is copied in full when linesize >= the ceil row bytes and
+	//payload_size[p] is 0 or covers (ceil rows-1)*linesize + ceil row bytes.
+	//A caller that sized chroma with floored rows (payload_size =
+	//linesize*(h/2), as older wrappers do) is accepted: its last chroma
+	//column/row is padded by replication; declaring less than that is refused.
+	//With payload_size 0 the linesize decides (below the ceil row bytes =
+	//floored) and the caller guarantees the rows. put_frame_fd is unchanged:
+	//the encoder keeps the caller's size there.
 	int nvmpi_encoder_put_frame(nvmpictx* ctx, nvFrame* frame);
 	//get filled packet from encoder
 	//When wait=false: non-blocking, returns -1 immediately if no packet ready.

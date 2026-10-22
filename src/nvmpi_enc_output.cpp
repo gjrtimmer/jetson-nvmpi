@@ -133,8 +133,8 @@ int setup_output_dmabuf(nvmpi_enc_ctx *ctx, uint32_t num_buffers )
     }
     for (uint32_t i = 0; i < ctx->enc->output_plane.getNumBuffers(); i++)
     {
-        cParams.width = ctx->width;
-        cParams.height = ctx->height;
+        cParams.width = ctx->coded_width;
+        cParams.height = ctx->coded_height;
         cParams.layout = NVBUF_LAYOUT_PITCH;
 
         /*
