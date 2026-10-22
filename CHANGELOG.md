@@ -3,6 +3,41 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.6.0 - 2026-10-22
+
+### Bug Fixes
+
+
+**dec**
+
+
+- get_frame checks the caller's plane layout against the decoded frame. A frame that does not fit (linesize shorter than a row, or larger than the caller's capacity or the size it allocated for) is refused with NVMPI_ERR_FRAME_SIZE instead of being copied. Before, a mid-stream resolution increase wrote past the caller's buffers (#149)
+
+
+**jpeg**
+
+
+- nvmpi_jpeg_decoder_get_frame bounds its copy by the caller's buffers in the same way (#149)
+
+
+### Features
+
+
+**dec**
+
+
+- New nvmpi_decoder_get_frame2: the caller passes per-plane capacity in nvFrame.payload_size[]. It reports the decoded width/height and minimum plane sizes, and keeps a frame that does not fit pending so the caller can reallocate and retry. New error code NVMPI_ERR_FRAME_SIZE (-90). nvFrame layout and soname unchanged (#149)
+
+
+### Testing
+
+
+**api**
+
+
+- get_frame / get_frame2 / JPEG plane size cases, including a resolution increase against exact-size caller buffers (#149)
+
+
 ## 4.5.3 - 2026-10-22
 
 ### Bug Fixes
