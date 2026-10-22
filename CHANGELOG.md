@@ -3,6 +3,32 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.6.1 - 2026-10-22
+
+### Bug Fixes
+
+
+**enc**
+
+
+- nvmpi_encoder_put_frame checks each caller plane whose payload_size[p] is set against the bytes it reads ((rows-1)*linesize + row bytes) and returns NVMPI_ERR_INVAL before taking an OUTPUT buffer. Before, a frame smaller than the configured size was read past the caller's buffer. payload_size 0 stays accepted (#150)
+
+
+### CI
+
+
+- Use the jetson-docker images and a prebaked deb-test image for test:deb (#152)
+
+
+### Testing
+
+
+**api**
+
+
+- put_frame plane size cases (#150)
+
+
 ## 4.6.0 - 2026-10-22
 
 ### Bug Fixes
