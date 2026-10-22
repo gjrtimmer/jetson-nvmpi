@@ -282,6 +282,7 @@ static const struct tcase k_cases[] = {
     { "fault_alloc_pool_first", "alloc@2", fault_alloc, NV12, 2, 0 },
     { "fault_alloc_pool_mid", "alloc@3", fault_alloc, I420, 3, 0 },
     { "legacy_decode", NEVER_FIRES, legacy_decode, 0, 0, 0 },
+    { "legacy_size_guard", NEVER_FIRES, legacy_size_guard, 0, 0, 0 },
 };
 
 static int run_body(void *arg)

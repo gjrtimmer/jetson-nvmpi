@@ -103,4 +103,58 @@ static int legacy_decode(int b_, int c_, int d_)
     return nvmpi_jpeg_decoder_close(c) == 0 ? 0 : 1;
 }
 
+/* Copy-out decoder with caller planes sized for the FIRST image (#149): a
+ * later, larger image is refused (nothing written, its size reported), also
+ * when payload_size is too small; with enough capacity it is delivered.
+ * Exact-size mallocs: a stray copy is an ASan heap-buffer-overflow. */
+static int legacy_size_guard(int b_, int c_, int d_)
+{
+    struct img a = img_a(), big = img_b();
+    static unsigned char y[256 * 64], u[256 * 64], v[256 * 64];
+    unsigned char *p[3];
+    size_t n = (size_t)big.w * big.h, i;
+    nvFrame f;
+    nvmpictx *c;
+    int k;
+
+    (void)b_; (void)c_; (void)d_;
+    set_pad(0);
+    c = nvmpi_create_jpeg_decoder();
+    REQUIRE(c);
+    REQUIRE(put(c, &a, 1) == 0);
+    memset(&f, 0, sizeof(f));
+    f.payload[0] = y; f.payload[1] = u; f.payload[2] = v;
+    f.linesize[0] = f.linesize[1] = f.linesize[2] = 256;
+    REQUIRE(nvmpi_jpeg_decoder_get_frame(c, &f, true) == 0);   /* baseline */
+
+    for (k = 0; k < 3; k++) {            /* exact first-image-size planes */
+        p[k] = malloc(k ? (size_t)a.w * ((a.h + 1) / 2) : (size_t)a.w * a.h);
+        REQUIRE(p[k]);
+    }
+    REQUIRE(put(c, &big, 2) == 0);
+    memset(&f, 0, sizeof(f));
+    for (k = 0; k < 3; k++) { f.payload[k] = p[k]; f.linesize[k] = a.w; }
+    REQUIRE(nvmpi_jpeg_decoder_get_frame(c, &f, true) == NVMPI_ERR_FRAME_SIZE);
+    REQUIRE(f.width == big.w && f.height == big.h);
+    for (k = 0; k < 3; k++) free(p[k]);
+
+    REQUIRE(put(c, &big, 3) == 0);        /* capacity too small */
+    memset(&f, 0, sizeof(f));
+    for (k = 0; k < 3; k++) {
+        f.payload[k] = y; f.linesize[k] = big.w; f.payload_size[k] = n / 4;
+    }
+    REQUIRE(nvmpi_jpeg_decoder_get_frame(c, &f, true) == NVMPI_ERR_FRAME_SIZE);
+
+    REQUIRE(put(c, &big, 4) == 0);        /* enough capacity */
+    for (k = 0; k < 3; k++) {
+        p[k] = malloc(n);
+        REQUIRE(p[k]);
+        f.payload[k] = p[k]; f.linesize[k] = big.w; f.payload_size[k] = n;
+    }
+    REQUIRE(nvmpi_jpeg_decoder_get_frame(c, &f, true) == 0);
+    REQUIRE(f.width == big.w && f.height == big.h && f.timestamp == 4);
+    for (i = 0; i < 3; i++) free(p[i]);
+    return nvmpi_jpeg_decoder_close(c) == 0 ? 0 : 1;
+}
+
 #endif

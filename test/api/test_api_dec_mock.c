@@ -278,6 +278,7 @@ static int fault_case(const struct tcase *t)
 #include "dec_mock_fd.h"
 #include "dec_mock_fd2.h"
 #include "dec_mock_reschange.h"
+#include "dec_mock_copysize.h"
 #include "dec_mock_pts.h"
 
 static const struct tcase k_cases[] = {
@@ -319,6 +320,15 @@ static const struct tcase k_cases[] = {
     { "res_change_alloc@22", "alloc@22", res_change_alloc_fault, 0, 1 },
     { "res_change_alloc@23", "alloc@23", res_change_alloc_fault, 0, 1 },
     { "res_change_alloc@24", "alloc@24", res_change_alloc_fault, 0, 1 },
+    /* get_frame / get_frame2 buffer capacity (#149); refusals log errors */
+    { "copysize_legacy_drop", "dqbuf@9999", copysize_legacy_drop, 0, 0 },
+    { "copysize_legacy_caps", "dqbuf@9999", copysize_legacy_caps, 0, 0 },
+    { "copysize_legacy_stride", "dqbuf@9999", copysize_legacy_stride, 0, 0 },
+    { "copysize_get_frame2_realloc", NULL, copysize_get_frame2_realloc, 0, 0 },
+    { "copysize_args_and_stride", NULL, copysize_args_and_stride, 0, 0 },
+    { "copysize_pending_fd", NULL, copysize_pending_fd, 0, 0 },
+    { "copysize_pending_close", NULL, copysize_pending_close, 0, 0 },
+    { "copysize_pending_flush", NULL, copysize_pending_flush, 0, 0 },
     /* pts round trip through the u64 ns kernel timestamp (#148) */
     { "pts_roundtrip_copy", NULL, pts_roundtrip_copy, 0, 0 },
     { "pts_roundtrip_fd", NULL, pts_roundtrip_fd, 0, 0 },
