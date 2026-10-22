@@ -3,6 +3,46 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.5.3 - 2026-10-22
+
+### Bug Fixes
+
+
+**av1**
+
+
+- Reject P010 input for AV1 encode: the Orin's (L4T R36.4) AV1 encoder cannot take 10-bit input, and the VIC conversion fails with BlockSide error 0x4 (#146)
+
+
+**dec**
+
+
+- Drop AV1 input until a sequence header has been seen; NVDEC held those OUTPUT buffers and put_packet blocked forever (#147)
+
+
+**dec,enc**
+
+
+- Make the pts round trip total for any int64, including AV_NOPTS_VALUE and negatives (#148)
+
+
+### Testing
+
+
+**api**
+
+
+- AV1 P010 refused, AV1 decode without an in-band sequence header (#146, #147)
+- Pts round trip cases for decoder and encoder (#148)
+
+
+**mock**
+
+
+- Model the AV1 decoder before the first sequence header like the Orin (#147)
+- Store V4L2 buffer timestamps as u64 ns like the kernel (#148)
+
+
 ## 4.5.2 - 2026-10-21
 
 ### Bug Fixes
