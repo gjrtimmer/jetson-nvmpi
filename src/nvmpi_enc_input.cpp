@@ -100,6 +100,10 @@ static void enc_geoms(const NvBuffer &buffer, uint32_t i, enc_geom *flo, enc_geo
 static int enc_check_frame(const nvFrame *frame, const NvBuffer &buffer, enc_geom g[3])
 {
 	static std::atomic<bool> warned(false);
+	static std::atomic<unsigned> traced(0);
+	/* NVMPI_ENC_TRACE=1: print the copy decision of each plane once per
+	 * process (the DEBUG log below is compiled out in default builds). */
+	static const bool trace = getenv("NVMPI_ENC_TRACE") != NULL;
 
 	for (uint32_t i = 0; i < buffer.n_planes && i < 3; i++)
 	{
@@ -120,13 +124,14 @@ static int enc_check_frame(const nvFrame *frame, const NvBuffer &buffer, enc_geo
 			return -1;
 		}
 		use = flo;
+		bool src_ok = false, dst_ok = false;
 		if (cei.row != flo.row || cei.rows != flo.rows)
 		{
-			bool src_ok = frame->linesize[i] >= cei.row &&
-			              nvmpi_plane_need(cei.rows, frame->linesize[i], (unsigned int)cei.row, &need) &&
-			              (!frame->payload_size[i] || need <= frame->payload_size[i]);
-			bool dst_ok = cei.row <= plane.fmt.stride && plane.length &&
-			              (uint64_t)plane.fmt.stride * cei.rows <= plane.length;
+			src_ok = frame->linesize[i] >= cei.row &&
+			         nvmpi_plane_need(cei.rows, frame->linesize[i], (unsigned int)cei.row, &need) &&
+			         (!frame->payload_size[i] || need <= frame->payload_size[i]);
+			dst_ok = cei.row <= plane.fmt.stride && plane.length &&
+			         (uint64_t)plane.fmt.stride * cei.rows <= plane.length;
 
 			if (src_ok && dst_ok)
 				use = cei;
@@ -135,6 +140,17 @@ static int enc_check_frame(const nvFrame *frame, const NvBuffer &buffer, enc_geo
 				          "of an odd-sized frame, last chroma column/row is dropped", i,
 				          (unsigned)(cei.row / plane.fmt.bytesperpixel), cei.rows);
 		}
+#define ENC_GEOM_FMT "put_frame plane %u: fmt %ux%u bpp %u stride %u length %u " \
+		             "linesize %u payload_size %lu floor %zux%u ceil %zux%u src_ok %d dst_ok %d use %s"
+#define ENC_GEOM_ARGS i, plane.fmt.width, plane.fmt.height, (unsigned)plane.fmt.bytesperpixel, \
+		              (unsigned)plane.fmt.stride, (unsigned)plane.length, frame->linesize[i], \
+		              frame->payload_size[i], flo.row, flo.rows, cei.row, cei.rows, \
+		              (int)src_ok, (int)dst_ok, (use.row == cei.row && use.rows == cei.rows) ? "ceil" : "floor"
+		NVMPI_LOG(NVMPI_LOG_DEBUG, ENC_GEOM_FMT, ENC_GEOM_ARGS);
+		if (trace && !(traced.fetch_or(1u << i) & (1u << i)))
+			fprintf(stderr, "[libnvmpi][enc][T]: " ENC_GEOM_FMT "\n", ENC_GEOM_ARGS);
+#undef ENC_GEOM_FMT
+#undef ENC_GEOM_ARGS
 		if (!nvmpi_plane_need(use.rows, frame->linesize[i], (unsigned int)use.row, &need) ||
 		    (frame->payload_size[i] && need > frame->payload_size[i]))
 		{
