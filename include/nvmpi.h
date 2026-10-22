@@ -364,6 +364,12 @@ extern "C" {
 
 	//Retrieve one decoded frame. When wait is true: blocks up to 500ms
 	//for a frame. Returns -1 when no frame is available (timeout or EOS).
+	//Buffer size (#149): with payload_size[] set for every plane, the image
+	//is copied only if it fits (same rule as nvmpi_decoder_get_frame2);
+	//without it the planes are assumed to hold the first image this call
+	//delivered (linesize >= row bytes). An image that does not fit is
+	//dropped, nothing is copied, width/height/type report its size and
+	//NVMPI_ERR_FRAME_SIZE is returned (reallocate, re-submit the image).
 	int nvmpi_jpeg_decoder_get_frame(nvmpictx* ctx, nvFrame* frame, bool wait);
 
 	//Destroy the JPEG decoder context and free all DMA buffers.

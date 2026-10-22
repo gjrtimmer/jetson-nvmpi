@@ -24,6 +24,7 @@
  * Allocated by nvmpi_create_jpeg_decoder(); freed by nvmpi_jpeg_decoder_close().
  */
 #include "nvmpi_dec_jpeg_internal.h"
+#include "nvmpi_frame_fit.h"
 #include <pthread.h>
 
 /* Defined in nvmpi_vic.cpp — serializes NvBufSurfTransform calls. */
@@ -207,6 +208,15 @@ int nvmpi_jpeg_decoder_put_packet(nvmpictx* handle, nvPacket* packet)
  * planes, and recycles the pool buffer.
  *
  * When wait is true: blocks up to 500ms. Returns -1 on timeout or EOS.
+ *
+ * Caller buffer size (#149): the decoded size comes from the image and may
+ * differ from image to image, the caller's planes are of unknown size. With
+ * payload_size[] set for every plane the frame must fit exactly
+ * (nvmpi_frame_fit.h); without it the planes are assumed to hold the first
+ * image this call delivered. A frame that does not fit is NOT copied: it is
+ * dropped, width/height/type report its size and NVMPI_ERR_FRAME_SIZE is
+ * returned (a still image can be re-submitted after reallocating). Smaller
+ * images are copied as before.
  */
 int nvmpi_jpeg_decoder_get_frame(nvmpictx* handle, nvFrame* frame, bool wait)
 {
@@ -228,6 +238,37 @@ int nvmpi_jpeg_decoder_get_frame(nvmpictx* handle, nvFrame* frame, bool wait)
 
 	if (!fb)
 		return -1;
+
+	/* Fit check BEFORE any byte is written to the caller's planes. */
+	const nvmpi_frame_geom gm = { ctx->last_width, ctx->last_height,
+		ctx->num_planes < 3 ? ctx->num_planes : 3,
+		ctx->frame_height, ctx->frame_linedatasize };
+	int fit;
+	if (nvmpi_frame_has_caps(frame, gm.num_planes))
+		fit = nvmpi_frame_check_caps(frame, &gm);
+	else
+	{
+		fit = nvmpi_frame_check_ptrs(frame, &gm);
+		/* First image delivered = the size the caller sized its planes for. */
+		if (fit == 0 && (!ctx->base_width || !ctx->base_height))
+		{
+			ctx->base_width = ctx->last_width;
+			ctx->base_height = ctx->last_height;
+		}
+		if (fit == 0 && (ctx->last_width > ctx->base_width ||
+		                 ctx->last_height > ctx->base_height))
+			fit = NVMPI_ERR_FRAME_SIZE;
+	}
+	if (fit != 0)
+	{
+		NVMPI_LOG_SUB(NVMPI_LOG_ERROR, "jpeg", "get_frame: %ux%u image does not fit "
+		              "the caller's buffers, dropped", ctx->last_width, ctx->last_height);
+		frame->width = ctx->last_width;
+		frame->height = ctx->last_height;
+		frame->type = ctx->out_pixfmt;
+		ctx->framePool->qEmptyBuf(fb);       /* recycled, nothing was copied */
+		return fit;
+	}
 
 	int ret = jpegCopyToFrame(ctx, fb, frame);
 	frame->timestamp = fb->timestamp;

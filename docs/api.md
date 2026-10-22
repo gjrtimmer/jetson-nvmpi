@@ -572,6 +572,15 @@ Retrieves one decoded frame into caller-allocated planes. With `wait == true`
 it blocks up to 500 ms. Returns `0`, or `-1` when no frame is available
 (timeout or EOS).
 
+Buffer size: with `payload_size[]` set for every plane the image is copied
+only if it fits (rule under
+[`nvmpi_decoder_get_frame2`](#nvmpi_decoder_get_frame2)); without it the
+planes are assumed to hold the first image this call delivered, with
+`linesize[p]` >= bytes per row. An image that does not fit is dropped and
+nothing is copied: `width` / `height` / `type` report its size and
+`NVMPI_ERR_FRAME_SIZE` is returned. Reallocate and re-submit the image. Smaller
+images are copied as before.
+
 ### `nvmpi_jpeg_decoder_close`
 
 `nvmpi.h:225` -- `int nvmpi_jpeg_decoder_close(nvmpictx* ctx);`

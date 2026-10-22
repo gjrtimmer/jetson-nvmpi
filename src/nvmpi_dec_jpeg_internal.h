@@ -66,6 +66,12 @@ struct nvmpictx_jpeg
 	uint32_t last_width{0};
 	uint32_t last_height{0};
 
+	/* Size the copy-out get_frame assumes the caller's buffers hold when it
+	 * gets no payload_size: the first image it delivered (#149). Touched by
+	 * the get_frame thread only. 0 = not recorded yet. */
+	uint32_t base_width{0};
+	uint32_t base_height{0};
+
 	/* Output pixel format — JPEG always produces YUV420 via VIC. */
 	nvPixFormat out_pixfmt{NV_PIX_YUV420};
 
