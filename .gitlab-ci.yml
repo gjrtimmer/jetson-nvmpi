@@ -2,9 +2,9 @@
 #
 # CI pipeline for jetson-nvmpi (libnvmpi, the Jetson V4L2/NvBuffer wrapper).
 #
-# Builder/runtime images are built and published by timmertech/jetson-builder;
+# Builder/runtime images are built and published by timmertech/jetson-docker;
 # this project only consumes them, pinned to immutable <tag>-<sha8> tags (see
-# JETSON_BUILDER_SHA). Same runners, rules and conventions as jetson-ffmpeg.
+# JETSON_DOCKER_SHA). Same runners, rules and conventions as jetson-ffmpeg.
 #
 # Three kinds of pipeline:
 #
@@ -35,8 +35,10 @@
 #               (tags: needs release:test:api:hw, NOT optional; main
 #               snapshots need test:api:hw optional so they run without it;
 #               dist:jp5 also build:jp5)
-#     test-deb - test:deb:jp6/jp5 install the dist debs on a clean ubuntu +
-#               NVIDIA apt repo and check they load/link (scripts/test-deb.sh);
+#     test-deb - test:deb:jp6/jp5 install the dist debs on the jetson-docker
+#               deb-test image (clean ubuntu, apt setup pre-seeded, runtime deps
+#               downloaded but not installed) and check they load/link
+#               (scripts/test-deb.sh);
 #               upload:s3 and both release jobs need them. dist + test-deb also
 #               run on MRs that touch packaging paths (.pkg-paths) and on main.
 #               Tags also run release:test:deb:hw (scripts/test-deb-hw.sh): the
@@ -121,14 +123,16 @@ variables:
   L4T_SOC: "t234"
   L4T_TAG_JP5: "r35.4.1"
   NVMPI_PREFIX: "${CI_PROJECT_DIR}/_nvmpi"
-  # Images are built by timmertech/jetson-builder. Immutable tags are
-  # <tag>-<sha8> of the jetson-builder commit that built them; bump
-  # JETSON_BUILDER_SHA to adopt new images (cached by if-not-present).
-  JETSON_BUILDER_SHA: "ffd27ba0"
-  BUILDER_IMAGE: "harbor.local/jetson/jetson-ffmpeg-builder:${L4T_TAG}-${JETSON_BUILDER_SHA}"
-  BUILDER_IMAGE_JP5: "harbor.local/jetson/jetson-ffmpeg-builder-jp5:${L4T_TAG_JP5}-${JETSON_BUILDER_SHA}"
-  RUNTIME_IMAGE: "harbor.local/jetson/l4t-jetpack6:${L4T_TAG}-${JETSON_BUILDER_SHA}"
-  RELEASE_IMAGE: "harbor.local/jetson/jetson-ffmpeg-release-tools:latest-${JETSON_BUILDER_SHA}"
+  # Images are built by timmertech/jetson-docker. Immutable tags are
+  # <tag>-<sha8> of the jetson-docker commit that built them; bump
+  # JETSON_DOCKER_SHA to adopt new images (cached by if-not-present).
+  JETSON_DOCKER_SHA: "746b2413"
+  BUILDER_IMAGE: "harbor.local/jetson/jetson-ffmpeg-builder:${L4T_TAG}-${JETSON_DOCKER_SHA}"
+  BUILDER_IMAGE_JP5: "harbor.local/jetson/jetson-ffmpeg-builder-jp5:${L4T_TAG_JP5}-${JETSON_DOCKER_SHA}"
+  RUNTIME_IMAGE: "harbor.local/jetson/l4t-jetpack6:${L4T_TAG}-${JETSON_DOCKER_SHA}"
+  RELEASE_IMAGE: "harbor.local/jetson/jetson-ffmpeg-release-tools:latest-${JETSON_DOCKER_SHA}"
+  DEB_TEST_IMAGE_JP6: "harbor.local/jetson/jetson-deb-test:jp6-${JETSON_DOCKER_SHA}"
+  DEB_TEST_IMAGE_JP5: "harbor.local/jetson/jetson-deb-test:jp5-${JETSON_DOCKER_SHA}"
 
 # Reusable pipeline rules (build/test jobs run on tags too, so a release is
 # gated on the Jetson test of that exact commit):
@@ -580,8 +584,10 @@ dist:jp5:
 
 # ---------------------------------------------------------------------------
 # Stage: test-deb — install the debs built by dist:* on a CLEAN system
-# (plain ubuntu + NVIDIA apt repo, NOT the builder image, which already has
-# every library) and check they load and link: dependency resolution, ldconfig,
+# (the jetson-docker deb-test image: clean ubuntu, NVIDIA apt repo and test
+# tooling pre-seeded, runtime deps downloaded but not installed, so dependency
+# resolution is still proven; NOT the builder image, which already has every
+# library) and check they load and link: dependency resolution, ldconfig,
 # dlopen (JP6) / static symbol check (JP5: NVIDIA r35.4 libs abort without
 # /dev/nvmap), libnvmpi-dev compile+link, purge leaves nothing, lintian errors.
 # See scripts/test-deb.sh (#112 was a missing libjpeg dependency this catches).
@@ -605,7 +611,7 @@ test:deb:jp6:
   extends: .test-deb
   needs: ["dist:jp6"]
   image:
-    name: "harbor.local/docker.io/library/ubuntu:22.04"
+    name: "${DEB_TEST_IMAGE_JP6}"
     pull_policy: if-not-present
   variables:
     JP: "6"
@@ -614,7 +620,7 @@ test:deb:jp5:
   extends: .test-deb
   needs: ["dist:jp5"]
   image:
-    name: "harbor.local/docker.io/library/ubuntu:20.04"
+    name: "${DEB_TEST_IMAGE_JP5}"
     pull_policy: if-not-present
   variables:
     JP: "5"

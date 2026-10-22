@@ -4,6 +4,9 @@
 # Run as root inside a CLEAN ubuntu container (22.04 for JP6, 20.04 for JP5),
 # NOT the builder image: the point is to prove the packages' dependencies
 # resolve from NVIDIA's apt repo alone and that the installed library works.
+# CI uses the jetson-docker deb-test image (plain ubuntu with the apt/CA/tool
+# setup below pre-seeded and runtime deps pre-downloaded), so those setup
+# steps are no-ops there; on plain ubuntu they do the work.
 #
 # Steps (each prints PASS or fails the script):
 #   1  apt-get install libnvmpi1 alone: dependency resolution

@@ -52,9 +52,9 @@ run.
   `dist:*` need it as `optional`, so tags still gate on it and main snapshots
   do not wait for it.
 - **Pinned images.** Builder, runtime and release-tools images come from
-  `timmertech/jetson-builder` with immutable `<tag>-<sha8>` tags
-  (`JETSON_BUILDER_SHA`), pulled with `if-not-present`. To adopt new images,
-  take the sha8 of the latest green jetson-builder main pipeline and bump it.
+  `timmertech/jetson-docker` with immutable `<tag>-<sha8>` tags
+  (`JETSON_DOCKER_SHA`), pulled with `if-not-present`. To adopt new images,
+  take the sha8 of the latest green jetson-docker main pipeline and bump it.
 - **ccache.** `build:*` use ccache as CMake compiler launcher with a per-job
   GitLab cache (`.ccache`, `CCACHE_COMPILERCHECK=content`).
 - **Downstream.** `trigger:jetson-ffmpeg` stays manual until jetson-ffmpeg
@@ -77,8 +77,8 @@ Stages, in order: `build`, `test`, `release-test`, `dist`, `test-deb`, `publish`
 | test | `test:api:tsan` | Same suite in a TSan build (`NVMPI_SANITIZER=thread`), run under `setarch -R`. | any runner, no tags |
 | dist | `dist:jp6` | Build the **real** (non-stub) library against NVIDIA's apt-repository libraries and package it. Needs `test:api:hw`. | any arm64 runner |
 | dist | `dist:jp5` | Same for JetPack 5. Needs `build:jp5` and `test:api:hw`. | any arm64 runner |
-| test-deb | `test:deb:jp6` | Install the `dist:jp6` debs in a clean `ubuntu:22.04` with NVIDIA's r36.4 apt repo and run `scripts/test-deb.sh --jp 6 --lintian`. | any runner, no tags |
-| test-deb | `test:deb:jp5` | Same in `ubuntu:20.04` with r35.4, static checks only (see below). | any runner, no tags |
+| test-deb | `test:deb:jp6` | Install the `dist:jp6` debs in the jetson-docker deb-test image (clean `ubuntu:22.04`, NVIDIA r36.4 apt repo pre-seeded) and run `scripts/test-deb.sh --jp 6 --lintian`. | any runner, no tags |
+| test-deb | `test:deb:jp5` | Same in the `ubuntu:20.04` / r35.4 deb-test image, static checks only (see below). | any runner, no tags |
 | test-deb | `release:test:deb:hw` | Tags only. Install the `dist:jp6` debs on the Orin, build `test_api` against them via `pkg-config`, check `libnvmpi.so.1` resolves from the system path and run it (`scripts/test-deb-hw.sh`). | Jetson runner |
 | publish | `upload:s3` (tags), `upload:s3:snapshot` (main) | Upload the tarballs (and, on tags, the changelog) to the S3 bucket. | release-tools image |
 | release | `release:gitlab` | Upload to the GitLab generic package registry and create the GitLab Release. Tags only. | release-tools image |
@@ -98,7 +98,9 @@ Details per job:
   `scripts/build.sh --no-stubs --clean --install` and `scripts/package.sh`.
   `--no-stubs` hard-fails if the real libraries are missing, so a release can
   never ship a stub-linked tarball. Artifacts: `dist/`, kept 1 week.
-- **`test:deb:*`** run `scripts/test-deb.sh` in a plain ubuntu image, not the
+- **`test:deb:*`** run `scripts/test-deb.sh` in the jetson-docker deb-test image
+  (`DEB_TEST_IMAGE_JP6`/`_JP5`): plain ubuntu with the apt, CA and tool setup
+  pre-seeded and the runtime deps downloaded but not installed. It is not the
   builder image (which already carries every library), so missing package
   dependencies show up. Steps: install `libnvmpi1` alone (dependency
   resolution); `ldconfig` lists `libnvmpi.so.1` and the unversioned
@@ -212,7 +214,7 @@ both tags is online.
 
 Builder and runtime images (JetPack 5 and JetPack 6 builder, the Jetson test
 image and the release-tools image) are built and published by the
-`timmertech/jetson-builder` project's pipeline; this project only consumes them.
+`timmertech/jetson-docker` project's pipeline; this project only consumes them.
 
 ## Branch and merge request pipelines
 
