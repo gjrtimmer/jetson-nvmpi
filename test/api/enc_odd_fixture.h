@@ -154,17 +154,23 @@ static void oc_compare(const unsigned char *u, const unsigned char *v, struct oc
             sv += dv * dv;
             if (x == OC_CW - 1 || y == OC_CH - 1) {
                 /* Interior neighbour: what an encoder that ignores the
-                 * edge replicates into it. Lossy coding blurs a one-sample
-                 * sentinel, so judge "arrived" by which value the decoded
-                 * sample is nearer to, not by an absolute threshold. */
+                 * edge replicates into it (decoded == neighbour, give or
+                 * take coding noise). Lossy coding blurs a one-sample
+                 * sentinel but still moves the sample towards it, so a
+                 * sample is lost only if it moved less than a quarter of
+                 * the neighbour->sentinel step away from the neighbour.
+                 * The corner's neighbour is on the edge itself: skip it. */
                 unsigned nx = x == OC_CW - 1 ? x - 1 : x;
                 unsigned ny = x == OC_CW - 1 ? y : y - 1;
+                double nu = oc_u(nx, ny), nv = oc_v(nx, ny);
 
                 ed += oc_abs(du) + oc_abs(dv);
+                if (x == OC_CW - 1 && y == OC_CH - 1)
+                    continue;
                 n += 2;
-                if (oc_abs(du) >= oc_abs((double)u[y * OC_CW + x] - oc_u(nx, ny)))
+                if (oc_abs((double)u[y * OC_CW + x] - nu) < 0.25 * oc_abs(oc_u(x, y) - nu))
                     lost++;
-                if (oc_abs(dv) >= oc_abs((double)v[y * OC_CW + x] - oc_v(nx, ny)))
+                if (oc_abs((double)v[y * OC_CW + x] - nv) < 0.25 * oc_abs(oc_v(x, y) - nv))
                     lost++;
             }
         }

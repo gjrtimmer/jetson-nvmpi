@@ -11,9 +11,10 @@
  *   odd_chroma probe: fmt=NV12 psnr_u=.. psnr_v=.. lastcol=ok|bad
  *
  * lastcol is "ok" when at most ODD_EDGE_LOST_MAX of the last-column/last-row
- * samples decode nearer their interior neighbour than the source sentinel:
- * an encoder that ignores the edge replicates the interior there, while lossy
- * coding only blurs a one-sample sentinel (edge_diff is printed too). Strict
+ * samples stay at their interior neighbour's value (moved less than a quarter
+ * of the way to the source sentinel): an encoder that ignores the edge
+ * replicates the interior there, while lossy coding only blurs a one-sample
+ * sentinel (edge_diff is printed too). Strict
  * mode (NVMPI_TEST_STRICT=1) fails on "bad"; outside it the probe line is the
  * result. The encoder output of YUV420 vs NV12 input is compared the same way.
  * The mock cannot run this (its decoder does not reproduce pixels): the
