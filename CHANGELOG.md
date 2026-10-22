@@ -3,6 +3,17 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.6.4 - 2026-10-22
+
+### Testing
+
+
+**api**
+
+
+- Sanitizer builds give the mock tests headroom: the decoder mock cases run in 4 shards instead of 2, and NVMPI_MOCK_TEST_TIMEOUT is 600 s for sanitizer builds. On CI the ASan decoder shards dropped from ~155 s to ~90 s each, against a 600 s limit (was 300 s, and a loaded runner timed them out) (#153)
+
+
 ## 4.6.3 - 2026-10-22
 
 ### Bug Fixes
