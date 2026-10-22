@@ -15,6 +15,7 @@
  *   reject_*        progressive/gray/garbage fail, decoder stays usable
  *   fault_*         allocation failures end in a clean error path
  *   legacy_*        the copy-out (non-fd) JPEG decoder still works
+ *   enc_*           JPEG encoder put_frame plane size checks (#151)
  *
  * Each case runs in a forked child under alarm() with its stderr captured
  * (case_log.h): an unexpected [libnvmpi][..][E] line fails the case, a
@@ -245,6 +246,7 @@ static int fd_size_churn(int fmt, int b_, int c_)
 }
 
 #include "jpeg_mock_misc.h"
+#include "jpeg_mock_enc.h"
 
 /* ---- table and runner --------------------------------------------------- */
 
@@ -283,6 +285,9 @@ static const struct tcase k_cases[] = {
     { "fault_alloc_pool_mid", "alloc@3", fault_alloc, I420, 3, 0 },
     { "legacy_decode", NEVER_FIRES, legacy_decode, 0, 0, 0 },
     { "legacy_size_guard", NEVER_FIRES, legacy_size_guard, 0, 0, 0 },
+    { "enc_size_refused", NEVER_FIRES, jpeg_enc_size_refused, 0, 0, 0 },
+    { "enc_size_legacy", NEVER_FIRES, jpeg_enc_size_legacy, 0, 0, 0 },
+    { "enc_linesize_short", NEVER_FIRES, jpeg_enc_linesize_short, 0, 0, 0 },
 };
 
 static int run_body(void *arg)

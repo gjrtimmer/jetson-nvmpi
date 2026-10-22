@@ -246,6 +246,10 @@ if(NVMPI_MOCK)
 	# behavioural model (mock/mock_jpegdec.cpp, issue #128).
 	list(REMOVE_ITEM JETSON_MULTIMEDIA_API_SRC ${JETSON_MULTIMEDIA_API_SRC_DIR}/NvJpegDecoder.cpp)
 	set(NVMPI_SRC ${NVMPI_SRC} ${CMAKE_CURRENT_SOURCE_DIR}/mock/mock_jpegdec.cpp)
+	# Same for NvJpegEncoder.cpp: the Tegra libjpeg it needs is absent, so the
+	# real class cannot be created (#151). Minimal mock: mock/mock_jpegenc.cpp.
+	list(REMOVE_ITEM JETSON_MULTIMEDIA_API_SRC ${JETSON_MULTIMEDIA_API_SRC_DIR}/NvJpegEncoder.cpp)
+	set(NVMPI_SRC ${NVMPI_SRC} ${CMAKE_CURRENT_SOURCE_DIR}/mock/mock_jpegenc.cpp)
 endif()
 set(NVMPI_SRC ${NVMPI_SRC} ${JETSON_MULTIMEDIA_API_SRC})
 
