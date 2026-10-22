@@ -73,19 +73,20 @@ static inline uint64_t e_now_ms(void)
 /* Create an encoder and fill its packet pool (npkt / E_NPKT packets, owned by the
  * caller exactly like the FFmpeg wrapper owns them). NULL when creation
  * fails. Pool packets are released by e_destroy(). */
-static inline nvmpictx *e_create_n(const struct ecfg *c, int npkt)
+static inline nvmpictx *e_create_sz(const struct ecfg *c, int npkt, unsigned w,
+                                    unsigned h, nvPixFormat pix)
 {
     nvEncParam p;
     nvmpictx *ctx;
     int i;
 
     memset(&p, 0, sizeof(p));
-    p.width = EW;
-    p.height = EH;
+    p.width = w;
+    p.height = h;
     p.profile = 77;
     p.level = 41;
     p.bitrate = 2000000;
-    p.pixFormat = c->dmabuf ? NV_PIX_NV12 : NV_PIX_YUV420; /* NV12 surfaces */
+    p.pixFormat = pix;
     p.iframe_interval = c->gop;
     p.idr_interval = c->idr;
     p.insert_spspps_idr = (char)c->hdr_at_idr;
@@ -109,6 +110,12 @@ static inline nvmpictx *e_create_n(const struct ecfg *c, int npkt)
         nvmpi_encoder_qEmptyPacket(ctx, pk);
     }
     return ctx;
+}
+
+static inline nvmpictx *e_create_n(const struct ecfg *c, int npkt)
+{
+    return e_create_sz(c, npkt, EW, EH,
+                       c->dmabuf ? NV_PIX_NV12 : NV_PIX_YUV420); /* NV12 surfaces */
 }
 
 static inline nvmpictx *e_create(const struct ecfg *c)

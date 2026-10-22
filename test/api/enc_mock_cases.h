@@ -16,6 +16,7 @@
 #include "enc_mock_drain.h"
 #include "enc_mock_pts.h"
 #include "enc_mock_framesize.h"
+#include "enc_mock_oddchroma.h"
 
 static const struct tcase k_cases[] = {
     { "blocking_h264", NULL, blocking_h264, 0 },
@@ -69,6 +70,16 @@ static const struct tcase k_cases[] = {
      * never-firing fault only marks them as expected */
     { "put_frame_size_refused", "dqbuf@9999", put_frame_size_refused, 0 },
     { "put_frame_size_legacy", NULL, put_frame_size_legacy, 0 },
+    /* odd-size chroma reaches the OUTPUT plane (#154); the refusal is a
+     * logged error, so the never-firing fault only marks it as expected */
+    { "odd_chroma_nv12", NULL, odd_chroma_nv12, 0 },
+    { "odd_chroma_yuv420", NULL, odd_chroma_yuv420, 0 },
+    { "odd_chroma_nv12_zero", NULL, odd_chroma_nv12_zero, 0 },
+    { "odd_chroma_yuv420_zero", NULL, odd_chroma_yuv420_zero, 0 },
+    { "odd_chroma_nv12_floored", NULL, odd_chroma_nv12_floored, 0 },
+    { "odd_chroma_yuv420_floored", NULL, odd_chroma_yuv420_floored, 0 },
+    { "odd_chroma_under", "dqbuf@9999", odd_chroma_under, 0 },
+    { "odd_chroma_driver_floored", NULL, odd_chroma_driver_floored, 0 },
     /* fault matrix: fn == NULL -> fault_case() */
     { "fault_none_control", "dqbuf@9999", NULL, 0 },
     { "fault_open@1", "open@1", NULL, 0 },        /* factory retry recovers */
