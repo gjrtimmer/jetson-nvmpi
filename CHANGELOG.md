@@ -3,6 +3,26 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.6.3 - 2026-10-22
+
+### Bug Fixes
+
+
+**enc**
+
+
+- Odd frame sizes: put_frame copied chroma at the floored NvBuffer geometry, so the last chroma column/row never reached the encoder. With the plane at 641x357 the Tegra encoder also replicated the interior into them. For 4:2:0 input with an odd width or height, the encoder is now configured at the even-rounded size (641x357 is coded as 642x358, as any 4:2:0 encoder must). libnvmpi copies luma w x h with the last column/row replicated into the padding, and chroma at the full (ceil) geometry. Callers whose payload_size covers only the floored chroma keep the floored copy, with the padding replicated. API unchanged; put_frame_fd (caller DMA-BUF) unchanged (#154)
+
+
+### Testing
+
+
+**api**
+
+
+- Odd-size chroma mock cases (the mock models the encoder's edge replication) and an Orin round-trip probe that checks the last chroma column/row arrive (#154)
+
+
 ## 4.6.2 - 2026-10-22
 
 ### Bug Fixes
