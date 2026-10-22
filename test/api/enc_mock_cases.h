@@ -15,6 +15,7 @@
 #include "enc_mock_p010.h"
 #include "enc_mock_drain.h"
 #include "enc_mock_pts.h"
+#include "enc_mock_framesize.h"
 
 static const struct tcase k_cases[] = {
     { "blocking_h264", NULL, blocking_h264, 0 },
@@ -64,6 +65,10 @@ static const struct tcase k_cases[] = {
     { "pts_roundtrip_enc", NULL, pts_roundtrip_enc, 0 },
     { "pts_roundtrip_enc_fd", NULL, pts_roundtrip_enc_fd, 0 },
     { "pts_roundtrip_enc_long", NULL, pts_roundtrip_enc_long, 0 },
+    /* put_frame plane sizes (#150); the refusals are logged errors, so the
+     * never-firing fault only marks them as expected */
+    { "put_frame_size_refused", "dqbuf@9999", put_frame_size_refused, 0 },
+    { "put_frame_size_legacy", NULL, put_frame_size_legacy, 0 },
     /* fault matrix: fn == NULL -> fault_case() */
     { "fault_none_control", "dqbuf@9999", NULL, 0 },
     { "fault_open@1", "open@1", NULL, 0 },        /* factory retry recovers */
