@@ -126,7 +126,7 @@ variables:
   # Images are built by timmertech/jetson-docker. Immutable tags are
   # <tag>-<sha8> of the jetson-docker commit that built them; bump
   # JETSON_DOCKER_SHA to adopt new images (cached by if-not-present).
-  JETSON_DOCKER_SHA: "746b2413"
+  JETSON_DOCKER_SHA: "43214410"
   BUILDER_IMAGE: "harbor.local/jetson/jetson-ffmpeg-builder:${L4T_TAG}-${JETSON_DOCKER_SHA}"
   BUILDER_IMAGE_JP5: "harbor.local/jetson/jetson-ffmpeg-builder-jp5:${L4T_TAG_JP5}-${JETSON_DOCKER_SHA}"
   RUNTIME_IMAGE: "harbor.local/jetson/l4t-jetpack6:${L4T_TAG}-${JETSON_DOCKER_SHA}"
