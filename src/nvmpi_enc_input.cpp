@@ -168,7 +168,7 @@ static int enc_check_frame(const nvFrame *frame, const NvBuffer &buffer,
 //returns -1 then, 0 on success.
 int copyFrameToNvBuf(nvFrame* frame, NvBuffer& buffer, uint32_t w, uint32_t h)
 {
-	uint32_t i, j;
+	uint32_t i;
 	char *dataDst;
 	char *dataSrc;
 	enc_geom g[3];
@@ -183,21 +183,8 @@ int copyFrameToNvBuf(nvFrame* frame, NvBuffer& buffer, uint32_t w, uint32_t h)
 		if (!dataDst)
 			return -1;       /* buffer not CPU-mapped: nothing to copy into */
 		plane.bytesused = 0;
-		for (j = 0; j < g[i].srows; j++)
-		{
-			memcpy(dataDst, dataSrc, g[i].srow);
-			/* replicate the last sample into the padding column(s) */
-			for (size_t k = g[i].srow; g[i].srow >= g[i].bps && k + g[i].bps <= g[i].drow; k += g[i].bps)
-				memcpy(dataDst + k, dataDst + g[i].srow - g[i].bps, g[i].bps);
-			dataDst += plane.fmt.stride;
-			dataSrc += frameLineSize;
-		}
-		/* replicate the last copied row into the padding row(s) */
-		for (j = g[i].srows; g[i].srows > 0 && j < g[i].drows; j++)
-		{
-			memcpy(dataDst, dataDst - plane.fmt.stride, g[i].drow);
-			dataDst += plane.fmt.stride;
-		}
+		nvmpi_enc_copy_pad(dataDst, plane.fmt.stride, dataSrc, frameLineSize,
+		                   g[i].srow, g[i].srows, g[i].drow, g[i].drows, g[i].bps);
 		plane.bytesused = plane.fmt.stride * g[i].drows;
 	}
 	return 0;

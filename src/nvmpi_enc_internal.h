@@ -203,6 +203,35 @@ static inline nvPacket* enc_wait_packet(nvmpi_enc_ctx* ctx)
 	}
 }
 
+//Copy a srow x srows byte block into a drow x drows destination plane and pad
+//the rest (#154): the last copied sample (bps bytes) is replicated into the
+//extra column(s) of every row, then the last copied row into the extra row(s).
+//Shared by put_frame (copyFrameToNvBuf) and put_frame_fd so both pad odd sizes
+//identically. The caller guarantees srow <= drow, srows <= drows, that dst
+//holds dstride * drows bytes and that src holds (srows-1) * sstride + srow
+//bytes (validated before the call); nothing is read or written beyond that.
+//Pure memcpy, no allocation or ownership.
+static inline void nvmpi_enc_copy_pad(char *dst, size_t dstride, const char *src, size_t sstride,
+                                      size_t srow, uint32_t srows, size_t drow, uint32_t drows, size_t bps)
+{
+	uint32_t j;
+	for (j = 0; j < srows; j++)
+	{
+		memcpy(dst, src, srow);
+		/* replicate the last sample into the padding column(s) */
+		for (size_t k = srow; srow >= bps && k + bps <= drow; k += bps)
+			memcpy(dst + k, dst + srow - bps, bps);
+		dst += dstride;
+		src += sstride;
+	}
+	/* replicate the last copied row into the padding row(s) */
+	for (j = srows; srows > 0 && j < drows; j++)
+	{
+		memcpy(dst, dst - dstride, drow);
+		dst += dstride;
+	}
+}
+
 //Forward declarations for functions defined across the split encoder files.
 //encoder_capture_plane_dq_callback: defined in nvmpi_enc_output.cpp; registered
 //with NvVideoEncoder's capture-plane DQ thread in nvmpi_create_encoder()
