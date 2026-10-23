@@ -39,6 +39,13 @@
         fflush(stdout); \
     } while (0)
 
+/* put_frame_fd feed of the DMA-BUF variant (#156), enc_odd_fd_case.h:
+ * allocate + fill the odd-size surface, submit it (so odd_encode serves both
+ * the memory and the fd input). */
+static int odd_fd_surface(int *fd);
+static int odd_fd_feed(nvmpictx *enc, int fd, long pts);
+static int odd_fd_full_chroma;          /* set by odd_fd_surface: ceil chroma held */
+
 /* The coded stream: one packet per frame, kept apart so they can be fed to
  * the decoder one by one the way enc_p010_rt.h does. */
 struct odd_stream {
@@ -56,18 +63,20 @@ static void odd_stream_free(struct odd_stream *s)
     s->count = 0;
 }
 
-/* Encode ODD_FRAMES identical-pattern frames, one packet awaited per frame
+/* via_fd: the frames go in through put_frame_fd (use_dmabuf=1) from one
+ * odd-size NV12 surface instead of put_frame (#156).
+ * Encode ODD_FRAMES identical-pattern frames, one packet awaited per frame
  * (a single-frame stream is not enough for the hardware decoder, which holds
  * its only frame, so the stream mirrors the working hevc round trips), then
  * EOS and drain. 0 ok, 77 skip (encoder create failed), 1 fail (printed). */
-static int odd_encode(nvPixFormat pix, const char *name, struct odd_stream *st)
+static int odd_encode(nvPixFormat pix, const char *name, struct odd_stream *st, int via_fd)
 {
     nvEncParam ep;
     nvmpictx *enc;
     nvPacket pool[ODD_POOL], *g, *tmp;
     struct oc_pic p;
     char x[48];
-    int rc = 1, i, tries, r;
+    int rc = 1, i, tries, r, fd = -1;
 
     memset(st, 0, sizeof(*st));
     memset(pool, 0, sizeof(pool));
@@ -86,6 +95,7 @@ static int odd_encode(nvPixFormat pix, const char *name, struct odd_stream *st)
     ep.hw_preset_type = 1;
     ep.codingType = NV_VIDEO_CodingH264;
     ep.wait_timeout = 2000;
+    ep.use_dmabuf = via_fd;
     enc = nvmpi_create_encoder(&ep);
     if (!enc)
         return 77;
@@ -97,16 +107,24 @@ static int odd_encode(nvPixFormat pix, const char *name, struct odd_stream *st)
         }
         nvmpi_encoder_qEmptyPacket(enc, &pool[i]);
     }
+    if (via_fd && odd_fd_surface(&fd) != 0) {
+        ODD_FAIL(name, "alloc_surface", "");
+        goto out;
+    }
     for (i = 0; i < ODD_FRAMES; i++) {
         g = NULL;
-        if (oc_build(&p, pix, OC_FULL, 1000 + i) != 0) {
-            ODD_FAIL(name, "alloc_frame", "");
-            goto out;
+        if (via_fd) {
+            r = odd_fd_feed(enc, fd, 1000 + i);
+        } else {
+            if (oc_build(&p, pix, OC_FULL, 1000 + i) != 0) {
+                ODD_FAIL(name, "alloc_frame", "");
+                goto out;
+            }
+            r = nvmpi_encoder_put_frame(enc, &p.f);
+            oc_free(&p);
         }
-        r = nvmpi_encoder_put_frame(enc, &p.f);
-        oc_free(&p);
         if (r != 0) {
-            snprintf(x, sizeof(x), "frame=%d put_frame=%d", i, r);
+            snprintf(x, sizeof(x), "frame=%d put_frame%s=%d", i, via_fd ? "_fd" : "", r);
             ODD_FAIL(name, "put_frame", x);
             goto out;
         }
@@ -146,6 +164,8 @@ out:
         ODD_FAIL(name, "encoder_close", "");
         rc = 1;
     }
+    if (fd >= 0)
+        nvmpi_surface_destroy(fd);
     for (i = 0; i < ODD_POOL; i++)
         free(pool[i].payload);
     if (rc)
@@ -266,14 +286,14 @@ static void odd_edges(const char *name, const unsigned char *u, const unsigned c
     fflush(stdout);
 }
 
-static int odd_chroma_run(nvPixFormat pix, const char *name)
+static int odd_chroma_run(nvPixFormat pix, const char *name, int via_fd)
 {
     static unsigned char u[OC_CW * OC_CH], v[OC_CW * OC_CH];
     struct odd_stream st;
     unsigned dw = 0, dh = 0;
     struct oc_cmp c;
     char info[96];
-    int ok, frames = 0, r = odd_encode(pix, name, &st);
+    int ok, frames = 0, r = odd_encode(pix, name, &st, via_fd);
 
     if (r == 0) {
         snprintf(info, sizeof(info), "packets=%d au0_bytes=%zu sps=%d pps=%d idr=%d", st.count,
@@ -290,7 +310,10 @@ static int odd_chroma_run(nvPixFormat pix, const char *name)
         return r;
     oc_compare(u, v, &c);
     odd_edges(name, u, v);
-    ok = c.edge_lost <= ODD_EDGE_LOST_MAX;
+    /* An fd source whose surface holds only the floored chroma (printed by
+     * odd_fd_surface) has no sentinel to lose: the replicated edge equals the
+     * hardware's substitution, so the edge cannot be judged then. */
+    ok = c.edge_lost <= ODD_EDGE_LOST_MAX || (via_fd && !odd_fd_full_chroma);
     printf("odd_chroma probe: fmt=%s psnr_u=%.1f psnr_v=%.1f lastcol=%s edge_lost=%.2f edge_diff=%.1f dec=%ux%u frames=%d %s\n",
            name, c.psnr_u, c.psnr_v, ok ? "ok" : "bad", c.edge_lost, c.edge_diff, dw, dh, frames, info);
     fflush(stdout);        /* the case child _exit()s: unflushed output is lost */
@@ -307,13 +330,15 @@ static int test_encoder_odd_chroma(void)
     int a, b;
 
     setenv("NVMPI_ENC_TRACE", "1", 1);        /* libnvmpi prints the copy decision */
-    a = odd_chroma_run(NV_PIX_NV12, "NV12");
-    b = odd_chroma_run(NV_PIX_YUV420, "YUV420");
+    a = odd_chroma_run(NV_PIX_NV12, "NV12", 0);
+    b = odd_chroma_run(NV_PIX_YUV420, "YUV420", 0);
 
     if (a == 1 || b == 1)
         return 1;
     return (a == 77 && b == 77) ? 77 : 0;
 #endif
 }
+
+#include "enc_odd_fd_case.h"
 
 #endif /* NVMPI_TEST_ENC_ODD_CASE_H */

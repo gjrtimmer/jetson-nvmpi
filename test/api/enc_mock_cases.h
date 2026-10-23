@@ -17,6 +17,7 @@
 #include "enc_mock_pts.h"
 #include "enc_mock_framesize.h"
 #include "enc_mock_oddchroma.h"
+#include "enc_mock_oddfd.h"
 
 static const struct tcase k_cases[] = {
     { "blocking_h264", NULL, blocking_h264, 0 },
@@ -79,6 +80,9 @@ static const struct tcase k_cases[] = {
     { "odd_chroma_nv12_floored", NULL, odd_chroma_nv12_floored, 0 },
     { "odd_chroma_yuv420_floored", NULL, odd_chroma_yuv420_floored, 0 },
     { "odd_chroma_under", "dqbuf@9999", odd_chroma_under, 0 },
+    /* the same through put_frame_fd (#156); the refusals are logged errors */
+    { "odd_chroma_fd", NULL, odd_chroma_fd, 0 },
+    { "odd_fd_unregistered", "dqbuf@9999", odd_fd_unregistered, 0 },
     /* fault matrix: fn == NULL -> fault_case() */
     { "fault_none_control", "dqbuf@9999", NULL, 0 },
     { "fault_open@1", "open@1", NULL, 0 },        /* factory retry recovers */

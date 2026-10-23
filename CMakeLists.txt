@@ -390,7 +390,8 @@ if(BUILD_TESTING)
   # nvbufsurface.h (when present): the fd2 case compares against planeParams (#138).
   target_include_directories(test_api PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${JETSON_MULTIMEDIA_API_INCLUDE_DIR} ${CUDA_INCLUDE_DIR})
-  target_link_libraries(test_api PRIVATE nvmpi Threads::Threads)
+  # LIB_NVBUFSURFACE: the odd-size put_frame_fd case fills a surface (#156).
+  target_link_libraries(test_api PRIVATE nvmpi ${LIB_NVBUFSURFACE} Threads::Threads)
   target_compile_definitions(test_api PRIVATE NVMPI_HAVE_AV1=${NVMPI_HAVE_AV1})
   if(NVMPI_MOCK)
     # The JPEG fd cases run (instead of skipping on the missing NVJPG node).
@@ -436,8 +437,10 @@ if(BUILD_TESTING)
       TIMEOUT ${NVMPI_MOCK_TEST_TIMEOUT})
     # Encoder data path, teardown and fault matrix (mock-only).
     add_executable(test_api_enc_mock test/api/test_api_enc_mock.c)
-    target_include_directories(test_api_enc_mock PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(test_api_enc_mock PRIVATE nvmpi Threads::Threads)
+    # nvbufsurface.h: the odd-size put_frame_fd cases fill a surface (#156).
+    target_include_directories(test_api_enc_mock PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+      ${JETSON_MULTIMEDIA_API_INCLUDE_DIR} ${CUDA_INCLUDE_DIR})
+    target_link_libraries(test_api_enc_mock PRIVATE nvmpi ${LIB_NVBUFSURFACE} Threads::Threads)
     # Encoder suite in 3 shards (NVMPI_TEST_SHARD=k/n, see case_log.h): the
     # ASan job is bound by its longest ctest, so one big suite is split.
     set(NVMPI_ENC_SHARDS 3)
