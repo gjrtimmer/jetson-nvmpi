@@ -3,6 +3,56 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.6.5 - 2026-10-23
+
+### Bug Fixes
+
+
+**enc**
+
+
+- Odd frame sizes through put_frame_fd (use_dmabuf): the encoder kept the caller's odd w x h, so the Tegra encoder replaced the last chroma column/row with its own values. On NvUtils builds the DMA-BUF encoder is now configured at the even-rounded size, like put_frame since 4.6.3. The staging copy reads the caller's surface at its full geometry (chroma ceil(w/2) x ceil(h/2)) and replicates the last column/row into the padding. An fd that is not an NvBufSurface (dup'd or foreign) cannot be padded: at an odd size put_frame_fd refuses it with NVMPI_ERR_INVAL before taking an OUTPUT slot. Legacy nvbuf_utils builds refuse use_dmabuf with an odd width or height at create. API unchanged (#156)
+
+
+**jpeg**
+
+
+- Drop nested /* in SOF comment (-Wcomment)
+
+
+### Build
+
+
+**cmake**
+
+
+- Non-/usr prefix note as STATUS, not WARNING
+
+
+### CI
+
+
+- Bump JETSON_DOCKER_SHA to 43214410: the deb-test image preinstalls the dependencies of nvidia-l4t-multimedia and libjpeg-turbo8, so test:deb runs faster
+
+
+### Refactor
+
+
+**enc**
+
+
+- Share the copy-and-pad row loop between put_frame and put_frame_fd
+
+
+### Testing
+
+
+**api**
+
+
+- Odd-size put_frame_fd mock cases (padded copy, and an unregistered fd refused) and an Orin round trip that checks the last chroma column/row arrive (#156)
+
+
 ## 4.6.4 - 2026-10-22
 
 ### Testing
