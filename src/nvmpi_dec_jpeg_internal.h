@@ -138,7 +138,7 @@ int jpegFdPutPacket(nvmpictx_jpeg *ctx, nvPacket *packet);
  * nvmpi_dec_jpeg_fd.cpp. */
 void jpegFdClose(nvmpictx_jpeg *ctx);
 
-/* On success *width/*height receive the displayed size from the SOF header.
+/* On success *width and *height receive the displayed size from the SOF header.
  * True if the JPEG is 3-component baseline/extended-sequential (SOF0/SOF1);
  * logs and returns false for progressive, grayscale, CMYK or malformed
  * input. Bounds-checked (untrusted bytes). Defined in nvmpi_dec_jpeg_sof.cpp. */
