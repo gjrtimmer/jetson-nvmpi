@@ -72,6 +72,24 @@ int nvmpi_encoder_put_frame_fd(nvmpictx* h,
 	if (dmabuf_fd >= 0 && !enc_can_admit(ctx))
 		return NVMPI_ERR_EAGAIN;
 
+#ifdef WITH_NVUTILS
+	/* Odd w x h: the encoder runs at the even-rounded coded size, so only the
+	 * staging copy below can feed it (it pads). The direct pass-through used
+	 * for unregistered fds (decoder dup'd fds) would hand the encoder a
+	 * w x h surface it reads as W' x H' (out-of-bounds chroma, #156): refuse
+	 * before a slot is taken, so nothing is queued or leaked. */
+	if (dmabuf_fd >= 0 && (ctx->coded_width != ctx->width || ctx->coded_height != ctx->height)) {
+		NvBufSurface *probe = NULL;
+		if (NvBufSurfaceFromFd(dmabuf_fd, (void **)(&probe)) != 0) {
+			NVMPI_LOG(NVMPI_LOG_ERROR, "put_frame_fd: fd %d is not an NvBufSurface "
+				  "(dup'd or foreign) and cannot be padded: an odd %ux%u "
+				  "picture is not accepted by direct pass-through",
+				  dmabuf_fd, ctx->width, ctx->height);
+			return NVMPI_ERR_INVAL;
+		}
+	}
+#endif
+
 	/* Buffer acquisition: same index-then-dqBuffer pattern as put_frame.
 	 * First N frames use sequential indices; after that, reclaim a used
 	 * buffer. Blocking mode waits indefinitely; non-blocking returns
@@ -116,8 +134,10 @@ int nvmpi_encoder_put_frame_fd(nvmpictx* h,
 		if (internal_fd < 0) {
 			NvBufSurf::NvCommonAllocateParams cParams;
 			memset(&cParams, 0, sizeof(cParams));
-			cParams.width = ctx->width;
-			cParams.height = ctx->height;
+			/* Coded (even-rounded) size, not the caller's: an odd w x h
+			 * frame is padded to it by the copy below (#156). */
+			cParams.width = ctx->coded_width;
+			cParams.height = ctx->coded_height;
 			cParams.layout = NVBUF_LAYOUT_PITCH;
 			/* 10-bit input (HEVC Main10, P010M OUTPUT plane) needs a
 			 * 16-bit-per-sample surface; 8-bit encoders keep NV12. */
@@ -216,44 +236,63 @@ int nvmpi_encoder_put_frame_fd(nvmpictx* h,
 					return -1;
 				}
 
-				/* Copy plane-by-plane to handle stride diffs.
+				/* Copy plane-by-plane at the caller's w x h geometry
+				 * (luma h rows, chroma ceil(h/2) rows of ceil(w/2)
+				 * samples) and pad the even-rounded plane by replicating
+				 * the last column/row, so no stale bytes reach the
+				 * encoder and the hardware does not substitute its own
+				 * edge (#156, same as put_frame #154).
 				 * Destination mapped by mapOutputBuffers during
 				 * lazy alloc — nvBuffer->planes[j].data valid. */
+				/* The internal surface's own pitch is the row stride of
+				 * the mapped data; the V4L2 plane format's stride is the
+				 * same on the hardware but is only the driver's view. */
+				NvBufSurface *dst_surf = NULL;
+				if (NvBufSurfaceFromFd(internal_fd, (void **)(&dst_surf)) != 0)
+					dst_surf = NULL;
 				for (uint32_t j = 0; j < nvBuffer->n_planes; j++) {
-					uint8_t *src_ptr = (uint8_t *)
-						src_surf->surfaceList[0].mappedAddr.addr[j];
-					uint8_t *dst_ptr = (uint8_t *)
-						nvBuffer->planes[j].data;
-					unsigned int src_pitch =
-						src_surf->surfaceList[0].planeParams.pitch[j];
-					unsigned int src_height =
-						src_surf->surfaceList[0].planeParams.height[j];
-					unsigned int dst_stride =
-						nvBuffer->planes[j].fmt.stride;
-					/* Never write more rows than the destination plane
-					 * has (a taller source surface would overflow it). */
-					if (src_height > nvBuffer->planes[j].fmt.height)
-						src_height = nvBuffer->planes[j].fmt.height;
-					unsigned int copy_w =
-						src_pitch < dst_stride ? src_pitch : dst_stride;
+					const NvBuffer::NvBufferPlane &dp = nvBuffer->planes[j];
+					const NvBufSurfacePlaneParams &sp =
+						src_surf->surfaceList[0].planeParams;
+					bool sub = j > 0 && (uint64_t)dp.fmt.width * 2 == nvBuffer->planes[0].fmt.width;
+					bool subh = j > 0 && (uint64_t)dp.fmt.height * 2 == nvBuffer->planes[0].fmt.height;
+					size_t bps = dp.fmt.bytesperpixel;
+					size_t drow = bps * (size_t)dp.fmt.width;
+					uint32_t drows = dp.fmt.height;
+					/* Caller geometry (ceil for subsampled chroma; NV12
+					 * chroma is interleaved CbCr, bps already counts it). */
+					size_t srow = bps * (size_t)(sub ? (ctx->width + 1) / 2 : ctx->width);
+					uint32_t srows = subh ? (ctx->height + 1) / 2 : ctx->height;
+					/* Clamp to what the source surface really holds: a
+					 * source with floored chroma gives fewer rows/columns,
+					 * the rest is replicated. Never read past its pitch,
+					 * plane width or height, never write past the plane. */
+					size_t swidth = (size_t)sp.width[j] * sp.bytesPerPix[j];
+					if (srow > sp.pitch[j]) srow = sp.pitch[j];
+					if (srow > swidth) srow = swidth - swidth % bps;
+					if (srow > drow) srow = drow;
+					if (srows > sp.height[j]) srows = sp.height[j];
+					if (srows > drows) srows = drows;
+					size_t dstride = dst_surf ?
+						dst_surf->surfaceList[0].planeParams.pitch[j] : dp.fmt.stride;
+					if (drow > dstride) {
+						NVMPI_LOG(NVMPI_LOG_ERROR,
+							  "put_frame_fd: plane %u row exceeds the OUTPUT stride", j);
+						NvBufSurfaceUnMap(src_surf, 0, -1);
+						return -1;
+					}
 
-					for (unsigned int y = 0; y < src_height; y++)
-						memcpy(dst_ptr + (size_t)y * dst_stride,
-						       src_ptr + (size_t)y * src_pitch,
-						       copy_w);
-
-					nvBuffer->planes[j].bytesused =
-						dst_stride * src_height;
+					nvmpi_enc_copy_pad((char *)dp.data, dstride,
+						(const char *)src_surf->surfaceList[0].mappedAddr.addr[j],
+						sp.pitch[j], srow, srows, drow, drows, bps);
+					nvBuffer->planes[j].bytesused = dp.fmt.stride * drows;
 				}
 
 				NvBufSurfaceUnMap(src_surf, 0, -1);
 
 				/* Flush CPU writes so encoder's VIC blit sees
 				 * the copied data. */
-				NvBufSurface *dst_surf = NULL;
-				ret = NvBufSurfaceFromFd(internal_fd,
-							 (void **)(&dst_surf));
-				if (ret == 0)
+				if (dst_surf)
 					NvBufSurfaceSyncForDevice(dst_surf, 0, -1);
 
 				/* Point V4L2 planes at the internal fd. */

@@ -203,6 +203,16 @@ static inline nvPacket* enc_wait_packet(nvmpi_enc_ctx* ctx)
 	}
 }
 
+//1 when put_frame_fd stages the caller's surface through a CPU copy into an
+//internal coded-size surface (NvUtils), so it can pad an odd w x h to the
+//even coded size (#156); 0 on legacy builds, which pass the fd straight
+//through and cannot (odd DMA-BUF sizes are refused at create there).
+#ifdef WITH_NVUTILS
+#define NVMPI_ENC_FD_PADS 1
+#else
+#define NVMPI_ENC_FD_PADS 0
+#endif
+
 //Copy a srow x srows byte block into a drow x drows destination plane and pad
 //the rest (#154): the last copied sample (bps bytes) is replicated into the
 //extra column(s) of every row, then the last copied row into the extra row(s).

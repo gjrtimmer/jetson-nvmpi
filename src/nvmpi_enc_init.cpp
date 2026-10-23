@@ -164,13 +164,15 @@ nvmpictx* nvmpi_create_encoder(nvEncParam* param)
 	//NVMPI_ENC_CHUNK_SIZE — the same constant the wrapper uses for packets
 	//4:2:0 cannot signal an odd size: the encoder codes the even-rounded
 	//picture anyway, and configured at an odd size it substitutes its own
-	//values for the last chroma column/row instead of ours (#154). So memory
+	//values for the last chroma column/row instead of ours (#154). So 4:2:0
 	//input is configured at the even-rounded size and put_frame pads the
-	//extra column/row. Not for lossless (4:4:4, no subsampling) and not for
-	//external DMA-BUF input (surfaces of the caller's w x h, put_frame_fd).
+	//extra column/row; so does put_frame_fd on NvUtils (CPU staging copy into
+	//an internal coded-size surface, #156). Legacy put_frame_fd passes the fd
+	//through and cannot pad: nvmpi_enc_check_input refuses odd sizes there.
+	//Not for lossless (4:4:4, no subsampling).
 	ctx->coded_width = ctx->width;
 	ctx->coded_height = ctx->height;
-	if (!ctx->dmabuf_external && !(ctx->enableLossless && param->codingType == NV_VIDEO_CodingH264))
+	if ((NVMPI_ENC_FD_PADS || !ctx->dmabuf_external) && !(ctx->enableLossless && param->codingType == NV_VIDEO_CodingH264))
 	{
 		ctx->coded_width = (ctx->width + 1) & ~1u;
 		ctx->coded_height = (ctx->height + 1) & ~1u;

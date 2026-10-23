@@ -512,8 +512,8 @@ extern "C" {
 	//linesize*(h/2), as older wrappers do) is accepted: its last chroma
 	//column/row is padded by replication; declaring less than that is refused.
 	//With payload_size 0 the linesize decides (below the ceil row bytes =
-	//floored) and the caller guarantees the rows. put_frame_fd is unchanged:
-	//the encoder keeps the caller's size there.
+	//floored) and the caller guarantees the rows. put_frame_fd follows the
+	//same contract (see there).
 	int nvmpi_encoder_put_frame(nvmpictx* ctx, nvFrame* frame);
 	//get filled packet from encoder
 	//When wait=false: non-blocking, returns -1 immediately if no packet ready.
@@ -622,6 +622,20 @@ extern "C" {
 	//Returns 0 on success, NVMPI_ERR_EAGAIN when no packet is spare (both
 	//modes) or, non-blocking, no buffer available, negative on error or if
 	//already flushing. Same back-pressure rule as nvmpi_encoder_put_frame.
+	//Odd sizes (#156): create the encoder at the real w x h (use_dmabuf=1) and
+	//pass surfaces of that size. As with put_frame, 4:2:0 cannot signal an odd
+	//size, so the encoder is configured at the even-rounded size and the
+	//bitstream is that size (641x357 is coded as 642x358). The surface is
+	//copied (CPU) into an internal even-rounded one: luma w x h and chroma
+	//ceil(w/2) x ceil(h/2) are taken (as far as the source surface holds
+	//them; a source with only floored chroma has its last chroma column/row
+	//replicated), and the extra last column and row are filled by replicating
+	//the last real one. Because that needs the copy, an odd size is only
+	//accepted for a surface registered in the NvBufSurface table (from
+	//nvmpi_surface_alloc_for_enc / nvmpi_surface_alloc): a dup'd or foreign fd
+	//(direct pass-through) is refused with NVMPI_ERR_INVAL and queues nothing.
+	//Legacy (nvbuf_utils, JetPack 4) builds have no copy: nvmpi_create_encoder
+	//returns NULL for use_dmabuf=1 with an odd width or height there.
 	int nvmpi_encoder_put_frame_fd(nvmpictx* ctx,
 		int dmabuf_fd, int width, int height, int pitch,
 		int64_t timestamp);

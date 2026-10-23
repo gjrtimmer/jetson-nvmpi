@@ -30,6 +30,7 @@
 //    into a 10-bit profile and this layer does not convert samples.
 //  - P010 through the external DMA-BUF path needs an NvUtils 10-bit surface
 //    (NVBUF_COLOR_FORMAT_NV12_10LE); legacy nvbuf_utils builds cannot do it.
+//  - DMA-BUF input of an odd w or h needs the NvUtils staging copy (#156).
 bool nvmpi_enc_check_input(const nvEncParam* param)
 {
 	bool p010 = (param->pixFormat == NV_PIX_P010);
@@ -47,6 +48,13 @@ bool nvmpi_enc_check_input(const nvEncParam* param)
 #ifndef WITH_NVUTILS
 	if (p010 && param->use_dmabuf) {
 		NVMPI_LOG(NVMPI_LOG_ERROR, "P010 DMA-BUF encode input requires the NvUtils buffer API (JetPack 5+)");
+		return false;
+	}
+	/* Legacy put_frame_fd passes the caller's fd straight to the encoder: there
+	 * is no staging copy to pad an odd w x h to the even coded size, and the
+	 * hardware would substitute its own last chroma column/row (#156). */
+	if (param->use_dmabuf && ((param->width | param->height) & 1)) {
+		NVMPI_LOG(NVMPI_LOG_ERROR, "DMA-BUF encode input at an odd size requires the NvUtils buffer API (JetPack 5+)");
 		return false;
 	}
 #endif
