@@ -107,9 +107,16 @@ static int odd_encode(nvPixFormat pix, const char *name, struct odd_stream *st, 
         }
         nvmpi_encoder_qEmptyPacket(enc, &pool[i]);
     }
-    if (via_fd && odd_fd_surface(&fd) != 0) {
-        ODD_FAIL(name, "alloc_surface", "");
-        goto out;
+    if (via_fd) {
+        r = odd_fd_surface(&fd);
+        if (r == 77) {            /* no nvbufsurface.h: cannot run, not a failure */
+            rc = 77;
+            goto out;
+        }
+        if (r != 0) {
+            ODD_FAIL(name, "alloc_surface", "");
+            goto out;
+        }
     }
     for (i = 0; i < ODD_FRAMES; i++) {
         g = NULL;

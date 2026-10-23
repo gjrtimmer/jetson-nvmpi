@@ -29,6 +29,12 @@
 #endif
 #endif
 
+/* A build that must run this case (the deb hw job) defines NVMPI_REQUIRE_SURF:
+ * a missing header is then a build error, never a case that cannot run. */
+#if defined(NVMPI_REQUIRE_SURF) && !defined(ODDFD_HAVE_SURF)
+#error "NVMPI_REQUIRE_SURF: nvbufsurface.h not found, add -I<jetson_multimedia_api>/include"
+#endif
+
 #ifdef ODDFD_HAVE_SURF
 
 /* Allocate the 641x357 NV12 surface, print its real plane geometry and fill
@@ -74,11 +80,11 @@ static int odd_fd_surface(int *fd)
     return 0;
 }
 
-#else  /* legacy nvbuf_utils build: no NvBufSurface to fill, the case fails */
+#else  /* no nvbufsurface.h (legacy nvbuf_utils): no surface to fill, SKIP */
 static int odd_fd_surface(int *fd)
 {
     *fd = -1;
-    return -1;
+    return 77;
 }
 #endif
 

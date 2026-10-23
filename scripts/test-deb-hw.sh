@@ -66,9 +66,18 @@ ldconfig
 # from the package's system path, which the ldd check below asserts.
 export LD_LIBRARY_PATH="/usr/lib/aarch64-linux-gnu/nvidia:/usr/lib/aarch64-linux-gnu/tegra"
 
-# Only the pkg-config flags: nothing from a build tree can sneak in.
+# Only the pkg-config flags plus the NVIDIA Multimedia API: nothing from a
+# build tree can sneak in. The odd-size put_frame_fd case (#156) allocates a
+# real NvBufSurface, so it needs nvbufsurface.h and -lnvbufsurface, as the
+# in-tree build gets them from CMakeLists.txt. NVMPI_REQUIRE_SURF turns a
+# missing header into a compile error instead of a case that cannot run.
+MM_API="${JETSON_MULTIMEDIA_API_DIR:-/usr/src/jetson_multimedia_api}"
+[ -f "${MM_API}/include/nvbufsurface.h" ] \
+    || { echo "[FAIL] ${MM_API}/include/nvbufsurface.h missing (set JETSON_MULTIMEDIA_API_DIR)" >&2; exit 1; }
 # shellcheck disable=SC2046 # pkg-config output must word-split
-gcc -O1 -o "${WORK}/test_api" "${ROOT}/test/api/test_api.c" $(pkg-config --cflags --libs nvmpi) -pthread
+gcc -O1 -DNVMPI_REQUIRE_SURF -o "${WORK}/test_api" "${ROOT}/test/api/test_api.c" \
+    $(pkg-config --cflags --libs nvmpi) -I"${MM_API}/include" \
+    -L/usr/lib/aarch64-linux-gnu/nvidia -L/usr/lib/aarch64-linux-gnu/tegra -lnvbufsurface -pthread
 
 ldd "${WORK}/test_api" | tee "${WORK}/ldd.txt"
 ! grep -F 'not found' "${WORK}/ldd.txt" || { echo "[FAIL] unresolved libs" >&2; exit 1; }
