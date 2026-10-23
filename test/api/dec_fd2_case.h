@@ -21,6 +21,12 @@
 #endif
 #endif
 
+/* NVMPI_REQUIRE_SURF (the deb hw job): the allocator comparison must run,
+ * so a missing header is a build error, not a silently skipped check. */
+#if defined(NVMPI_REQUIRE_SURF) && !defined(DECFD2_HAVE_SURF)
+#error "NVMPI_REQUIRE_SURF: nvbufsurface.h not found, add -I<jetson_multimedia_api>/include"
+#endif
+
 #define DECFD2_FAIL(what) do { fprintf(stderr, "dec_fd2 FAIL %s:%d: %s\n", __func__, __LINE__, (what)); return 1; } while (0)
 
 #ifdef DECFD2_HAVE_SURF
