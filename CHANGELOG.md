@@ -33,6 +33,7 @@ including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
 
 - Bump JETSON_DOCKER_SHA to 43214410: the deb-test image preinstalls the dependencies of nvidia-l4t-multimedia and libjpeg-turbo8, so test:deb runs faster
+- The release hw deb test builds test_api with the Jetson Multimedia API headers and libnvbufsurface, with NVMPI_REQUIRE_SURF: a missing nvbufsurface.h is now a build error instead of a silently skipped or falsely failed NvBufSurface case (#156)
 
 
 ### Refactor
