@@ -484,8 +484,10 @@ if(NOT NVMPI_DEB_VERSION)
 	set(NVMPI_DEB_VERSION "${PROJECT_VERSION}-1")
 endif()
 if(NOT CMAKE_INSTALL_PREFIX STREQUAL "/usr")
-	message(WARNING "CMAKE_INSTALL_PREFIX is '${CMAKE_INSTALL_PREFIX}', not /usr: "
-		"nvmpi.pc in the .deb will carry the wrong prefix. Configure with -DCMAKE_INSTALL_PREFIX=/usr to package.")
+	# STATUS, not WARNING: dev/CI builds use other prefixes by design;
+	# scripts/package-deb.sh always configures /usr.
+	message(STATUS "CMAKE_INSTALL_PREFIX is '${CMAKE_INSTALL_PREFIX}', not /usr: "
+		"nvmpi.pc in a .deb from this tree would carry the wrong prefix (package via scripts/package-deb.sh).")
 endif()
 
 set(CPACK_GENERATOR "DEB")
