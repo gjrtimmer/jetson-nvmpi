@@ -84,6 +84,7 @@ void dec_capture_loop_fcn(void *arg)
 			switch (v4l2Event.type)
 			{
 				case V4L2_EVENT_RESOLUTION_CHANGE:
+					tm.phase("resolution_event_in_loop");   /* NVMPI_TIMING=1 only */
 					respondToResolutionEvent(v4l2Format, v4l2Crop, ctx);
 					continue;
 			}
