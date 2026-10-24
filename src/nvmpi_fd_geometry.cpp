@@ -8,8 +8,8 @@
 #include "nvUtils2NvBuf.h"
 #include <string.h>
 
-bool nvmpi_fd_fill_geometry(nvPixFormat fmt, nvmpi_frame_buffer *fb,
-                            nvmpi_fd_frame *fr)
+bool nvmpi_fd_fill_geometry_surf(nvPixFormat fmt, int dma_fd,
+                                 const NvBufSurface *surf, nvmpi_fd_frame *fr)
 {
 	/* NV12 and P010 are semi-planar (Y + interleaved UV); YUV420 is 3 planes */
 	const uint32_t want = (fmt == NV_PIX_YUV420) ? 3 : 2;
@@ -17,7 +17,7 @@ bool nvmpi_fd_fill_geometry(nvPixFormat fmt, nvmpi_frame_buffer *fb,
 	uint64_t total;
 
 #ifdef WITH_NVUTILS
-	const NvBufSurfaceParams &sp = fb->dst_dma_surface->surfaceList[0];
+	const NvBufSurfaceParams &sp = surf->surfaceList[0];
 	const NvBufSurfacePlaneParams &pp = sp.planeParams;
 	num_planes = pp.num_planes;
 	/* dataSize can be 0 on some surface types: fall back to the end of the
@@ -26,8 +26,9 @@ bool nvmpi_fd_fill_geometry(nvPixFormat fmt, nvmpi_frame_buffer *fb,
 	if (total == 0 && num_planes >= 1 && num_planes <= 3)
 		total = (uint64_t)pp.offset[num_planes - 1] + pp.psize[num_planes - 1];
 #else
+	(void)surf; /* legacy API reads the params by fd */
 	NvBufferParams pp;
-	int ret = NvBufferGetParams(fb->dst_dma_fd, &pp);
+	int ret = NvBufferGetParams(dma_fd, &pp);
 	if (ret < 0) {
 		NVMPI_LOG_SUB(NVMPI_LOG_ERROR, "fd", "NvBufferGetParams failed (code=%d)", ret);
 		return false;
@@ -64,9 +65,16 @@ bool nvmpi_fd_fill_geometry(nvPixFormat fmt, nvmpi_frame_buffer *fb,
 		fr->offset[i] = offset[i];
 	}
 	fr->struct_size = sizeof(*fr);
-	fr->fd = fb->dst_dma_fd;
+	fr->fd = dma_fd;
 	fr->format = fmt;
 	fr->num_planes = want;
 	fr->size = total;
 	return true;
+}
+
+bool nvmpi_fd_fill_geometry(nvPixFormat fmt, nvmpi_frame_buffer *fb,
+                            nvmpi_fd_frame *fr)
+{
+	return nvmpi_fd_fill_geometry_surf(fmt, fb->dst_dma_fd,
+	                                   fb->dst_dma_surface, fr);
 }

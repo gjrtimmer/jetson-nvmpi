@@ -14,3 +14,9 @@
  * implausible layout. NV12/P010 need 2 planes, YUV420 needs 3. */
 bool nvmpi_fd_fill_geometry(nvPixFormat fmt, nvmpi_frame_buffer *fb,
                             nvmpi_fd_frame *fr);
+
+/* The same from a registered surface: surf is the NvBufSurface behind dma_fd
+ * (NvBufSurfaceFromFd; unused on legacy nvbuf_utils builds, which read the
+ * params by fd). The fd is stored in fr->fd. */
+bool nvmpi_fd_fill_geometry_surf(nvPixFormat fmt, int dma_fd,
+                                 const NvBufSurface *surf, nvmpi_fd_frame *fr);

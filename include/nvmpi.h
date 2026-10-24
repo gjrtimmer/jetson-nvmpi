@@ -676,6 +676,26 @@ extern "C" {
 	//(no-op). Returns 0 on success, -1 on NvBufferDestroy failure.
 	int nvmpi_surface_destroy(int dmabuf_fd);
 
+	//Plane layout of a registered pitch-linear surface (#157): one from
+	//nvmpi_surface_alloc / nvmpi_surface_alloc_for_enc, or a decoder / JPEG
+	//pool fd. Read-only: the fd is not retained, dup'd or closed, and the
+	//surface stays owned by its allocator.
+	//Caller sets frame->struct_size to sizeof(nvmpi_fd_frame) (at least
+	//NVMPI_FD_FRAME_V1_SIZE); the library fills min(struct_size, sizeof)
+	//bytes and writes that size back, like nvmpi_decoder_get_frame_fd2.
+	//Filled: fd (= dmabuf_fd), width/height (allocated size of plane 0),
+	//format (NV12 -> NV_PIX_NV12, YUV420 -> NV_PIX_YUV420, NV12_10LE ->
+	//NV_PIX_P010; the _ER/_709/_2020 colorimetry variants map the same),
+	//num_planes (2 or 3), pitch[], offset[] (bytes from the start of the
+	//buffer), size (whole buffer, or the end of the last plane when the
+	//allocator reports none); timestamp and flags are 0. The pitch is the
+	//allocator's, not the width: e.g. 642 wide can give 768.
+	//Returns 0 on success, NVMPI_ERR_INVAL (nothing written) for a NULL
+	//frame, a struct_size below NVMPI_FD_FRAME_V1_SIZE, dmabuf_fd < 0, an fd
+	//the allocator does not know (dup'd, closed, foreign), any other colour
+	//format, or an implausible layout.
+	int nvmpi_surface_get_layout(int dmabuf_fd, nvmpi_fd_frame *frame);
+
 	//Copy NV12 frame data from an unregistered DMA-BUF fd (e.g. dup'd
 	//from decoder DRM_PRIME output) into a registered NvBufSurface fd.
 	//Uses mmap + CPU copy + DMA-BUF sync. dst_fd must have been

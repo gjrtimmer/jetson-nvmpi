@@ -16,6 +16,9 @@
  * handle during its internal VIC format conversion; VIDEO_CONVERT
  * buffers cause NVMAP_IOC_PARAMETERS failures at the encoder.
  *
+ * nvmpi_surface_get_layout (#157) reports the plane layout of any registered
+ * surface (these allocations, decoder and JPEG pool fds).
+ *
  * Supports both buffer API generations:
  *   - NvUtils/NvBufSurface (WITH_NVUTILS, JetPack 5+)
  *   - Legacy nvbuf_utils (JetPack 4)
@@ -23,6 +26,7 @@
 #include "nvmpi.h"
 #include "nvUtils2NvBuf.h"
 #include "nvmpi_alloc.h"
+#include "nvmpi_fd_geometry.h"
 #include "nvmpi_log.h"
 #include <errno.h>
 #include <string.h>
@@ -104,6 +108,91 @@ int nvmpi_surface_alloc_for_enc(unsigned int width, unsigned int height,
 	int *dmabuf_fd)
 {
 	return nvmpi_surface_alloc_internal(width, height, dmabuf_fd, 1);
+}
+
+/* Map the surface colour format to nvPixFormat. The colorimetry variants
+ * (_ER, _709, _2020) share the plane layout of the base format and are what
+ * decoder pool surfaces carry, so they map to the same value. Anything else
+ * (RGB, 12-bit, ...) is not a layout this API describes. */
+#ifdef WITH_NVUTILS
+#define NVMPI_CF(n) NVBUF_COLOR_FORMAT_##n
+#else
+#define NVMPI_CF(n) NvBufferColorFormat_##n
+#endif
+static bool nvmpi_surface_pix_format(int cf, nvPixFormat *out)
+{
+	switch (cf) {
+	case NVMPI_CF(NV12): case NVMPI_CF(NV12_ER): case NVMPI_CF(NV12_709):
+	case NVMPI_CF(NV12_709_ER): case NVMPI_CF(NV12_2020):
+		*out = NV_PIX_NV12;
+		return true;
+	case NVMPI_CF(YUV420): case NVMPI_CF(YUV420_ER): case NVMPI_CF(YUV420_709):
+	case NVMPI_CF(YUV420_709_ER): case NVMPI_CF(YUV420_2020):
+		*out = NV_PIX_YUV420;
+		return true;
+#ifdef WITH_NVUTILS
+	/* 10-bit constants exist only in the NvUtils API (JetPack 5+) */
+	case NVMPI_CF(NV12_10LE): case NVMPI_CF(NV12_10LE_ER):
+	case NVMPI_CF(NV12_10LE_709): case NVMPI_CF(NV12_10LE_709_ER):
+	case NVMPI_CF(NV12_10LE_2020):
+		*out = NV_PIX_P010;
+		return true;
+#endif
+	default:
+		return false;
+	}
+}
+
+/* Public (#157): plane layout of a registered surface. Read-only: no
+ * retention, no fd close, no VIC transform (so no nvmpi_transform_mutex).
+ * Everything is validated into a local first so *frame is untouched on
+ * error. */
+int nvmpi_surface_get_layout(int dmabuf_fd, nvmpi_fd_frame *frame)
+{
+	/* Reject a missing/short struct up front: a v0 caller must never get a
+	 * write past its own struct_size. */
+	if (!frame || frame->struct_size < NVMPI_FD_FRAME_V1_SIZE || dmabuf_fd < 0)
+		return NVMPI_ERR_INVAL;
+
+	NvBufSurface *surf = NULL;
+	nvPixFormat fmt;
+	uint32_t w, h;
+#ifdef WITH_NVUTILS
+	/* Fails for dup'd or foreign fds (the fd->surface table only knows fds
+	 * issued by the allocator), which is the intended INVAL. */
+	if (NvBufSurfaceFromFd(dmabuf_fd, (void **)&surf) != 0 || !surf ||
+	    !surf->surfaceList || surf->numFilled < 1)
+		return NVMPI_ERR_INVAL;
+	const NvBufSurfaceParams &sp = surf->surfaceList[0];
+	if (!nvmpi_surface_pix_format((int)sp.colorFormat, &fmt))
+		return NVMPI_ERR_INVAL;
+	w = sp.planeParams.width[0];
+	h = sp.planeParams.height[0];
+#else
+	NvBufferParams bp;
+	if (NvBufferGetParams(dmabuf_fd, &bp) < 0 ||
+	    !nvmpi_surface_pix_format((int)bp.pixel_format, &fmt))
+		return NVMPI_ERR_INVAL;
+	w = bp.width[0];
+	h = bp.height[0];
+#endif
+	/* Same bound as the allocators: a zero or huge plane-0 size is not a
+	 * surface this library hands out. */
+	if (w == 0 || h == 0 || w > 8192 || h > 8192)
+		return NVMPI_ERR_INVAL;
+
+	nvmpi_fd_frame fr;
+	if (!nvmpi_fd_fill_geometry_surf(fmt, dmabuf_fd, surf, &fr))
+		return NVMPI_ERR_INVAL;
+	fr.width = w;
+	fr.height = h;
+
+	/* Fill min(struct_size, sizeof) and write the filled size back, like
+	 * nvmpi_decoder_get_frame_fd2. */
+	size_t n = frame->struct_size < sizeof(fr) ? frame->struct_size : sizeof(fr);
+	fr.struct_size = (uint32_t)n;
+	memcpy(frame, &fr, n);
+	return 0;
 }
 
 /* Freed here; allocated in nvmpi_surface_alloc() above */
