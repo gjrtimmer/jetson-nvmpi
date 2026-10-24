@@ -275,6 +275,7 @@ static int test_encoder_hevc_create_close(void)
 #include "dec_eos_case.h"
 #include "dec_flush_case.h"
 #include "caps_case.h"
+#include "surf_layout_case.h"
 
 int main(void)
 {
@@ -314,6 +315,10 @@ int main(void)
     /* Flush after the first resolution event, resume at the same size (#162). */
     fail += RUN_TEST(test_decoder_flush_after_event_h264);
     fail += RUN_TEST(test_decoder_flush_after_event_hevc);
+    /* nvmpi_surface_get_layout (#157). */
+    fail += RUN_TEST(test_surface_layout_alloc);
+    fail += RUN_TEST(test_surface_layout_invalid);
+    fail += RUN_TEST(test_surface_layout_decoder);
     /* JPEG DMA-BUF output: real NVJPG or the mock model, SKIP on stubs. */
     fail += RUN_TEST(test_jpeg_fd_nv12);
     fail += RUN_TEST(test_jpeg_fd_yuv420);
