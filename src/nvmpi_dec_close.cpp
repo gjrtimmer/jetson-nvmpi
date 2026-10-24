@@ -20,20 +20,31 @@
 //  4. Move filled frames back to the empty queue (generation unchanged).
 //  5. Reset EOS flags (eos, input_eos) and output-plane buffer index.
 //  6. STREAMON output plane.
-//  7. Restart the capture thread — it will wait for the next
-//     resolution-change event (triggered when the caller re-primes
-//     extradata / SPS / PPS), then reinitialize the capture plane
-//     and frame pool via respondToResolutionEvent().
+//  7. If the CAPTURE plane was configured: re-queue all its buffers and
+//     STREAMON it (#162). A stateful decoder only raises a resolution event
+//     when the format changes, so a resume at the same size never gets one.
+//  8. Restart the capture thread. With the plane re-armed it goes straight
+//     to the capture loop (a later real resolution change arrives there as
+//     an event); without one (no event seen yet) it waits for the first
+//     resolution-change event as at create.
 //
-//The caller MUST re-prime extradata after this call so the hardware
-//decoder can reconfigure its capture plane (same path as initial setup).
+//The caller should re-prime extradata (SPS / PPS) after this call: the
+//decoder needs them to parse the stream again.
 int nvmpi_decoder_flush(nvmpictx* h)
 {
 	nvmpi_dec_ctx* ctx = static_cast<nvmpi_dec_ctx*>(h);
-	ctx->eos.store(true);
-	ctx->dec->capture_plane.setStreamStatus(false);
+	{
+		/* eos and STREAMOFF under the re-queue mutex, see its declaration. */
+		std::lock_guard<std::mutex> g(ctx->capture_requeue_mu);
+		ctx->eos.store(true);
+		ctx->dec->capture_plane.setStreamStatus(false);
+	}
 	if (ctx->dec_capture_loop.joinable())
 		ctx->dec_capture_loop.join();
+	/* The thread may have restarted the plane (resolution event handled
+	 * while we stopped it): stop it again so every buffer is ours. */
+	if (ctx->dec->capture_plane.getStreamStatus())
+		ctx->dec->capture_plane.setStreamStatus(false);
 
 	ctx->dec->output_plane.setStreamStatus(false);
 
@@ -60,6 +71,24 @@ int nvmpi_decoder_flush(nvmpictx* h)
 	ctx->index = 0;
 
 	ctx->dec->output_plane.setStreamStatus(true);
+
+	/* Thread joined: this thread owns the CAPTURE plane. A configured plane
+	 * (buffers allocated) was STREAMOFF'd above, which returned every
+	 * buffer to us: queue them again and start it, so frames flow after
+	 * the resume without a resolution event. If re-arming fails, fall back
+	 * to the event wait (the plane is rebuilt when an event arrives). */
+	ctx->capture_armed = false;
+	if (ctx->numberCaptureBuffers > 0)
+	{
+		if (ctx->dec->capture_plane.setStreamStatus(true) == 0 &&
+		    ctx->requeueDecoderCapturePlane() == 0)
+			ctx->capture_armed = true;
+		else
+		{
+			NVMPI_LOG(NVMPI_LOG_ERROR, "flush: could not re-arm the capture plane");
+			ctx->dec->capture_plane.setStreamStatus(false);
+		}
+	}
 
 	ctx->dec_capture_loop = std::thread(dec_capture_loop_fcn, ctx);
 	pthread_setname_np(ctx->dec_capture_loop.native_handle(), "dec_capture");

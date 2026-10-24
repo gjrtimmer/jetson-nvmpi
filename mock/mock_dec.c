@@ -52,9 +52,10 @@
  *   STREAMOFF            OUTPUT: full flush (stream state and pending events
  *                        are reset). CAPTURE: completes a resolution change.
  *                        After an OUTPUT flush the next input announces the
- *                        stream again only with NVMPI_MOCK_DEC_REANNOUNCE=1;
- *                        with 0 (stateful decoder spec: an event only on a
- *                        format change) the CAPTURE format is kept, so a
+ *                        stream again with NVMPI_MOCK_DEC_REANNOUNCE=1; the
+ *                        default 0 follows the stateful decoder spec (an
+ *                        event only on a format change; to be confirmed on
+ *                        the Orin): the CAPTURE format is kept, so a
  *                        client that tore the CAPTURE queue down must re-arm
  *                        it itself (#162). A later different SPS size still
  *                        announces.
@@ -100,7 +101,7 @@ static void dec_on_open(struct mock_ctx *ctx)
 {
     /* Allocated here; freed in dec_on_close() (single deallocation point). */
     struct dec_model *m = calloc(1, sizeof(*m));
-    uint32_t w = 0, h = 0, wait = DEC_DQ_WAIT_MS, reannounce = 1;
+    uint32_t w = 0, h = 0, wait = DEC_DQ_WAIT_MS, reannounce = 0;
 
     if (!m)
         return;                    /* ctx->model NULL: model stays inert    */

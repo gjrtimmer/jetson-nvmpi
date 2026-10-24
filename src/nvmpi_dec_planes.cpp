@@ -168,6 +168,17 @@ void nvmpi_dec_ctx::initDecoderCapturePlane(v4l2_format &format)
 	TEST_ERROR(ret < 0, "Error in decoder capture plane streamon", ret);
 
 	/* Enqueue all the empty decoder capture plane buffers. */
+	requeueDecoderCapturePlane();
+}
+
+//Enqueue every CAPTURE-plane buffer to the decoder (all of them are empty:
+//a STREAMOFF returns the queued ones to us). Used after the plane setup and
+//by flush(), which re-arms the plane without a new resolution event (#162).
+//Capture thread or, with the thread joined, the user thread. 0 or -1.
+int nvmpi_dec_ctx::requeueDecoderCapturePlane()
+{
+	int ret = 0;
+
 	for (uint32_t i = 0; i < dec->capture_plane.getNumBuffers(); i++)
 	{
 		struct v4l2_buffer v4l2_buf;
@@ -184,18 +195,19 @@ void nvmpi_dec_ctx::initDecoderCapturePlane(v4l2_format &format)
 
 		ret = dec->capture_plane.qBuffer(v4l2_buf, NULL);
 		if (ret < 0) {
+			const int q_errno = errno;
 			/* Partial init is worse than no init — remaining buffers
 			 * never reach the driver queue, leading to silent capture
 			 * starvation.  Return early so the caller can handle the
 			 * error (or fail-fast on the next decode call). */
 			NVMPI_LOG(NVMPI_LOG_ERROR,
-			          "initCapturePlane: qBuffer failed at buffer %d/%d",
-			          i, dec->capture_plane.getNumBuffers());
-			return;
+			          "capture plane qBuffer failed at buffer %d/%d (errno=%d)",
+			          i, dec->capture_plane.getNumBuffers(), q_errno);
+			return -1;
 		}
 	}
 
-	return;
+	return 0;
 }
 
 //Tear down the CAPTURE plane: STREAMOFF, unmap/release the V4L2 buffers

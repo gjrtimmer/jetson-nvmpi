@@ -160,6 +160,19 @@ struct nvmpi_dec_ctx : nvmpictx
 	bool av1_drop_logged{false};        //INFO line printed for this stream start
 	uint32_t av1_dropped{0};            //packets dropped before the first header
 	std::thread dec_capture_loop;       //runs dec_capture_loop_fcn()
+	/* Set by flush when it re-armed a configured CAPTURE plane (#162): the
+	 * restarted capture thread skips the wait for the first resolution event
+	 * (a stateful decoder sends none when the stream resumes at the same
+	 * size) and goes straight to the main loop, which still handles a later
+	 * event. Written by the user thread (create, flush) before the thread
+	 * starts, read by the capture thread: thread creation orders it. */
+	bool capture_armed{false};
+	/* Orders the capture thread's re-queue of a dequeued CAPTURE buffer
+	 * against flush's "eos + STREAMOFF" step (#162): a re-queue that slipped
+	 * in after the STREAMOFF would leave that buffer queued, and flush's own
+	 * re-queue of the whole plane would then fail with EINVAL (a sticky
+	 * plane error). Held for one ioctl only; never while waiting. */
+	std::mutex capture_requeue_mu;
 
 	int frame_pool_size{12};            //number of nvmpi_frame_buffer's to allocate
 	uint32_t chunk_size{CHUNK_SIZE_DEFAULT}; //bytes per compressed-input OUTPUT-plane buffer
@@ -202,6 +215,8 @@ struct nvmpi_dec_ctx : nvmpictx
 
 	//allocate CAPTURE-plane DMA buffers, REQBUFS/STREAMON, enqueue them all
 	void initDecoderCapturePlane(v4l2_format &format);
+	//re-queue every (empty) CAPTURE buffer; 0 or -1
+	int requeueDecoderCapturePlane();
 	/* deinitPlane unmaps the buffers and calls REQBUFS with count 0 */
 	void deinitDecoderCapturePlane();
 };
@@ -213,6 +228,8 @@ NvBufferColorFormat getNvColorFormatFromV4l2Format(v4l2_format &format, bool wan
 //true: drop this AV1 packet (no sequence header seen yet); see nvmpi_dec_av1.cpp
 bool nvmpi_dec_av1_drop(nvmpi_dec_ctx* ctx, const nvPacket* packet);
 void dec_capture_loop_fcn(void *arg);
+struct NvmpiTimer;
+bool dec_wait_first_event(nvmpi_dec_ctx* ctx, NvmpiTimer& tm);
 void respondToResolutionEvent(v4l2_format &format, v4l2_crop &crop, nvmpi_dec_ctx* ctx);
 int copyNvBufToFrame(const dec_gen* g, nvmpi_frame_buffer *nvmpiBuf, nvFrame* frame);
 //Next frame for any consumer: the held (pending) one first, else the pool
