@@ -273,6 +273,7 @@ static int test_encoder_hevc_create_close(void)
 #include "dec_fd_case.h"
 #include "dec_fd2_case.h"
 #include "dec_eos_case.h"
+#include "caps_case.h"
 
 int main(void)
 {
@@ -281,6 +282,7 @@ int main(void)
     verbose_mode = env_flag("NVMPI_TEST_VERBOSE");
 
     int fail = 0;
+    fail += RUN_TEST(test_get_caps_drain_bit);
     fail += RUN_TEST(test_decoder_create_close);
     fail += RUN_TEST(test_encoder_create_close);
     fail += RUN_TEST(test_decoder_rapid_lifecycle);

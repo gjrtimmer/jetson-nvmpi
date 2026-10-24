@@ -404,6 +404,9 @@ if(BUILD_TESTING)
     set(NVMPI_MOCK_LD "${CMAKE_BINARY_DIR}/mock:${CMAKE_BINARY_DIR}:${CMAKE_CURRENT_SOURCE_DIR}/stubs")
     add_test(NAME mock_selftest COMMAND test_mock)
     add_test(NAME api_mock COMMAND test_api)
+    # The symbol must be exported from the shared library (dlopen callers, #166).
+    add_test(NAME caps_exported
+      COMMAND sh -c "nm -D --defined-only \"$1\" | grep -qw nvmpi_get_caps" sh $<TARGET_FILE:nvmpi>)
     # Decoder data path + fault matrix (needs the mock model; mock-only).
     add_executable(test_api_dec_mock test/api/test_api_dec_mock.c)
     # nvbufsurface.h: the zero-copy cases check the surface behind each borrowed fd (#137).
