@@ -293,6 +293,7 @@ static const struct tcase k_cases[] = {
     { "av1_td_only", NULL, av1s_td_only, 0, 0 },
     { "av1_never_seq", NULL, av1s_never_seq, 0, 0 },
     { "av1_flush_resets", NULL, av1s_flush_resets, 0, 0 },
+    { "av1_close_in_guard", NULL, av1s_close_in_guard, 0, 0 },
     { "resolution_change", NULL, resolution_change, 0, 0 },
     { "teardown_undrained", NULL, teardown_undrained, 0, 0 },
     { "teardown_no_data", NULL, teardown_no_data, 0, 0 },

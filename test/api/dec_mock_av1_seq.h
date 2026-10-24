@@ -38,8 +38,8 @@
 /* close() bound for streams that never got a stream event. Dropped
  * header-less packets are not counted as fed, so the plain case closes like
  * the no-data one; the EOS-marker variant counts as fed and pays the capture
- * thread's race-guard dqEvent (500 ms, nvmpi_dec_capture.cpp), ~0.6 s by
- * design. 2 s catches a stuck join. */
+ * thread's race guard (500 ms budget, nvmpi_dec_capture.cpp), which close()
+ * interrupts (#165). 2 s catches a stuck join. */
 #define AV1S_CLOSE_MAX_MS 2000
 #define AV1S_SETTLE_MS 50
 
@@ -187,6 +187,26 @@ static int av1s_never_seq(void)
         REQUIRE(av1s_poll(c) != 0);                /* bounded, no frame     */
         REQUIRE(av1s_close(c) == 0);
     }
+    return 0;
+}
+
+/* close() while the capture thread sits in its race guard (#165). The guard
+ * budget is 500 ms and the thread enters it as soon as the EOS marker (counted
+ * as fed) ends the pre-event wait; close() sets eos and must cut the wait
+ * short instead of letting it run out (an uninterruptible dqEvent(500) stretched
+ * to ~5 s under CPU load). Without the fix the remaining ~400 ms show here. */
+#define AV1S_GUARD_CLOSE_MAX_MS 250
+
+static int av1s_close_in_guard(void)
+{
+    uint8_t eos = 0;
+    long ms;
+    AV1S_BEGIN(c);
+    REQUIRE(put(c, &eos, 0, 0) == 0);              /* EOS marker, fed       */
+    usleep(100 * 1000);                            /* thread is in the guard */
+    ms = lat_close_ms(c);
+    fprintf(stderr, "    close %ld ms (bound %d)\n", ms, AV1S_GUARD_CLOSE_MAX_MS);
+    REQUIRE(ms >= 0 && ms < AV1S_GUARD_CLOSE_MAX_MS);
     return 0;
 }
 
