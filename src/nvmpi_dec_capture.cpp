@@ -2,9 +2,15 @@
 #include <pthread.h>
 #include "nvmpi_timing.h"
 
-/* Slice length of the pre-event dqEvent poll: bounds how long close()/flush()
- * wait for a capture thread that is still waiting for the first event. */
-#define EVENT_POLL_MS 50
+/* Slice length of the pre-event dqEvent polls: bounds how long close()/flush()
+ * wait for a capture thread that is still waiting for the first event.
+ * NvV4l2Element::dqEvent counts its timeout in usleep(1000) iterations, not
+ * in wall-clock time, so under CPU load a slice lasts several times its
+ * nominal length (#165): keep it short. */
+#define EVENT_POLL_MS 10
+
+/* Race guard budget (wall-clock), see the guard in dec_capture_loop_fcn. */
+#define RACE_GUARD_MS 500
 
 /* Drain safety net (#161): after the caller's EOS the capture thread waits
  * for the driver's LAST buffer. If no capture buffer arrives for
@@ -105,9 +111,20 @@ void dec_capture_loop_fcn(void *arg)
      * stream that was fed keeps the guard exactly as before. */
     if (!got_resolution_change && (ctx->eos.load() || ctx->input_eos.load()) &&
         ctx->packets_put.load(std::memory_order_acquire) > 0) {
-        ret = dec->dqEvent(v4l2Event, 500);
-        if (ret == 0 && v4l2Event.type == V4L2_EVENT_RESOLUTION_CHANGE)
-            got_resolution_change = true;
+        /* Wait in EVENT_POLL_MS slices against a wall-clock deadline and
+         * leave as soon as ctx->eos is set. One dqEvent(500) cannot be
+         * interrupted and its usleep(1000) loop stretches under CPU load: a
+         * close() right after input EOS then waited ~5 s for the join (#165).
+         * input_eos alone must not end the wait (that is what the guard is
+         * for); only eos, set by close()/flush()/errors, does. */
+        const std::chrono::steady_clock::time_point deadline =
+            std::chrono::steady_clock::now() + std::chrono::milliseconds(RACE_GUARD_MS);
+        while (!got_resolution_change && !ctx->eos.load() &&
+               std::chrono::steady_clock::now() < deadline) {
+            ret = dec->dqEvent(v4l2Event, EVENT_POLL_MS);
+            if (ret == 0 && v4l2Event.type == V4L2_EVENT_RESOLUTION_CHANGE)
+                got_resolution_change = true;
+        }
         tm.phase("race_guard");
     }
 
