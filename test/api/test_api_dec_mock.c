@@ -281,6 +281,7 @@ static int fault_case(const struct tcase *t)
 #include "dec_mock_copysize.h"
 #include "dec_mock_pts.h"
 #include "dec_mock_eos.h"
+#include "dec_mock_flush.h"
 
 static const struct tcase k_cases[] = {
     { "decode_plain", NULL, decode_plain, 0, 0 },
@@ -343,6 +344,12 @@ static const struct tcase k_cases[] = {
     { "eos_drain_noreorder", NULL, eos_drain_noreorder, 0, 0 },
     { "eos_drain_after_flush", NULL, eos_drain_after_flush, 0, 0 },
     { "eos_close_during_drain", NULL, eos_close_during_drain, 0, 0 },
+    { "flush_event_hdr", NULL, flush_event_hdr, 0, 0 },
+    { "flush_event_nohdr", NULL, flush_event_nohdr, 0, 0 },
+    { "flush_event_mixed", NULL, flush_event_mixed, 0, 0 },
+    { "flush_event_reannounce", NULL, flush_event_reannounce, 0, 0 },
+    { "flush_event_then_change", NULL, flush_event_then_change, 0, 0 },
+    { "flush_event_prompt", NULL, flush_event_prompt, 0, 0 },
     /* fault matrix: fn == NULL -> fault_case() */
     { "fault_none_control", "dqbuf@9999", NULL, 0, 0 },
     { "fault_dqbuf@1", "dqbuf@1", NULL, 0, 1 },
