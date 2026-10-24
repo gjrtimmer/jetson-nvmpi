@@ -35,6 +35,7 @@ struct dec_model {
     uint32_t off_epoch;            /* ++ on every STREAMOFF (wakes polls)   */
     int last_idx;                  /* newest frame buffer, -1 none          */
     bool seq_seen;                 /* AV1: a sequence header arrived (#147) */
+    bool reannounce;               /* OUTPUT flush re-announces the stream  */
     bool env_dims;                 /* NVMPI_MOCK_WIDTH/HEIGHT given         */
     uint32_t env_w, env_h;
     /* Reorder delay (NVMPI_MOCK_DEC_REORDER = N, 0 = off): the DPB depth of

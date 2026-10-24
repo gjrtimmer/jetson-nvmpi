@@ -39,15 +39,18 @@ static int fill_gray(int fd)
 }
 
 /* Announce stream size (w,h): program the CAPTURE format/crop and push the
- * RESOLUTION_CHANGE event. A change while CAPTURE streams must be completed
- * by the application (STREAMOFF) before new-size frames flow. */
+ * RESOLUTION_CHANGE event. An announce while CAPTURE streams must be
+ * completed by the application (STREAMOFF) before frames flow. */
 void mock_dec_announce(struct mock_ctx *ctx, struct dec_model *m, uint32_t w,
                      uint32_t h)
 {
     struct mock_queue *cap = &ctx->q[MOCK_Q_CAPTURE];
     struct v4l2_pix_format_mplane *pix = &cap->fmt.fmt.pix_mp;
 
-    m->reconfig = m->announced && cap->streaming;
+    /* Any announce while CAPTURE streams (a size change, or the stream
+     * starting again after a flush with CAPTURE left armed) holds frames
+     * until the application tore the queue down: the event comes first. */
+    m->reconfig = cap->streaming;
     m->announced = true;
     m->width = w;
     m->height = h;

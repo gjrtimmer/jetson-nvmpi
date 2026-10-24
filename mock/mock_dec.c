@@ -51,6 +51,13 @@
  *                        OUTPUT queue is streamed off (flush).
  *   STREAMOFF            OUTPUT: full flush (stream state and pending events
  *                        are reset). CAPTURE: completes a resolution change.
+ *                        After an OUTPUT flush the next input announces the
+ *                        stream again only with NVMPI_MOCK_DEC_REANNOUNCE=1;
+ *                        with 0 (stateful decoder spec: an event only on a
+ *                        format change) the CAPTURE format is kept, so a
+ *                        client that tore the CAPTURE queue down must re-arm
+ *                        it itself (#162). A later different SPS size still
+ *                        announces.
  *                        Blocked DQBUF/DEVICE_POLL waiters are woken (core);
  *                        a woken DQBUF returns EAGAIN (see dec_on_open).
  *
@@ -93,7 +100,7 @@ static void dec_on_open(struct mock_ctx *ctx)
 {
     /* Allocated here; freed in dec_on_close() (single deallocation point). */
     struct dec_model *m = calloc(1, sizeof(*m));
-    uint32_t w = 0, h = 0, wait = DEC_DQ_WAIT_MS;
+    uint32_t w = 0, h = 0, wait = DEC_DQ_WAIT_MS, reannounce = 1;
 
     if (!m)
         return;                    /* ctx->model NULL: model stays inert    */
@@ -107,6 +114,8 @@ static void dec_on_open(struct mock_ctx *ctx)
     }
     (void)mock_env_uint("NVMPI_MOCK_DEC_REORDER", 0, MOCK_DEC_REORDER_MAX,
                         &m->reorder);
+    (void)mock_env_uint("NVMPI_MOCK_DEC_REANNOUNCE", 0, 1, &reannounce);
+    m->reannounce = reannounce != 0;
     (void)mock_env_uint("NVMPI_MOCK_DQBUF_WAIT_MS", 0, 60000, &wait);
     ctx->dq_wait_ms = wait;
     /* A DQBUF released by STREAMOFF reports EAGAIN, not EINVAL. libnvmpi's
@@ -315,7 +324,9 @@ static void dec_on_streamoff(struct mock_ctx *ctx, int qi)
     m->off_epoch++;                    /* wakes DEVICE_POLL waiters         */
     m->last_idx = -1;
     if (qi == MOCK_Q_OUTPUT) {         /* flush: start over, drop events    */
-        m->announced = m->reconfig = m->eos_seen = m->eos_last = false;
+        m->reconfig = m->eos_seen = m->eos_last = false;
+        if (m->reannounce)             /* else keep the stream format       */
+            m->announced = false;
         m->seq_seen = false;           /* AV1: next stream sends its own header */
         m->held_n = m->held_head = 0;  /* reorder FIFO is flushed too       */
         ctx->ev_head = ctx->ev_count = 0;

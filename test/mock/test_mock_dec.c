@@ -191,7 +191,9 @@ static void test_backpressure_and_eos(void)
     CHECK(drain_frames(&d, NULL) == 0);
     dh_close(&d);
 
-    /* EOS after every frame was already delivered: EAGAIN + LAST only. */
+    /* EOS after every frame was already delivered: EAGAIN + LAST only.
+     * This device also re-announces after the flush at the end (#162). */
+    setenv("NVMPI_MOCK_DEC_REANNOUNCE", "1", 1);
     CHECK(start(&d, 640, 360, 4, O_NONBLOCK) == 0);
     dh_ms(30);
     CHECK(drain_frames(&d, &fl) == 1 && !(fl & V4L2_BUF_FLAG_LAST));
@@ -210,11 +212,40 @@ static void test_backpressure_and_eos(void)
     }
     CHECK(dh_put(&d, au, fx_idr(au, 640, 360), 40) == 0);
     CHECK(dh_wait_event(&d, 2000) == 0);
+    dh_disarm(&d);                               /* CAPTURE streams: re-arm */
+    CHECK(dh_arm(&d, 3) == 0);
     dh_ms(30);
     for (i = 0; i < 40 && !got; i++, dh_ms(5))
         got = drain_frames(&d, NULL);
     CHECK(got == 1);
     dh_close(&d);
+    unsetenv("NVMPI_MOCK_DEC_REANNOUNCE");
+}
+
+/* Spec model (#162, NVMPI_MOCK_DEC_REANNOUNCE=0): a flush resumed at the same size raises NO new event
+ * and an armed CAPTURE queue keeps producing; a different size still does. */
+static void test_flush_no_reannounce(void)
+{
+    struct dh d;
+    unsigned type = OUT;
+    int got = 0, i;
+
+    setenv("NVMPI_MOCK_DEC_REANNOUNCE", "0", 1);
+    CHECK(start(&d, 640, 360, 4, O_NONBLOCK) == 0);
+    dh_ms(30);
+    CHECK(drain_frames(&d, NULL) == 1);
+    CHECK(v4l2_ioctl(d.fd, VIDIOC_STREAMOFF, &type) == 0);
+    CHECK(v4l2_ioctl(d.fd, VIDIOC_STREAMON, &type) == 0);
+    d.out_used = 0;
+    CHECK(dh_put(&d, au, fx_idr(au, 640, 360), 60) == 0);
+    CHECK(dh_wait_event(&d, 100) != 0);          /* no new event          */
+    for (i = 0; i < 40 && !got; i++, dh_ms(5))
+        got = drain_frames(&d, NULL);
+    CHECK(got == 1);                             /* armed queue: frame    */
+    CHECK(dh_put(&d, au, fx_idr(au, 320, 240), 61) == 0);
+    CHECK(dh_wait_event(&d, 2000) == 0);         /* real change: event    */
+    dh_close(&d);
+    unsetenv("NVMPI_MOCK_DEC_REANNOUNCE");
 }
 
 static void test_midstream_change(void)
@@ -354,6 +385,7 @@ void test_decoder_model(void)
     test_frames_and_sizes();
     test_size_sources();
     test_backpressure_and_eos();
+    test_flush_no_reannounce();
     test_midstream_change();
     test_blocking_paths();
 }
