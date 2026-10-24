@@ -41,7 +41,8 @@ src/
   nvmpi_dec_fd.cpp         get_frame_fd, get_frame_fd2, borrow/release
   nvmpi_fd_geometry.cpp    plane geometry of nvmpi_fd_frame (decoder + JPEG)
   nvmpi_dec_close.cpp      flush, close
-  nvmpi_dec_capture.cpp    capture thread loop, resolution-change handling
+  nvmpi_dec_capture.cpp    capture thread loop, EOS drain
+  nvmpi_dec_resevent.cpp   resolution-change handling (capture plane re-arm)
   nvmpi_dec_planes.cpp     CAPTURE-plane alloc/teardown, colour format selection
   nvmpi_dec_internal.h     decoder context struct, macros
   nvmpi_timing.h           NVMPI_TIMING phase timer (create/close latency)
@@ -143,7 +144,10 @@ Details worth knowing:
   plane buffer. Input buffers are first handed out by index, then recycled with
   a blocking `dqBuffer`.
 - **EOS.** A zero-size packet is queued like any other, and flips the context's
-  atomic `eos` flag.
+  atomic `input_eos` flag (input finished). The separate `eos` flag means
+  "capture finished" and is set by the capture thread once it dequeued the
+  buffer flagged `V4L2_BUF_FLAG_LAST` (or on a fatal error, close or flush), so
+  the frames the decoder still holds for reordering are delivered (#161).
 - **Pool generations.** The destination pool is a refcounted generation
   (`dec_gen`, the same model as the JPEG fd path): buffers of one output size,
   the plane geometry of those buffers, and a `dec_slot` per buffer. Whoever
@@ -281,9 +285,12 @@ Decoder threads:
 - **User thread**: the public API calls (one thread per context).
 - **Capture thread** (`dec_capture_loop_fcn`, named `dec_capture`): lives for the
   lifetime of the context (restarted by flush). Dequeues decoded buffers, VIC
-  transforms them, publishes frames. On every exit path (normal EOS, event or
+  transforms them, publishes frames. After the caller's EOS it keeps dequeuing
+  until the LAST capture buffer (a `LAST` buffer without data, or `EPIPE`, also
+  ends it); if no buffer arrives for 4 x `wait_timeout` (at least 1 s) it logs a
+  warning and ends the drain anyway. On every exit path (drain done, event or
   dequeue error, external EOS) it calls the pool's `shutdown()` so no consumer
-  can block forever.
+  can block forever; frames already queued stay deliverable after it.
 
 Encoder threads:
 
@@ -297,7 +304,8 @@ Encoder threads:
 | `m_filledBuf` mutex + `cv_filledBuf` | `NVMPI_bufPool` | filled queue and blocking waits |
 | `m_emptyBuf` mutex + `cv_emptyBuf` | `NVMPI_bufPool` | empty queue |
 | `m_shutdown` (`std::atomic<bool>`) | `NVMPI_bufPool` | shutdown signal to blocked consumers |
-| `eos` (`std::atomic<bool>`) | decoder context | end of stream between user and capture thread |
+| `input_eos` (`std::atomic<bool>`) | decoder context | caller sent EOS: starts the capture drain |
+| `eos` (`std::atomic<bool>`) | decoder context | capture finished / stop request between user and capture thread |
 | `flushing`, `capPlaneGotEOS` (`std::atomic<bool>`) | encoder context | flushing state, EOS seen by the DQ thread |
 | `nvmpi_transform_mutex` (`pthread_mutex_t`) | `nvmpi_vic.cpp` | every `NvBufSurfTransform` call |
 
@@ -387,8 +395,8 @@ create-then-close without data returns in about one slice (50-75 ms). It used
 to wait out a 500 ms `dqEvent` plus the 500 ms race guard below, 0.5-1.5 s per
 cycle (issue #105).
 
-The race guard (an extra 500 ms `dqEvent` when the loop ended on `eos` without
-an event) exists because FFmpeg 7.0+ may queue the EOS marker before the driver
+The race guard (an extra 500 ms `dqEvent` when the loop ended on `eos` or
+`input_eos` without an event) exists because FFmpeg 7.0+ may queue the EOS marker before the driver
 emits the event for re-primed extradata. It runs only when a packet was ever
 queued to the OUTPUT plane (`packets_put`, never reset by flush): without data
 the driver cannot emit an event, so there is nothing to wait for. Teardown after

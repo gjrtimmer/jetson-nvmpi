@@ -98,18 +98,31 @@ void dec_gen_release(std::shared_ptr<dec_gen> &&ref, dec_slot *slot);
 //Created by nvmpi_create_decoder(), owned by the caller via
 //nvmpi_decoder_close(). Shared between the user thread and the internal
 //capture thread; cross-thread handoff happens through framePool, and the
-//'eos' flag is the (best-effort) shutdown signal.
+//'eos' flag is the (best-effort) shutdown signal. 'input_eos' is the
+//separate "caller finished feeding" signal that starts the capture drain.
 struct nvmpi_dec_ctx : nvmpictx
 {
 	NvVideoDecoder *dec{nullptr};       //NVIDIA V4L2 decoder device wrapper
-	std::atomic<bool> eos{false};       //set on EOS or fatal error; stops capture loop
-	                                    //(atomic: read by user thread, written by capture thread)
+	/* Capture finished: the capture thread saw the LAST buffer (or the drain
+	 * safety net fired), hit a fatal error, or flush/close asks it to stop.
+	 * Stops the capture loop; NOT set by put_packet (see input_eos), so the
+	 * decoder can still hand out the frames it holds after the caller sent
+	 * EOS. Atomic: written by the capture, flush and close threads. */
+	std::atomic<bool> eos{false};
+	/* Input side finished: the caller queued the zero-sized EOS marker. The
+	 * capture thread keeps dequeuing until the driver flags the last buffer
+	 * (V4L2_BUF_FLAG_LAST), because frames still inside the decoder (reorder
+	 * / DPB depth) only appear after the marker (#161). Written
+	 * by the user thread in put_packet, cleared by create and flush (after
+	 * the capture thread is joined), read by the capture thread. */
+	std::atomic<bool> input_eos{false};
 	int index{0};                       //next OUTPUT-plane buffer index until all are used once
 	/* Packets successfully queued to the OUTPUT plane since create (incl.
 	 * the zero-sized EOS marker). Written by the user thread in
-	 * put_packet AFTER qBuffer succeeds and BEFORE eos is set; read by the
-	 * capture thread after it observed eos, so the release/acquire pair
-	 * orders the counter before the eos flag. Never reset (flush keeps it):
+	 * put_packet AFTER qBuffer succeeds and BEFORE input_eos is set; read by
+	 * the capture thread after it observed input_eos (or eos), so the
+	 * release/acquire pair orders the counter before the flag. Never reset
+	 * (flush keeps it):
 	 * the capture thread's race guard keys on "was ever fed". */
 	std::atomic<uint32_t> packets_put{0};
 	nvmpi_pts_map pts_map;              //int64 pts <-> V4L2 timeval (put thread -> capture thread)

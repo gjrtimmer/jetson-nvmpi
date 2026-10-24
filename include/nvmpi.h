@@ -275,6 +275,8 @@ extern "C" {
 	//the NvUtils buffer API (legacy nvbuf_utils, pre-JetPack 5).
 	nvmpictx* nvmpi_create_decoder(nvDecParam* param);
 
+	//A packet with payload_size == 0 is the EOS marker: get_frame* still
+	//return all frames held inside the decoder, then -1 (end of stream).
 	//Feed one compressed packet (Annex-B for H.264/HEVC). May block waiting
 	//for a free V4L2 OUTPUT-plane buffer once all buffers are in flight.
 	//Decoded frames must be drained (get_frame / get_frame_fd) by the

@@ -6,108 +6,18 @@
  * wait for a capture thread that is still waiting for the first event. */
 #define EVENT_POLL_MS 50
 
+/* Drain safety net (#161): after the caller's EOS the capture thread waits
+ * for the driver's LAST buffer. If no capture buffer arrives for
+ * DRAIN_IDLE_FACTOR x wait_timeout_ms (at least DRAIN_IDLE_MIN_MS), a driver
+ * that never flags LAST must not hang the stream: the drain is declared done
+ * and a WARN is logged. A healthy drain delivers its buffers within
+ * milliseconds, so this only bounds the failure case. */
+#define DRAIN_IDLE_FACTOR 4
+#define DRAIN_IDLE_MIN_MS 1000
+
 /* Defined in nvmpi_vic.cpp — serializes NvBufSurfTransform calls to
  * prevent driver deadlock between capture thread and filter thread. */
 extern pthread_mutex_t nvmpi_transform_mutex;
-
-void respondToResolutionEvent(v4l2_format &format, v4l2_crop &crop,nvmpi_dec_ctx* ctx)
-{
-	int ret=0;
-
-    /* Get capture plane format from the decoder.
-       This may change after resolution change event.
-       Refer ioctl VIDIOC_G_FMT */
-	ret = ctx->dec->capture_plane.getFormat(format);
-	TEST_ERROR(ret < 0, "Error: Could not get format from decoder capture plane", ret);
-
-    /* Get the display resolution from the decoder.
-       Refer ioctl VIDIOC_G_CROP */
-	ret = ctx->dec->capture_plane.getCrop(crop);
-	TEST_ERROR(ret < 0, "Error: Could not get crop from decoder capture plane", ret);
-
-	//output resolution = resize target if requested, else stream resolution
-	ctx->coded_width = crop.c.width;
-	ctx->coded_height = crop.c.height;
-	ctx->output_width = ctx->resized.width ? ctx->resized.width : crop.c.width;
-	ctx->output_height = ctx->resized.height ? ctx->resized.height : crop.c.height;
-
-	//init/reinit DecoderCapturePlane
-#ifndef WITH_NVUTILS
-	bool hadCapture = ctx->numberCaptureBuffers > 0;
-#endif
-	ctx->deinitDecoderCapturePlane();
-	ctx->initDecoderCapturePlane(format);
-
-	/* override default seesion. Without overriding session we wil
-	   get seg. fault if decoding in forked process*/
-#ifdef WITH_NVUTILS
-	ctx->session.compute_mode = NvBufSurfTransformCompute_VIC;
-	ctx->session.gpu_id = 0;
-	ctx->session.cuda_stream = 0;
-	NvBufSurfTransformSetSessionParams(&(ctx->session));
-#else
-	if (hadCapture)
-		NvBufferSessionDestroy(ctx->session);
-	ctx->session = NvBufferSessionCreate();
-#endif
-
-	/* Skip the rebuild only if the CURRENT generation already has the new
-	 * output size (e.g. pre-allocated from container hints that turned out
-	 * accurate): saves one alloc/free cycle and first-frame latency. The
-	 * comparison must be against the generation's own size: output_width/
-	 * height were just overwritten above, so comparing them with the same
-	 * expression was always true and a mid-stream resolution change never
-	 * rebuilt the pool (#137). A generation without buffers (allocation
-	 * failed earlier) is rebuilt too. */
-	if (ctx->gen && !ctx->gen->slots.empty() &&
-	    ctx->gen->w == ctx->output_width && ctx->gen->h == ctx->output_height)
-	{
-		NVMPI_LOG(NVMPI_LOG_DEBUG, "frame pool already allocated at %ux%u, skipping rebuild",
-		          ctx->output_width, ctx->output_height);
-	}
-	else
-	{
-		/* Retire the old generation without waiting: unborrowed buffers die
-		 * now, borrowed ones when released (their cookies keep the
-		 * generation alive), then allocate at the new size. */
-		ctx->retireFramePool();
-		ctx->initFramePool();
-	}
-
-	//reset buffer transformation params based on new resolution data
-	ctx->updateBufferTransformParams();
-
-	return;
-}
-
-/*
-struct transFormWorker
-{
-	std::thread _workerThr;
-	nvmpi_dec_ctx* _ctx = NULL;
-
-	//void init(nvmpi_dec_ctx* ctx);
-
-	void start(nvmpi_dec_ctx* ctx);
-	void stop();
-
-	bool isWaiting();
-
-	void workerFnc();
-};
-
-void transFormWorker::start(nvmpi_dec_ctx* ctx)
-{
-	_ctx = ctx;
-	_workerThr = std::thread(&transFormWorker::workerFnc,this);
-	return;
-}
-
-void transFormWorker::workerFnc()
-{
-
-}
-*/
 
 //Body of the decoder capture thread (started by nvmpi_create_decoder).
 //Responsibilities:
@@ -118,7 +28,11 @@ void transFormWorker::workerFnc()
 //     scale), stamp the pts, publish it as "filled", and re-queue the V4L2
 //     buffer to the decoder;
 //  3. handle mid-stream resolution changes and EOS/error shutdown.
-//Exits when ctx->eos is set (EOS buffer, fatal error, or close()).
+//EOS (#161): the caller's zero-sized packet sets ctx->input_eos only. The
+//loop then keeps dequeuing, because frames held inside the decoder for
+//reordering are delivered after the marker, until the driver flags the last
+//capture buffer (V4L2_BUF_FLAG_LAST) or the idle safety net fires.
+//Exits when ctx->eos is set (drain done, fatal error, or close()/flush()).
 void dec_capture_loop_fcn(void *arg)
 {
 	nvmpi_dec_ctx* ctx=(nvmpi_dec_ctx*)arg;
@@ -163,14 +77,14 @@ void dec_capture_loop_fcn(void *arg)
         if (v4l2Event.type == V4L2_EVENT_RESOLUTION_CHANGE)
             got_resolution_change = true;
     }
-    while (!got_resolution_change && !ctx->eos.load());
+    while (!got_resolution_change && !ctx->eos.load() && !ctx->input_eos.load());
     tm.phase(got_resolution_change ? "pre_event_wait(event)" : "pre_event_wait(eos)");
 
     /* Race guard: after flush/seek, FFmpeg's threaded decoder model
      * (libavcodec >= 61 / FFmpeg 7.0+) may queue all remaining packets
      * including the zero-sized EOS marker before the V4L2 decoder has
      * emitted the resolution-change event triggered by re-primed
-     * extradata. put_packet sets ctx->eos on the zero-sized marker,
+     * extradata. put_packet sets ctx->input_eos on the zero-sized marker,
      * causing the loop above to exit before the event arrives.
      *
      * Without a retry the capture plane stays uninitialized: no REQBUFS,
@@ -189,7 +103,7 @@ void dec_capture_loop_fcn(void *arg)
      * plane has no frames to receive, and the wait only delayed close()
      * by 500 ms (#105). packets_put is never reset by flush, so every
      * stream that was fed keeps the guard exactly as before. */
-    if (!got_resolution_change && ctx->eos.load() &&
+    if (!got_resolution_change && (ctx->eos.load() || ctx->input_eos.load()) &&
         ctx->packets_put.load(std::memory_order_acquire) > 0) {
         ret = dec->dqEvent(v4l2Event, 500);
         if (ret == 0 && v4l2Event.type == V4L2_EVENT_RESOLUTION_CHANGE)
@@ -203,7 +117,20 @@ void dec_capture_loop_fcn(void *arg)
      * valid destination buffers for any frames it has already decoded. */
     if (got_resolution_change) {
         respondToResolutionEvent(v4l2Format, v4l2Crop, ctx);
+    } else if (!ctx->eos.load()) {
+        /* Input ended without any event: there is no capture plane, so
+         * nothing can be drained. Stop here instead of entering the loop
+         * below with an unarmed plane. */
+        NVMPI_LOG(NVMPI_LOG_INFO, "input EOS before the first resolution event: nothing to drain");
+        ctx->eos.store(true);
     }
+
+    /* Drain idle bound, see DRAIN_IDLE_FACTOR. last_progress = last time a
+     * capture buffer was dequeued or handled; only consulted after input EOS. */
+    int drain_idle_ms = DRAIN_IDLE_FACTOR * ctx->wait_timeout_ms;
+    if (drain_idle_ms < DRAIN_IDLE_MIN_MS)
+        drain_idle_ms = DRAIN_IDLE_MIN_MS;
+    std::chrono::steady_clock::time_point last_progress = std::chrono::steady_clock::now();
 
 	while (!(ctx->eos.load() || dec->isInError()))
 	{
@@ -226,6 +153,12 @@ void dec_capture_loop_fcn(void *arg)
 		{
 			struct v4l2_buffer v4l2_buf;
 			struct v4l2_plane planes[MAX_PLANES];
+			/* Zero both every iteration: the drain decisions below read
+			 * flags and bytesused, and stale or uninitialised values from
+			 * the previous buffer (or the stack) must never look like a
+			 * LAST / empty buffer. */
+			memset(&v4l2_buf, 0, sizeof(v4l2_buf));
+			memset(planes, 0, sizeof(planes));
 			v4l2_buf.m.planes = planes;
 
 			/* Dequeue a filled buffer.
@@ -244,20 +177,55 @@ void dec_capture_loop_fcn(void *arg)
 			 * coordination, but that is too invasive for this fix. */
 			if (dec->capture_plane.dqBuffer(v4l2_buf, &dec_buffer, NULL, 0))
 			{
-				if (errno == EAGAIN)
+				const int dq_errno = errno;
+				if (dq_errno == EAGAIN)
 				{
+					/* Empty queue. The driver sets LAST in the buffer
+					 * after the final frame was dequeued post-EOS. */
 					if (v4l2_buf.flags & V4L2_BUF_FLAG_LAST)
 					{
-						ERROR_MSG("Got EoS at capture plane");
+						if (ctx->input_eos.load())
+							NVMPI_LOG(NVMPI_LOG_INFO, "capture plane drained (LAST)");
+						else
+							ERROR_MSG("Got EoS at capture plane");
+						ctx->eos.store(true);
+					}
+					else if (ctx->input_eos.load() &&
+					         std::chrono::steady_clock::now() - last_progress >
+					         std::chrono::milliseconds(drain_idle_ms))
+					{
+						/* Driver never flagged LAST: do not hang. */
+						NVMPI_LOG(NVMPI_LOG_WARN,
+						          "no capture buffer %d ms after input EOS, ending the drain",
+						          drain_idle_ms);
 						ctx->eos.store(true);
 					}
 					usleep(10000);
+				}
+				else if (dq_errno == EPIPE && ctx->input_eos.load())
+				{
+					/* EPIPE = stream ended (some drivers answer this
+					 * instead of EAGAIN+LAST once drained): expected. */
+					NVMPI_LOG(NVMPI_LOG_INFO, "capture plane drained (EPIPE)");
+					ctx->eos.store(true);
 				}
 				else
 				{
 					ERROR_MSG("Error while calling dequeue at capture plane");
 					ctx->eos.store(true);
 				}
+				break;
+			}
+
+			last_progress = std::chrono::steady_clock::now();
+			const bool is_last = (v4l2_buf.flags & V4L2_BUF_FLAG_LAST) != 0;
+			if (is_last && v4l2_buf.m.planes[0].bytesused == 0)
+			{
+				/* LAST on an empty buffer: end marker without a picture.
+				 * Nothing to transform or emit; the drain is complete. Not
+				 * re-queued: close()/flush() tear the capture plane down. */
+				NVMPI_LOG(NVMPI_LOG_INFO, "capture plane drained (empty LAST buffer)");
+				ctx->eos.store(true);
 				break;
 			}
 
@@ -371,6 +339,16 @@ void dec_capture_loop_fcn(void *arg)
 					break;
 			}
 
+			/* LAST buffer with a picture: it was emitted above and is the
+			 * final one. Finish the drain here (no re-queue); the pool
+			 * shutdown below wakes the consumer once it took the rest. */
+			if (is_last)
+			{
+				NVMPI_LOG(NVMPI_LOG_INFO, "capture plane drained (LAST buffer)");
+				ctx->eos.store(true);
+				break;
+			}
+
 			//return the DMA buffer to the decoder so it can be refilled
 			v4l2_buf.m.planes[0].m.fd = ctx->dmaBufferFileDescriptor[v4l2_buf.index];
 			if (dec->capture_plane.qBuffer(v4l2_buf, NULL) < 0)
@@ -385,6 +363,9 @@ void dec_capture_loop_fcn(void *arg)
 				ctx->eos.store(true);
 				break;
 			}
+			/* Restart the idle clock: time spent back-pressured above is
+			 * the consumer's, not a silent driver. */
+			last_progress = std::chrono::steady_clock::now();
 		}
 	}
 	/* Unblock any consumer waiting in dqFilledBuf(timeout) — all exit

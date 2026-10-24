@@ -19,8 +19,8 @@
  *   nvmpi_dec_pool.cpp    — frame-pool generations.
  *   nvmpi_dec_init.cpp    — nvmpi_create_decoder() and the
  *                           VIC-transform-parameter setup it depends on.
- *   nvmpi_dec_capture.cpp — capture-thread loop and resolution-change
- *                           handling.
+ *   nvmpi_dec_capture.cpp — capture-thread loop and EOS drain.
+ *   nvmpi_dec_resevent.cpp — resolution-change handling.
  *   nvmpi_dec_planes.cpp  — CAPTURE-plane allocation/teardown helpers.
  *   nvmpi_dec_close.cpp   — nvmpi_decoder_flush() and nvmpi_decoder_close().
  */
@@ -31,7 +31,8 @@
 //(by index), afterwards block in dqBuffer(-1 = infinite) until the decoder
 //releases one. The packet payload is memcpy'd, so the caller keeps
 //ownership of it. pts (microseconds) is carried in the V4L2 timestamp.
-//A zero-sized payload is the EOS marker and flips ctx->eos.
+//A zero-sized payload is the EOS marker and flips ctx->input_eos (the
+//capture thread then drains the decoder; ctx->eos is set when that is done).
 //Returns 0 on success, -1 on dequeue failure, -2 on queue failure,
 //-3 when the packet exceeds chunk_size (packet dropped, decoder usable).
 //AV1: packets before the first sequence header are dropped and report 0.
@@ -80,7 +81,10 @@ int nvmpi_decoder_put_packet(nvmpictx* h,nvPacket* packet)
 		}
 	}
 
-	memcpy(nvBuffer->planes[0].data,packet->payload,packet->payload_size);
+	/* The EOS marker has payload_size 0 and callers may pass a NULL payload
+	 * with it: memcpy(.., NULL, 0) is undefined behaviour (UBSan reports it). */
+	if (packet->payload_size > 0)
+		memcpy(nvBuffer->planes[0].data,packet->payload,packet->payload_size);
 	nvBuffer->planes[0].bytesused=packet->payload_size;
 	v4l2_buf.m.planes[0].bytesused = nvBuffer->planes[0].bytesused;
 
@@ -97,13 +101,16 @@ int nvmpi_decoder_put_packet(nvmpictx* h,nvPacket* packet)
 		return -2;
 	}
 
-	/* Count BEFORE the EOS store below: the capture thread's race guard
-	 * (nvmpi_dec_capture.cpp) reads this after seeing eos. */
+	/* Count BEFORE the input_eos store below: the capture thread's race guard
+	 * (nvmpi_dec_capture.cpp) reads this after seeing input_eos. */
 	ctx->packets_put.fetch_add(1, std::memory_order_release);
 
 	if (v4l2_buf.m.planes[0].bytesused == 0)
 	{
-		ctx->eos.store(true);
+		/* Only the input side is finished. ctx->eos stays false: the capture
+		 * thread must keep dequeuing until the driver's LAST buffer, or the
+		 * frames still held for reordering are lost (#161). */
+		ctx->input_eos.store(true);
 		NVMPI_LOG(NVMPI_LOG_INFO, "input EOS detected");
 	}
 

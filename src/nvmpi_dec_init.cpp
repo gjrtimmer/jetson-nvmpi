@@ -14,15 +14,15 @@
  * The CAPTURE plane and (for streams whose dimensions are unknown at create
  * time) the frame pool are NOT fully set up here — that happens on the
  * capture thread once the first resolution-change event fires (see
- * nvmpi_dec_capture.cpp: respondToResolutionEvent()).
+ * nvmpi_dec_resevent.cpp: respondToResolutionEvent()).
  *
  * Companion files:
  *   nvmpi_dec_internal.h  — shared includes, defines, nvmpi_dec_ctx struct,
  *                           and forward declarations.
  *   nvmpi_dec_api.cpp     — runtime API: put_packet, get_frame.
  *   nvmpi_dec_fd.cpp      — zero-copy get_frame_fd, borrow/release.
- *   nvmpi_dec_capture.cpp — capture-thread loop and resolution-change
- *                           handling.
+ *   nvmpi_dec_capture.cpp — capture-thread loop and EOS drain.
+ *   nvmpi_dec_resevent.cpp — resolution-change handling.
  *   nvmpi_dec_planes.cpp  — CAPTURE-plane allocation/teardown helpers.
  *   nvmpi_dec_codec.cpp   — codingType to V4L2 fourcc mapping.
  *   nvmpi_dec_pool.cpp    — frame-pool generations: initFramePool()/
@@ -284,6 +284,7 @@ nvmpictx* nvmpi_create_decoder(nvDecParam* param)
 	ctx->hint_height = param->height;
 	ctx->framePool = new NVMPI_bufPool<dec_slot*>();
 	ctx->eos.store(false);
+	ctx->input_eos.store(false);
 	ctx->index=0;
 	for(int index=0;index<MAX_BUFFERS;index++)
 		ctx->dmaBufferFileDescriptor[index]=-1;

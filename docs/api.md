@@ -303,8 +303,10 @@ the capture thread. `param` is read once. The decoder device is looked up as
 
 Feeds one compressed packet (Annex-B for H.264/HEVC). May block waiting for a
 free V4L2 OUTPUT-plane buffer once all buffers are in flight. A packet with
-`payload_size == 0` signals end of stream (starts flushing). `pts` is carried
-in microseconds.
+`payload_size == 0` signals end of stream: the decoder then drains, and the
+`get_frame*` calls keep returning every frame still held inside it (reorder
+/ DPB depth, the last frames of the stream) before reporting the end of the
+stream with `-1`. `pts` is carried in microseconds.
 
 | Return | Meaning |
 | --- | --- |

@@ -18,7 +18,7 @@
 //  2. Join the capture thread.
 //  3. STREAMOFF output plane — aborts any in-flight V4L2 buffers.
 //  4. Move filled frames back to the empty queue (generation unchanged).
-//  5. Reset EOS flag and output-plane buffer index.
+//  5. Reset EOS flags (eos, input_eos) and output-plane buffer index.
 //  6. STREAMON output plane.
 //  7. Restart the capture thread — it will wait for the next
 //     resolution-change event (triggered when the caller re-primes
@@ -50,6 +50,7 @@ int nvmpi_decoder_flush(nvmpictx* h)
 		ctx->framePool->qEmptyBuf(slot);
 
 	ctx->eos.store(false);
+	ctx->input_eos.store(false);        /* capture thread joined: no reader */
 	/* AV1: the restarted stream must send its own sequence header; until it
 	 * does, data is dropped again instead of poisoning the driver (#147). */
 	ctx->av1_seq_seen = false;
