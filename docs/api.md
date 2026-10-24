@@ -806,7 +806,7 @@ For fds you allocate yourself and pass to the encoder, use
 
 ## Surfaces
 
-Helpers to allocate and free pitch-linear NV12 DMA-BUF surfaces. Both
+Helpers to allocate, free and describe pitch-linear NV12 DMA-BUF surfaces. Both
 allocators reject zero dimensions and sizes above 8192 in either direction
 (`src/nvmpi_surface.cpp`); the dimension limit is not stated in the header.
 
@@ -834,6 +834,35 @@ Returns `0` or `-1`.
 
 Destroys a surface from either allocator. Safe with `dmabuf_fd == -1` (no-op).
 Returns `0`, or `-1` if the underlying destroy fails.
+
+### `nvmpi_surface_get_layout`
+
+```c
+int nvmpi_surface_get_layout(int dmabuf_fd, nvmpi_fd_frame *frame);
+```
+
+Reports the plane layout of a registered pitch-linear surface: one from
+`nvmpi_surface_alloc` / `nvmpi_surface_alloc_for_enc`, or a decoder or JPEG
+pool fd. Use it instead of assuming `pitch == width` and
+`offset[1] == pitch * height`: the allocator rounds the pitch (a 642 wide NV12
+surface can have pitch 768) and page-aligns the planes. Same `struct_size`
+handshake as `nvmpi_decoder_get_frame_fd2`: set `frame->struct_size` to
+`sizeof(nvmpi_fd_frame)` (minimum `NVMPI_FD_FRAME_V1_SIZE`); the library fills
+`min(struct_size, sizeof)` bytes and writes that size back.
+
+| Field | Value |
+| --- | --- |
+| `fd` | `dmabuf_fd`, unchanged. |
+| `width`, `height` | Allocated size of plane 0. |
+| `format` | From the surface colour format: NV12 gives `NV_PIX_NV12`, YUV420 gives `NV_PIX_YUV420`, NV12_10LE gives `NV_PIX_P010` (NvUtils builds). The `_ER`, `_709` and `_2020` variants map to the same value. |
+| `num_planes`, `pitch[]`, `offset[]`, `size` | From the allocator's plane parameters; `size` is `dataSize`, or the end of the last plane when that is 0. |
+| `timestamp`, `flags` | 0. |
+
+Read-only: the fd is not retained, `dup`'d or closed, and ownership stays with
+the allocator (still `nvmpi_surface_destroy`). Returns `0`, or
+`NVMPI_ERR_INVAL` with `*frame` untouched for a NULL `frame`, a too-small
+`struct_size`, `dmabuf_fd < 0`, an fd the allocator does not know (`dup`'d,
+closed or foreign), any other colour format, or an implausible layout.
 
 ### `nvmpi_surface_copy_from_dmabuf`
 
