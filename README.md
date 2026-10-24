@@ -97,9 +97,9 @@ libnvmpi targets the Jetson families that ship the NVIDIA Jetson Multimedia API:
 
 | JetPack | L4T | Buffer API used | Platforms | Status in this project |
 | --- | --- | --- | --- | --- |
-| 6.x | r36 | NvUtils (NvBufSurface) | AGX Orin, Orin NX, Orin Nano | Tested in CI on Orin NX (JetPack 6, L4T r36.4) |
-| 5.x | r35 | NvUtils (NvBufSurface) | AGX Xavier, Xavier NX, AGX Orin, Orin NX (5.1.x), Orin Nano (5.1.x) | Compile-checked in CI; not hardware tested |
-| 4.x and earlier | r32 and earlier | legacy `nvbuf_utils` | TX1, TX2, Nano, AGX Xavier, Xavier NX | Supported by the code; not exercised by CI. jetson-ffmpeg's v2.x series is the line for FFmpeg 4.2/4.4 on these. |
+| 6.x | R36 | NvUtils (NvBufSurface) | AGX Orin, Orin NX, Orin Nano | Tested in CI on Orin NX (JetPack 6, L4T R36.4) |
+| 5.x | R35 | NvUtils (NvBufSurface) | AGX Xavier, Xavier NX, AGX Orin, Orin NX (5.1.x), Orin Nano (5.1.x) | Compile-checked in CI; not hardware tested |
+| 4.x and earlier | R32 and earlier | legacy `nvbuf_utils` | TX1, TX2, Nano, AGX Xavier, Xavier NX | Supported by the code; not exercised by CI. jetson-ffmpeg's v2.x series is the line for FFmpeg 4.2/4.4 on these. |
 
 The first JetPack with the multimedia API libnvmpi is built on is JetPack 3.2
 (L4T r28); earlier releases and the TK1 cannot be supported. Platforms that
@@ -125,10 +125,10 @@ Hardware limits that no software can change:
 Each tagged release publishes one archive per JetPack generation:
 `jetson-nvmpi_<version>_l4t<tag>_aarch64.tar.gz` (for example
 `..._l4tr36.4.0_...` for JetPack 6 and `..._l4tr35.4.1_...` for JetPack 5). They
-are attached to the GitLab release and stored in the project's S3 bucket under
-`releases/<version>/jp5` and `releases/<version>/jp6` (see
-[docs/ci.md](docs/ci.md#published-artifacts-and-layout)). Choose the archive
-that matches your JetPack.
+are attached to the
+[GitHub release](https://github.com/gjrtimmer/jetson-nvmpi/releases) of each
+version (see [docs/ci.md](docs/ci.md#published-artifacts-and-layout) for how
+they are produced). Choose the archive that matches your JetPack.
 
 Layout:
 
@@ -161,7 +161,7 @@ Prerequisites: a Jetson with JetPack installed (Multimedia API headers in
 `/usr/src/jetson_multimedia_api`), CMake 3.10 or newer, a C++11 compiler, Git.
 
 ```bash
-git clone <your clone URL of jetson-nvmpi>
+git clone https://github.com/gjrtimmer/jetson-nvmpi.git
 cd jetson-nvmpi
 ./scripts/build.sh --install        # build, install to /usr/local, run ldconfig
 ```
@@ -372,7 +372,7 @@ hardware suites live in the jetson-ffmpeg repository.
 
 ## CI and releases
 
-The GitLab pipeline:
+The GitLab CI pipeline (self-hosted Jetson runner; GitHub is a mirror):
 
 ```text
 build (stubs: jp6, jp5; unit tests)  ->  test (test:api:hw on the Jetson runner;
@@ -386,9 +386,8 @@ build (stubs: jp6, jp5; unit tests)  ->  test (test:api:hw on the Jetson runner;
   `<version>-<short-sha>`.
 - A tag `vX.Y.Z` runs the same jobs, so a release is gated on the Jetson test of
   that exact commit. The **tag must equal the `VERSION` in `CMakeLists.txt`**.
-  It then uploads to S3 `releases/<version>/jp5|jp6/`, the GitLab package
-  registry, and creates the GitLab release with a changelog generated from
-  Conventional Commits.
+  It then publishes the per-JetPack archives and creates the release with a
+  changelog generated from Conventional Commits.
 - Cutting a release: bump `project(nvmpi VERSION X.Y.Z ...)`, merge, tag
   `vX.Y.Z`, push the tag.
 
@@ -400,7 +399,7 @@ jetson-ffmpeg.
 
 - **Static library**: `libnvmpi.a` is installed, but `nvmpi.pc` has no
   `Libs.private`, so `pkg-config --static` does not list the dependencies
-  (issue #12 on the project's GitLab). The shared library is the supported way
+  (tracked as a known gap). The shared library is the supported way
   to consume libnvmpi.
 - **Tegra V4L2 driver**: it does not unblock `DevicePoll()` after EOS, deadlocks
   on concurrent `NvBufSurfTransform` calls (libnvmpi serialises them with one
@@ -436,11 +435,11 @@ usage), see the [jetson-ffmpeg wiki](https://github.com/gjrtimmer/jetson-ffmpeg/
   [gjrtimmer/jetson-nvmpi](https://github.com/gjrtimmer/jetson-nvmpi/issues).
   For crashes include your Jetson module, JetPack / L4T version, and the
   `[libnvmpi]` log lines.
-- **Merge requests** go to the project's GitLab (the GitHub repository is a push
-  mirror). Branch from the default branch using `{type}/{NR}-{short-desc}`
+- **Changes**: the GitHub repository is a read-only mirror, so open an issue
+  rather than a pull request. Maintainer branches use `{type}/{NR}-{short-desc}`
   (`fix/`, `feat/`, `perf/`, `refactor/`, `ci/`, `docs/`; `NR` is the issue
   number).
-- **Commits and MR titles** follow
+- **Commits** follow
   [Conventional Commits](https://www.conventionalcommits.org/)
   (`feat(nvmpi): ...`, `fix(nvmpi): ...`, `ci: ...`, `docs: ...`). The changelog
   is generated from them, so use the right type. Keep the subject imperative and

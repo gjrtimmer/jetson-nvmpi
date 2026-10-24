@@ -52,7 +52,7 @@ run.
   `dist:*` need it as `optional`, so tags still gate on it and main snapshots
   do not wait for it.
 - **Pinned images.** Builder, runtime and release-tools images come from
-  `timmertech/jetson-docker` with immutable `<tag>-<sha8>` tags
+  the jetson-docker project with immutable `<tag>-<sha8>` tags
   (`JETSON_DOCKER_SHA`), pulled with `if-not-present`. To adopt new images,
   take the sha8 of the latest green jetson-docker main pipeline and bump it.
 - **ccache.** `build:*` use ccache as CMake compiler launcher with a per-job
@@ -143,7 +143,7 @@ on the Orin.
   `test:api:hw` needs `build:jp6`.
 - `workflow:auto_cancel:on_job_failure: all` cancels the rest of the pipeline,
   including a still-queued `test:api:hw`, when any job fails, so a mock failure
-  does not occupy the shared Orin.
+  does not occupy the Jetson runner.
 - Forked test children end with `_exit()`, which skips LeakSanitizer's exit
   check. `test/api/leak_check.h` runs `__lsan_do_leak_check()` before each
   `_exit()` in ASan builds (no-op otherwise), so leaks fail the offending case
@@ -214,7 +214,7 @@ both tags is online.
 
 Builder and runtime images (JetPack 5 and JetPack 6 builder, the Jetson test
 image and the release-tools image) are built and published by the
-`timmertech/jetson-docker` project's pipeline; this project only consumes them.
+jetson-docker project's pipeline; this project only consumes them.
 
 ## Branch and merge request pipelines
 

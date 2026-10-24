@@ -354,8 +354,7 @@ be resolvable on the library path of the machine that runs FFmpeg (see
 objects. `nvmpi.pc` has no `Libs.private`, so
 `pkg-config --static --libs nvmpi` does not list libnvmpi's own dependencies
 (the NVIDIA libraries, libjpeg and pthreads). Linking statically therefore
-requires adding those libraries by hand. This is a known gap tracked as issue
-#12 on the project's GitLab; the shared library is the supported way to
+requires adding those libraries by hand. This is a known gap; the shared library is the supported way to
 consume libnvmpi.
 
 ## Verifying the installation
