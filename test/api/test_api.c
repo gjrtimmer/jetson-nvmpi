@@ -273,6 +273,7 @@ static int test_encoder_hevc_create_close(void)
 #include "dec_fd_case.h"
 #include "dec_fd2_case.h"
 #include "dec_eos_case.h"
+#include "dec_flush_case.h"
 #include "caps_case.h"
 
 int main(void)
@@ -310,6 +311,9 @@ int main(void)
     /* Every frame the decoder holds comes back after EOS (#161). */
     fail += RUN_TEST(test_decoder_eos_drain_h264);
     fail += RUN_TEST(test_decoder_eos_drain_hevc);
+    /* Flush after the first resolution event, resume at the same size (#162). */
+    fail += RUN_TEST(test_decoder_flush_after_event_h264);
+    fail += RUN_TEST(test_decoder_flush_after_event_hevc);
     /* JPEG DMA-BUF output: real NVJPG or the mock model, SKIP on stubs. */
     fail += RUN_TEST(test_jpeg_fd_nv12);
     fail += RUN_TEST(test_jpeg_fd_yuv420);
