@@ -291,6 +291,7 @@ int main(void)
     test_transform_nv12_i420();
     test_transform_crop();
     test_decoder_model();
+    test_decoder_reorder();
     test_fault_injection();
     test_encoder_model();
     test_encoder_hevc_params();

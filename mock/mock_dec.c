@@ -30,8 +30,19 @@
  *                        streamoff (flush/close). After a header, buffers
  *                        with no picture OBU (TD/header only) complete
  *                        without a frame and the state is sticky.
+ *   Reorder delay        NVMPI_MOCK_DEC_REORDER=N (default 0) models the DPB
+ *                        depth of a real decoder: a VCL AU only produces a
+ *                        frame once N frames are held back, so the last N
+ *                        frames of a stream exist only inside the decoder
+ *                        until EOS drains them (the loss of #161
+ *                        when the capture thread stops before the LAST
+ *                        buffer). Frames come out in input order.
  *   EOS                  Frames already decoded are delivered first; the
  *                        newest undelivered one is flagged V4L2_BUF_FLAG_LAST.
+ *                        With a reorder delay the EOS marker stays QUEUED
+ *                        until every held frame was produced (it needs free
+ *                        CAPTURE buffers, like any frame), and LAST goes on
+ *                        the final one.
  *                        Afterwards DQBUF on the empty CAPTURE queue reports
  *                        EAGAIN with V4L2_BUF_FLAG_LAST set in the buffer
  *                        (what NvV4l2ElementPlane::dqBuffer and libnvmpi's
@@ -62,12 +73,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
 /* NVIDIA's V4L2_EVENT_RESOLUTION_CHANGE is the mainline SOURCE_CHANGE (5);
  * the NVIDIA header is not needed to build the mock. */
-#define MOCK_EVENT_RES_CHANGE V4L2_EVENT_SOURCE_CHANGE
 /* NVIDIA fourcc for HEVC (v4l2_nv_extensions.h); mainline uses 'HEVC'. */
 #define MOCK_PIX_FMT_H265 v4l2_fourcc('H', '2', '6', '5')
 /* AV1: NVIDIA fourcc ('AV10', V4L2_PIX_FMT_AV1 in its headers) and mainline's
@@ -78,7 +87,6 @@
 #define DEC_DEFAULT_W   320u
 #define DEC_DEFAULT_H   240u
 #define DEC_DQ_WAIT_MS  10u        /* default bound on a blocking DQBUF     */
-#define DEC_MAX_FILL    (1u << 28) /* never touch a surface bigger than this */
 
 
 static void dec_on_open(struct mock_ctx *ctx)
@@ -97,6 +105,8 @@ static void dec_on_open(struct mock_ctx *ctx)
         m->env_w = w;
         m->env_h = h;
     }
+    (void)mock_env_uint("NVMPI_MOCK_DEC_REORDER", 0, MOCK_DEC_REORDER_MAX,
+                        &m->reorder);
     (void)mock_env_uint("NVMPI_MOCK_DQBUF_WAIT_MS", 0, 60000, &wait);
     ctx->dq_wait_ms = wait;
     /* A DQBUF released by STREAMOFF reports EAGAIN, not EINVAL. libnvmpi's
@@ -120,83 +130,10 @@ static void dec_on_close(struct mock_ctx *ctx)
     }
 }
 
-/* Fill every byte of a buffer's backing memfd with 0x80: Y = 128 and
- * CbCr = 128 is mid-gray in NV12 whatever the plane layout. -1 on failure. */
-static int fill_gray(int fd)
-{
-    struct stat st;
-    void *p;
-
-    if (fd < 0 || fstat(fd, &st) < 0 || !S_ISREG(st.st_mode) ||
-        st.st_size <= 0 || (uint64_t)st.st_size > DEC_MAX_FILL)
-        return -1;
-    p = mmap(NULL, (size_t)st.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    if (p == MAP_FAILED)
-        return -1;
-    memset(p, 0x80, (size_t)st.st_size);
-    munmap(p, (size_t)st.st_size);
-    return 0;
-}
-
-/* Announce stream size (w,h): program the CAPTURE format/crop and push the
- * RESOLUTION_CHANGE event. A change while CAPTURE streams must be completed
- * by the application (STREAMOFF) before new-size frames flow. */
-static void announce(struct mock_ctx *ctx, struct dec_model *m, uint32_t w,
-                     uint32_t h)
-{
-    struct mock_queue *cap = &ctx->q[MOCK_Q_CAPTURE];
-    struct v4l2_pix_format_mplane *pix = &cap->fmt.fmt.pix_mp;
-
-    m->reconfig = m->announced && cap->streaming;
-    m->announced = true;
-    m->width = w;
-    m->height = h;
-    memset(pix, 0, sizeof(*pix));
-    pix->width = w;
-    pix->height = h;
-    pix->pixelformat = V4L2_PIX_FMT_NV12M;
-    pix->field = V4L2_FIELD_NONE;
-    pix->colorspace = V4L2_COLORSPACE_SMPTE170M;
-    pix->num_planes = 2;
-    pix->plane_fmt[0].sizeimage = w * h;
-    pix->plane_fmt[0].bytesperline = w;
-    pix->plane_fmt[1].sizeimage = w * h / 2;
-    pix->plane_fmt[1].bytesperline = w;
-    cap->crop.left = cap->crop.top = 0;
-    cap->crop.width = w;
-    cap->crop.height = h;
-    MOCK_TRACE("decoder: stream %ux%u%s", w, h, m->reconfig ? " (change)" : "");
-    mock_push_event(ctx, MOCK_EVENT_RES_CHANGE, 0);
-}
-
 /* Complete OUTPUT buffer oi (consumed by the decoder). */
 static void finish_out(struct mock_ctx *ctx, int oi, uint32_t flags)
 {
     (void)mock_complete_buf(ctx, MOCK_Q_OUTPUT, (uint32_t)oi, NULL, flags);
-}
-
-/* Produce one gray frame into capture buffer ci for output buffer mb. */
-static void produce(struct mock_ctx *ctx, struct dec_model *m, int ci,
-                    const struct mock_buf *mb)
-{
-    struct mock_queue *cap = &ctx->q[MOCK_Q_CAPTURE];
-    struct mock_buf *cb = &cap->bufs[ci];
-    uint32_t used[MOCK_MAX_PLANES] = { 0 }, flags = 0;
-    uint64_t luma = (uint64_t)m->width * m->height;
-    int fd = cap->memory == V4L2_MEMORY_MMAP ? cb->memfd :
-             cap->memory == V4L2_MEMORY_DMABUF ? cb->dmabuf_fd[0] : -1;
-
-    if (cb->n_planes >= 2) {
-        used[0] = (uint32_t)luma;
-        used[1] = (uint32_t)(luma / 2);
-    } else {
-        used[0] = (uint32_t)(luma * 3 / 2);
-    }
-    if (fill_gray(fd) < 0)
-        flags |= V4L2_BUF_FLAG_ERROR;  /* USERPTR or a foreign fd: no data */
-    cb->ts_ns = mb->ts_ns;                 /* timestamp copy (pts passthrough)  */
-    (void)mock_complete_buf(ctx, MOCK_Q_CAPTURE, (uint32_t)ci, used, flags);
-    m->last_idx = ci;
 }
 
 /* View of an OUTPUT buffer's bytes. Returns NULL when not readable. *map is
@@ -219,19 +156,38 @@ static const uint8_t *out_bytes(const struct mock_buf *mb, uint32_t memory,
     return NULL;                       /* DMABUF bitstream: not modelled    */
 }
 
-/* Process the EOS marker (empty OUTPUT buffer oi). Always consumes it. */
-static void step_eos(struct mock_ctx *ctx, struct dec_model *m, int oi)
+/* Process the EOS marker (empty OUTPUT buffer oi). Returns false while held
+ * frames still wait for a CAPTURE buffer (the marker stays queued and is
+ * retried when the application queues one); true once consumed. */
+static bool step_eos(struct mock_ctx *ctx, struct dec_model *m, int oi)
 {
     struct mock_queue *cap = &ctx->q[MOCK_Q_CAPTURE];
+    bool drained = false;
+    int ci;
 
     if (!m->eos_seen) {
-        /* The newest frame, if the application has not taken it yet,
-         * becomes the "last" buffer. */
-        if (m->last_idx >= 0 && cap->bufs[m->last_idx].state == MB_DONE)
+        /* Drain the reorder FIFO: every held frame is produced in order and
+         * the final one becomes the "last" buffer. */
+        while (m->held_n > 0) {
+            if (m->reconfig || !cap->streaming ||
+                (ci = mock_peek_queued(ctx, MOCK_Q_CAPTURE)) < 0) {
+                MOCK_TRACE("decoder: EOS waits, %u frame(s) held", m->held_n);
+                return false;
+            }
+            mock_dec_produce(ctx, m, ci, mock_dec_held_pop(m));
+            drained = true;
+            if (m->held_n == 0)
+                cap->bufs[ci].flags |= V4L2_BUF_FLAG_LAST;
+        }
+        /* Nothing was held: the newest frame, if the application has not
+         * taken it yet, becomes the "last" buffer. */
+        if (!drained && m->last_idx >= 0 &&
+            cap->bufs[m->last_idx].state == MB_DONE)
             cap->bufs[m->last_idx].flags |= V4L2_BUF_FLAG_LAST;
         m->eos_seen = m->eos_last = true;
     }
     finish_out(ctx, oi, 0);
+    return true;
 }
 
 /* Process OUTPUT buffer oi. Returns false when it must wait (back-pressure
@@ -249,10 +205,8 @@ static bool step(struct mock_ctx *ctx, struct dec_model *m, int oi)
     int ci;
     bool av1 = pixfmt == MOCK_PIX_FMT_AV1_NV || pixfmt == MOCK_PIX_FMT_AV1;
 
-    if (n == 0) {
-        step_eos(ctx, m, oi);
-        return true;
-    }
+    if (n == 0)
+        return step_eos(ctx, m, oi);
     if (n > mb->length[0]) {           /* driver would reject; flag + drop  */
         finish_out(ctx, oi, V4L2_BUF_FLAG_ERROR);
         return true;
@@ -288,15 +242,20 @@ static bool step(struct mock_ctx *ctx, struct dec_model *m, int oi)
 
     if (m->env_dims) {
         if (!m->announced)
-            announce(ctx, m, m->env_w, m->env_h);
+            mock_dec_announce(ctx, m, m->env_w, m->env_h);
     } else if (!m->announced) {
-        announce(ctx, m, sc.has_dims ? sc.width : DEC_DEFAULT_W,
+        mock_dec_announce(ctx, m, sc.has_dims ? sc.width : DEC_DEFAULT_W,
                  sc.has_dims ? sc.height : DEC_DEFAULT_H);
     } else if (sc.has_dims && (sc.width != m->width || sc.height != m->height)) {
-        announce(ctx, m, sc.width, sc.height);
+        mock_dec_announce(ctx, m, sc.width, sc.height);
     }
 
     if (!sc.has_vcl) {                 /* parameter sets only: no frame     */
+        finish_out(ctx, oi, 0);
+        return true;
+    }
+    if (m->held_n < m->reorder) {      /* still filling the reorder delay   */
+        mock_dec_held_push(m, mb->ts_ns);
         finish_out(ctx, oi, 0);
         return true;
     }
@@ -306,7 +265,14 @@ static bool step(struct mock_ctx *ctx, struct dec_model *m, int oi)
                    m->reconfig, cap->streaming);
         return false;                  /* hold: no destination buffer yet   */
     }
-    produce(ctx, m, ci, mb);
+    if (m->reorder) {                  /* the frame shown now is an older one */
+        uint64_t ts = mock_dec_held_pop(m);
+
+        mock_dec_held_push(m, mb->ts_ns);
+        mock_dec_produce(ctx, m, ci, ts);
+    } else {
+        mock_dec_produce(ctx, m, ci, mb->ts_ns);
+    }
     MOCK_TRACE("decoder: frame -> capture buffer %d", ci);
     finish_out(ctx, oi, 0);
     return true;
@@ -351,6 +317,7 @@ static void dec_on_streamoff(struct mock_ctx *ctx, int qi)
     if (qi == MOCK_Q_OUTPUT) {         /* flush: start over, drop events    */
         m->announced = m->reconfig = m->eos_seen = m->eos_last = false;
         m->seq_seen = false;           /* AV1: next stream sends its own header */
+        m->held_n = m->held_head = 0;  /* reorder FIFO is flushed too       */
         ctx->ev_head = ctx->ev_count = 0;
     } else {                           /* CAPTURE torn down: re-armed next  */
         m->reconfig = false;

@@ -13,6 +13,7 @@ struct mock_ctx;
 
 #define MOCK_DEC_MIN_DIM 16u
 #define MOCK_DEC_MAX_DIM 8192u        /* same bound as the nvbufsurface mock */
+#define MOCK_DEC_REORDER_MAX 16u      /* NVMPI_MOCK_DEC_REORDER upper bound  */
 
 /* What the model needs to know about one OUTPUT (bitstream) buffer. */
 struct mock_scan {
@@ -36,7 +37,26 @@ struct dec_model {
     bool seq_seen;                 /* AV1: a sequence header arrived (#147) */
     bool env_dims;                 /* NVMPI_MOCK_WIDTH/HEIGHT given         */
     uint32_t env_w, env_h;
+    /* Reorder delay (NVMPI_MOCK_DEC_REORDER = N, 0 = off): the DPB depth of
+     * a real decoder. The timestamps of the frames the model holds back are
+     * kept in a FIFO; a VCL AU produces a frame (the oldest held one) only
+     * once N are held, and EOS must drain the FIFO first. */
+    uint32_t reorder;
+    uint32_t held_n;                   /* frames currently held back        */
+    uint32_t held_head;                /* ring index of the oldest          */
+    uint64_t held_ts[MOCK_DEC_REORDER_MAX]; /* ts_ns of the held frames     */
 };
+
+/* mock_dec_frame.c (ctx->mu held). announce: program the CAPTURE format/crop
+ * for a w x h stream and push RESOLUTION_CHANGE. produce: complete CAPTURE
+ * buffer ci with a gray frame carrying ts_ns. held_push/held_pop: the reorder
+ * FIFO (never more than m->reorder <= MOCK_DEC_REORDER_MAX entries). */
+void mock_dec_announce(struct mock_ctx *ctx, struct dec_model *m, uint32_t w,
+                       uint32_t h);
+void mock_dec_produce(struct mock_ctx *ctx, struct dec_model *m, int ci,
+                      uint64_t ts_ns);
+void mock_dec_held_push(struct dec_model *m, uint64_t ts);
+uint64_t mock_dec_held_pop(struct dec_model *m);
 
 /* mock_dec_ctl.c: controls the decoder model answers itself: G_CTRL
  * MIN_BUFFERS_FOR_CAPTURE, S_EXT_CTRLS DEVICE_POLL / SET_POLL_INTERRUPT.

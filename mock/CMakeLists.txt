@@ -32,7 +32,7 @@ endfunction()
 nvmpi_mock_lib(nvv4l2_mock nvv4l2 libv4l2.so.0
 	mock_v4l2_core.c mock_v4l2_queue.c mock_v4l2_stream.c
 	mock_v4l2_fmt.c mock_v4l2_models.c mock_faults.c
-	mock_dec.c mock_dec_ctl.c mock_dec_nal.c
+	mock_dec.c mock_dec_frame.c mock_dec_ctl.c mock_dec_nal.c
 	mock_enc.c mock_enc_ctl.c mock_enc_nal.c mock_enc_h264.c mock_enc_pic.c
 	mock_enc_hevc.c mock_enc_hevc_slice.c mock_enc_cabac.c mock_enc_av1.c)
 add_custom_command(TARGET nvv4l2_mock POST_BUILD
@@ -57,6 +57,7 @@ if(BUILD_TESTING)
 	add_executable(test_mock
 		${CMAKE_SOURCE_DIR}/test/mock/test_mock.c
 		${CMAKE_SOURCE_DIR}/test/mock/test_mock_dec.c
+		${CMAKE_SOURCE_DIR}/test/mock/test_mock_dec_reorder.c
 		${CMAKE_SOURCE_DIR}/test/mock/test_mock_fault.c
 		${CMAKE_SOURCE_DIR}/test/mock/test_mock_enc.c
 		${CMAKE_SOURCE_DIR}/test/mock/test_mock_hevc.c

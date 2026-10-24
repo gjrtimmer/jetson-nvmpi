@@ -42,6 +42,8 @@ extern int mock_fails;
 /* test_mock_dec.c: decoder model. test_mock_fault.c: fault/delay injection. */
 void test_decoder_model(void);
 void test_fault_injection(void);
+/* test_mock_dec_reorder.c: reorder delay (NVMPI_MOCK_DEC_REORDER, #161). */
+void test_decoder_reorder(void);
 /* test_mock_enc.c: encoder model. */
 void test_encoder_model(void);
 /* test_mock_hevc.c: HEVC VPS/SPS/PPS of the encoder model. */
