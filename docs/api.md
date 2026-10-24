@@ -9,6 +9,7 @@ Contents:
 
 - [Concepts](#concepts)
 - [Constants](#constants)
+- [Library capabilities](#library-capabilities)
 - [Enums](#enums)
 - [Structures](#structures)
 - [Video decoder](#video-decoder)
@@ -86,6 +87,27 @@ into the caller's memory. Pinned by a static assert.
 NULL argument, `struct_size` too small, or a handle of the wrong kind
 (`nvmpi_jpeg_decoder_get_frame_fd`, `nvmpi_decoder_get_frame_fd2`). Matches Linux `EINVAL`. The value is part
 of the frozen 4.1.0 ABI.
+
+## Library capabilities
+
+Behaviour flags of the loaded libnvmpi build, for callers that `dlopen` it and
+cannot tell releases apart by file name.
+
+### `nvmpi_get_caps`
+
+`nvmpi.h` -- `unsigned int nvmpi_get_caps(void);`
+
+Returns the `NVMPI_CAP_*` bits this build supports. Thread-safe, no side
+effects, needs no context or device, never fails. Bits are never reused.
+
+| Bit | Meaning |
+| --- | --- |
+| `NVMPI_CAP_DEC_EOS_DRAIN` (`1u << 0`) | A zero-size `nvmpi_decoder_put_packet` drains the decoder to the last frame. Older releases stop capture at once and lose the reorder tail. |
+
+The symbol does not exist in releases that predate it. A caller that loads
+libnvmpi at run time should resolve it as optional (`dlsym` returning NULL) and
+treat a missing symbol like `0`: no bit set, old behaviour. Example: send the
+EOS packet only when `nvmpi_get_caps() & NVMPI_CAP_DEC_EOS_DRAIN`.
 
 ## Enums
 
