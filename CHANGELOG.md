@@ -3,6 +3,38 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.6.6 - 2026-10-24
+
+### Bug Fixes
+
+
+**dec**
+
+
+- Drain capture plane to LAST after input EOS
+
+
+**decoder**
+
+
+- Let close() interrupt the race-guard event wait
+
+
+### Testing
+
+
+**api**
+
+
+- Assert full frame count at decoder EOS
+- Bound close() latency inside the race guard
+
+
+**mock**
+
+
+- Model decoder reorder delay (NVMPI_MOCK_DEC_REORDER)
+
 ## 4.6.5 - 2026-10-23
 
 ### Bug Fixes
