@@ -3,6 +3,33 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.7.0 - 2026-10-24
+
+### Features
+
+
+**api**
+
+
+- Add nvmpi_get_caps capability bits
+
+
+### Testing
+
+
+**api**
+
+
+- Nvmpi_get_caps cases
+
+### Documentation
+
+
+**api**
+
+
+- Document nvmpi_get_caps
+
 ## 4.6.6 - 2026-10-24
 
 ### Bug Fixes
