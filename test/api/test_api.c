@@ -272,6 +272,7 @@ static int test_encoder_hevc_create_close(void)
 #include "enc_odd_case.h"
 #include "dec_fd_case.h"
 #include "dec_fd2_case.h"
+#include "dec_eos_case.h"
 
 int main(void)
 {
@@ -304,6 +305,9 @@ int main(void)
     fail += RUN_TEST(test_decoder_res_change_borrowed);
     /* get_frame_fd2 layout vs the allocator's planeParams (#138). */
     fail += RUN_TEST(test_decoder_fd2_geometry);
+    /* Every frame the decoder holds comes back after EOS (#161). */
+    fail += RUN_TEST(test_decoder_eos_drain_h264);
+    fail += RUN_TEST(test_decoder_eos_drain_hevc);
     /* JPEG DMA-BUF output: real NVJPG or the mock model, SKIP on stubs. */
     fail += RUN_TEST(test_jpeg_fd_nv12);
     fail += RUN_TEST(test_jpeg_fd_yuv420);

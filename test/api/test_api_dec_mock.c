@@ -140,7 +140,7 @@ static int decode_n(unsigned hint_w, unsigned hint_h)
     REQUIRE(put_err == 0 && got == 30);          /* one frame per VCL AU */
     REQUIRE(take(c, 640, 360, 0, NULL) != 0);    /* nothing more pending */
     REQUIRE(put(c, &eos, 0, 0) == 0);            /* EOS marker           */
-    REQUIRE(take(c, 640, 360, 0, NULL) != 0);    /* bounded, no hang     */
+    REQUIRE(take(c, 640, 360, 0, NULL) != 0);    /* end of stream, no hang */
     REQUIRE(nvmpi_decoder_close(c) == 0);
     return 0;
 }
@@ -280,6 +280,7 @@ static int fault_case(const struct tcase *t)
 #include "dec_mock_reschange.h"
 #include "dec_mock_copysize.h"
 #include "dec_mock_pts.h"
+#include "dec_mock_eos.h"
 
 static const struct tcase k_cases[] = {
     { "decode_plain", NULL, decode_plain, 0, 0 },
@@ -333,6 +334,14 @@ static const struct tcase k_cases[] = {
     { "pts_roundtrip_copy", NULL, pts_roundtrip_copy, 0, 0 },
     { "pts_roundtrip_fd", NULL, pts_roundtrip_fd, 0, 0 },
     { "pts_roundtrip_long", NULL, pts_roundtrip_long, 0, 0 },
+    /* every frame still held in the decoder is delivered at EOS (#161) */
+    { "eos_drain_reorder", NULL, eos_drain_reorder, 0, 0 },
+    { "eos_drain_fd", NULL, eos_drain_fd, 0, 0 },
+    { "eos_drain_hevc", NULL, eos_drain_hevc, 0, 0 },
+    { "eos_drain_short", NULL, eos_drain_short, 0, 0 },
+    { "eos_drain_noreorder", NULL, eos_drain_noreorder, 0, 0 },
+    { "eos_drain_after_flush", NULL, eos_drain_after_flush, 0, 0 },
+    { "eos_close_during_drain", NULL, eos_close_during_drain, 0, 0 },
     /* fault matrix: fn == NULL -> fault_case() */
     { "fault_none_control", "dqbuf@9999", NULL, 0, 0 },
     { "fault_dqbuf@1", "dqbuf@1", NULL, 0, 1 },

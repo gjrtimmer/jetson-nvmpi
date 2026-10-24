@@ -41,4 +41,51 @@ static inline int nal_has(const uint8_t *p, size_t n, int hevc, unsigned t)
     return 0;
 }
 
+/* Split an Annex-B stream into access units (hardware test fixtures, #161).
+ * An AU starts at the first non-VCL NAL (SPS/PPS/VPS/SEI/AUD) that follows a
+ * VCL NAL, or at a VCL NAL whose first-slice flag is set (H.264
+ * first_mb_in_slice == 0 and HEVC first_slice_segment_in_pic_flag are both
+ * the top bit of the byte after the NAL header). VCL: H.264 types 1..5,
+ * HEVC 0..31. Offsets point at the start code of each AU's first NAL
+ * (a 4-byte start code's leading zero belongs to the AU). Returns the number
+ * of AUs (at most max); off[i]/len[i] describe AU i. Bounds-checked,
+ * allocation free. */
+static inline unsigned nal_split_aus(const uint8_t *p, size_t n, int hevc,
+                                     size_t *off, size_t *len, unsigned max)
+{
+    size_t i, start = 0;
+    unsigned cnt = 0;
+    int seen_vcl = 0;
+
+    for (i = 0; i + 3 < n; i++) {
+        unsigned t;
+        size_t nal = i, hdr = hevc ? 2 : 1;
+        int vcl, first;
+
+        if (!(p[i] == 0 && p[i + 1] == 0 && p[i + 2] == 1))
+            continue;
+        if (i > 0 && p[i - 1] == 0)
+            nal = i - 1;                 /* 4-byte start code */
+        t = hevc ? (unsigned)((p[i + 3] >> 1) & 0x3f) : (unsigned)(p[i + 3] & 0x1f);
+        vcl = hevc ? t <= 31 : (t >= 1 && t <= 5);
+        first = vcl && i + 3 + hdr < n && (p[i + 3 + hdr] & 0x80);
+        if (seen_vcl && (!vcl || first)) {
+            if (cnt >= max)
+                return cnt;
+            off[cnt] = start;
+            len[cnt++] = nal - start;
+            start = nal;
+            seen_vcl = 0;
+        }
+        if (vcl)
+            seen_vcl = 1;
+        i += 2;
+    }
+    if (seen_vcl && cnt < max) {
+        off[cnt] = start;
+        len[cnt++] = n - start;
+    }
+    return cnt;
+}
+
 #endif /* NVMPI_TEST_NAL_SCAN_H */
