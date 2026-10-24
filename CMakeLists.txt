@@ -195,6 +195,7 @@ set(JETSON_MULTIMEDIA_API_SRC
     ${JETSON_MULTIMEDIA_API_SRC_DIR}/NvJpegEncoder.cpp)
 
 set(NVMPI_SRC
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_caps.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_init.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_api.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/nvmpi_dec_av1.cpp

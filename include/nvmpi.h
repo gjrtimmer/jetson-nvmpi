@@ -265,6 +265,15 @@ NVMPI_STATIC_ASSERT(NVMPI_FD_FRAME_V1_SIZE == 68, "V1 size ABI");
 extern "C" {
 #endif
 
+	//Behaviour flags of this libnvmpi build. Bits are never reused.
+	#define NVMPI_CAP_DEC_EOS_DRAIN (1u << 0)  /* zero-size put_packet drains to the last frame (#161) */
+
+	//Returns the NVMPI_CAP_* bits this library build supports. Thread-safe,
+	//no side effects, needs no context or device, never fails. Callers that
+	//dlopen libnvmpi load this symbol as optional: a missing symbol (older
+	//release) or an unset bit means the old behaviour, treat it as 0.
+	unsigned int nvmpi_get_caps(void);
+
 	//Create a decoder context: opens the V4L2 decoder device, sets up the
 	//bitstream (OUTPUT) plane and spawns the internal capture thread.
 	//Returns an opaque handle; param is read once and not retained.
