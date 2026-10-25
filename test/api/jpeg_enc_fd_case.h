@@ -159,6 +159,15 @@ static int jef_judge(const char *tag, const struct jef_img *src, const unsigned 
         double ba = jef_mse(&db, &da, pl), bs = jef_mse(&db, src, pl), as = jef_mse(&da, src, pl);
 
         fprintf(stderr, "    %s plane %d MSE: fd-vs-cpu %.2f, fd-vs-src %.2f, cpu-vs-src %.2f\n", tag, pl, ba, bs, as);
+        {
+            unsigned pw = pl ? (src->w + 1) / 2 : src->w, ph = pl ? (src->h + 1) / 2 : src->h;
+            fprintf(stderr, "      dbg plane %d row %u samples x=0,w/4,w/2,3w/4,w-1 (src/fd/cpu):", pl, ph / 2);
+            for (unsigned k = 0; k < 5; k++) {
+                size_t o = (size_t)(ph / 2) * src->st[pl] + (k == 4 ? pw - 1 : k * pw / 4);
+                fprintf(stderr, " %u/%u/%u", src->p[pl][o], db.p[pl][o], da.p[pl][o]);
+            }
+            fprintf(stderr, "\n");
+        }
         if (ba > JEF_AGREE_MSE || bs > as * JEF_LOSS_X + JEF_LOSS_MIN) bad = 1;
     }
     jef_free(&da); jef_free(&db);
