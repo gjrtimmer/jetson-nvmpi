@@ -396,7 +396,7 @@ if(BUILD_TESTING)
   target_include_directories(test_api PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${JETSON_MULTIMEDIA_API_INCLUDE_DIR} ${CUDA_INCLUDE_DIR})
   # LIB_NVBUFSURFACE: the odd-size put_frame_fd case fills a surface (#156).
-  target_link_libraries(test_api PRIVATE nvmpi ${LIB_NVBUFSURFACE} Threads::Threads)
+  target_link_libraries(test_api PRIVATE nvmpi ${LIB_NVBUFSURFACE} Threads::Threads m)
   target_compile_definitions(test_api PRIVATE NVMPI_HAVE_AV1=${NVMPI_HAVE_AV1})
   if(NVMPI_MOCK)
     # The JPEG fd cases run (instead of skipping on the missing NVJPG node).
@@ -435,6 +435,15 @@ if(BUILD_TESTING)
         ENVIRONMENT "LD_LIBRARY_PATH=${NVMPI_MOCK_LD};NVMPI_TEST_SHARD=${k}/${NVMPI_DEC_SHARDS}"
         TIMEOUT ${NVMPI_MOCK_TEST_TIMEOUT})
     endforeach()
+    # Decoder output colour tag against the decoder model (mock-only, #163).
+    add_executable(test_api_dec_color_mock test/api/test_api_dec_color_mock.c)
+    target_include_directories(test_api_dec_color_mock PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+      ${JETSON_MULTIMEDIA_API_INCLUDE_DIR} ${CUDA_INCLUDE_DIR})
+    target_link_libraries(test_api_dec_color_mock PRIVATE nvmpi ${LIB_NVBUFSURFACE} Threads::Threads)
+    add_test(NAME api_mock_dec_color COMMAND test_api_dec_color_mock)
+    set_tests_properties(api_mock_dec_color PROPERTIES
+      ENVIRONMENT "LD_LIBRARY_PATH=${NVMPI_MOCK_LD}"
+      TIMEOUT ${NVMPI_MOCK_TEST_TIMEOUT})
     # JPEG DMA-BUF output against the NvJPEGDecoder model (mock-only, #128).
     add_executable(test_api_jpeg_mock test/api/test_api_jpeg_mock.c)
     # nvbufsurface.h: the test maps the pool surface behind each borrowed fd.

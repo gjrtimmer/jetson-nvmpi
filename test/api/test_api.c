@@ -274,6 +274,7 @@ static int test_encoder_hevc_create_close(void)
 #include "dec_fd2_case.h"
 #include "dec_eos_case.h"
 #include "dec_flush_case.h"
+#include "dec_color_case.h"
 #include "caps_case.h"
 #include "query_case.h"
 #ifdef NVMPI_MOCK_JPEG
@@ -320,6 +321,8 @@ int main(void)
     /* Flush after the first resolution event, resume at the same size (#162). */
     fail += RUN_TEST(test_decoder_flush_after_event_h264);
     fail += RUN_TEST(test_decoder_flush_after_event_hevc);
+    /* Output is bit-exact against a software decode for 601/709, limited/full (#163). */
+    fail += RUN_TEST(test_decoder_color_exact);
     /* nvmpi_surface_get_layout (#157). */
     fail += RUN_TEST(test_surface_layout_alloc);
     fail += RUN_TEST(test_surface_layout_invalid);
