@@ -206,6 +206,25 @@ int jpegEncodeStage(nvmpictx_jpegenc *ctx, int fd, uint32_t w, uint32_t h,
 	 *
 	 * Integer overflow protection: width/height validated against
 	 * NVJPEG_ENC_MAX_DIM (16384) by the callers, so the product fits uint64. */
+	/* NvJPEGEncoder::encodeFromFd never sets cinfo.image_width/height: the
+	 * object keeps the size of its first encode, and on Orin a later frame
+	 * of another size came out as a JPEG of the first size (SOF 640x360 for
+	 * 642x358, 648x360 and 656x360 after a 640x360 frame). A size change
+	 * therefore gets a fresh encoder; created before the old one is dropped,
+	 * so a failure leaves a working encoder behind. Freed in close(). */
+	if (ctx->enc_width && (ctx->enc_width != w || ctx->enc_height != h)) {
+		NvJPEGEncoder *fresh = NvJPEGEncoder::createJPEGEncoder("jpegenc");
+
+		if (!fresh) {
+			NVMPI_LOG_SUB(NVMPI_LOG_ERROR, "jpegenc", "NvJPEGEncoder re-creation failed on a size change to %ux%u", w, h);
+			return -1;
+		}
+		delete ctx->jpegenc;
+		ctx->jpegenc = fresh;
+		ctx->enc_width = 0;
+		ctx->enc_height = 0;
+	}
+
 	unsigned long jpeg_alloc = (unsigned long)w * h * 2 + 65536;
 	unsigned char *jpeg_buf = (unsigned char *)malloc(jpeg_alloc);
 	if (!jpeg_buf) {
@@ -242,6 +261,9 @@ int jpegEncodeStage(nvmpictx_jpegenc *ctx, int fd, uint32_t w, uint32_t h,
 		}
 		return -1;
 	}
+
+	ctx->enc_width = w;
+	ctx->enc_height = h;
 
 	/* Stage output for get_packet. */
 	ctx->out_buf = jpeg_buf;

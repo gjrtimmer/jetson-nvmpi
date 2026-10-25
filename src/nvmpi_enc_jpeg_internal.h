@@ -76,6 +76,12 @@ struct nvmpictx_jpegenc
 	unsigned long out_pts{0};
 	bool packet_ready{false};
 
+	/* Picture size of the last encodeFromFd on jpegenc (0 before the first).
+	 * The NVIDIA class never updates cinfo.image_width/height after its first
+	 * encode, so a size change needs a new NvJPEGEncoder (jpegEncodeStage). */
+	uint32_t enc_width{0};
+	uint32_t enc_height{0};
+
 	/* VIC context of the DMA-BUF input path (put_frame_fd), created on first
 	 * use. Allocated by nvmpi_vic_create(); freed in close(). */
 	nvmpi_vic_ctx *vic{nullptr};

@@ -17,6 +17,7 @@ struct mock_jpegenc_last {
     int fd;                 /* fd of the last call, -1 before the first      */
     uint32_t color_format;  /* NvBufSurfaceColorFormat of that surface       */
     uint32_t width, height; /* its plane 0 size (planeParams)                */
+    uint32_t sof_width, sof_height; /* picture size the JPEG would carry     */
 };
 
 #ifdef __cplusplus

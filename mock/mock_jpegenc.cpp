@@ -11,6 +11,12 @@
  * hands the output back: the caller frees it with free(). No pixels are
  * encoded. The fd and surface format/size of the last call are recorded for
  * tests (mock_jpegenc.h, #158).
+ *
+ * Like the real class on Orin, an encoder object keeps the picture size of
+ * its FIRST encodeFromFd (cinfo.image_width/height are never updated by
+ * encodeFromFd): later calls on a surface of another size still write a JPEG
+ * of the first size. The recorded sof_width/sof_height show it; a caller must
+ * use a fresh NvJPEGEncoder after a size change.
  */
 #include "NvJpegEncoder.h"
 #include "mock_jpegenc.h"
@@ -24,7 +30,7 @@
 /* Guards g_last: the getter may be called from another thread than the
  * encoder's. Held for a struct copy only. */
 static std::mutex g_last_lock;
-static mock_jpegenc_last g_last = { 0, -1, 0, 0, 0 };
+static mock_jpegenc_last g_last = { 0, -1, 0, 0, 0, 0, 0 };
 
 extern "C" void nvmpi_mock_jpegenc_last(struct mock_jpegenc_last *out)
 {
@@ -66,6 +72,12 @@ int NvJPEGEncoder::encodeFromFd(int fd, J_COLOR_SPACE /* color_space */,
 		g_last.color_format = (uint32_t)sp.colorFormat;
 		g_last.width = sp.planeParams.width[0];
 		g_last.height = sp.planeParams.height[0];
+		if (!cinfo.image_width || !cinfo.image_height) {
+			cinfo.image_width = g_last.width;
+			cinfo.image_height = g_last.height;
+		}
+		g_last.sof_width = cinfo.image_width;
+		g_last.sof_height = cinfo.image_height;
 	}
 	if (!*out_buf || out_buf_size < sizeof(k_jpeg)) {
 		/* Like libjpeg: grow (or allocate) the caller's malloc'd buffer. */

@@ -52,6 +52,7 @@ static int jpegfd_mixed(int a_, int b_, int c_)
     REQUIRE(ef_ok(c, &d, 0, 640, 360));
     REQUIRE(ef_cpu(c, 128, 96, 3));                  /* realloc (put_frame) */
     REQUIRE(ef_last().width == 128 && ef_last().height == 96);
+    REQUIRE(ef_last().sof_width == 128 && ef_last().sof_height == 96);
     ef_desc(&d, &y128, 128, 96, 4);
     REQUIRE(ef_ok(c, &d, 1, 128, 96));               /* direct             */
     ef_desc(&d, &n128, 128, 96, 5);

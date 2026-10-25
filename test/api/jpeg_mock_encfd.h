@@ -100,6 +100,10 @@ static int ef_ok(nvmpictx *c, const nvmpi_fd_frame *d, int direct,
     if (a.calls != b.calls + 1 || a.color_format != NVBUF_COLOR_FORMAT_YUV420 ||
         a.width != ew || a.height != eh)
         return 0;
+    /* The JPEG must carry the size just encoded (the real encoder object
+     * keeps the size of its first encode, see mock_jpegenc.cpp). */
+    if (a.sof_width != ew || a.sof_height != eh)
+        return 0;
     if (direct ? a.fd != d->fd : a.fd == d->fd)
         return 0;
     return ef_packet(c, (unsigned long)d->timestamp);
