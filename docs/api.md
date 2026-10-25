@@ -261,7 +261,7 @@ internally.
 | `chunk_size` | `unsigned int` | Bytes per compressed-input V4L2 buffer. 0 = default (10,000,000 bytes); accepted range 65536..67108864, out-of-range values log a warning and use the default. One input packet must fit in one chunk. |
 | `max_perf` | `int` | Non-zero: lift the NVDEC clock governor. This field is copied as-is, so 0 means off. |
 | `disable_dpb` | `int` | Non-zero: skip decoded-picture-buffer reordering (low latency, no B-frame reordering). |
-| `wait_timeout` | `int` | Blocking wait timeout in ms. 0 = 500 ms; accepted range 50..5000, out-of-range values log a warning and use 500 ms. |
+| `wait_timeout` | `int` | Blocking wait timeout in ms. 0 or negative = 500 ms; other values are clamped to 50..5000 ms (a clamp logs a warning with the effective value). |
 | `width`, `height` | `unsigned int` | Stream size from container headers; 0 = unknown, rely on V4L2 resolution-change events. |
 
 ### `nvPacket`

@@ -192,11 +192,15 @@ nvmpictx* nvmpi_create_decoder(nvDecParam* param)
 	ctx->max_perf = param->max_perf;
 	ctx->disable_dpb = param->disable_dpb;
 
-	/* 0 = use default (500ms); valid range [50, 5000]; anything else = warn + default. */
-	if (param->wait_timeout >= 50 && param->wait_timeout <= 5000)
-		ctx->wait_timeout_ms = param->wait_timeout;
-	else if (param->wait_timeout != 0)
-		NVMPI_LOG(NVMPI_LOG_WARN, "wait_timeout %d out of range [50, 5000]; using default %d", param->wait_timeout, ctx->wait_timeout_ms);
+	/* 0 = default (500ms); 1..49 -> 50, >5000 -> 5000; negative = default.
+	 * Logged at WARN: INFO is compiled out at the default NVMPI_LOG_LEVEL. */
+	if (param->wait_timeout > 0) {
+		int wt = param->wait_timeout < 50 ? 50 : (param->wait_timeout > 5000 ? 5000 : param->wait_timeout);
+		ctx->wait_timeout_ms = wt;
+		if (wt != param->wait_timeout)
+			NVMPI_LOG(NVMPI_LOG_WARN, "wait_timeout %d ms clamped to %d ms", param->wait_timeout, wt);
+	} else if (param->wait_timeout < 0)
+		NVMPI_LOG(NVMPI_LOG_WARN, "wait_timeout %d ms clamped to %d ms", param->wait_timeout, ctx->wait_timeout_ms);
 
 	//0 keeps the default; out-of-range values (including garbage from
 	//callers built against an older nvDecParam layout) fall back too.
