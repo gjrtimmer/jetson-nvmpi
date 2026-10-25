@@ -3,6 +3,24 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.10.3 - 2026-10-25
+
+### Testing
+
+
+**api**
+
+
+- Build the decoder mock suite without AV1
+
+### CI
+
+
+**ci**
+
+
+- Cover the AV1-off mock build
+
 ## 4.10.2 - 2026-10-25
 
 ### Bug Fixes
