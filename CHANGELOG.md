@@ -3,6 +3,41 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.10.1 - 2026-10-25
+
+### Bug Fixes
+
+
+**decoder**
+
+
+- Keep the stream colorimetry through the VIC copy
+- Copy at scale 1:1 with the Nearest filter
+
+
+### Testing
+
+
+**api**
+
+
+- Decoder colour cases against mock and software decode
+- State the expected hardware result of the colour case
+
+
+**mock**
+
+
+- Model decoder colorimetry and strict colour transform
+
+### Documentation
+
+
+**api**
+
+
+- Decoder frames carry the stream range
+
 ## 4.10.0 - 2026-10-25
 
 ### Features
