@@ -695,6 +695,49 @@ before anything is read or encoded. `payload_size[p] == 0` means "not
 declared": the frame is accepted and the caller guarantees the plane is large
 enough. Set `payload_size[]` for all three planes.
 
+### `nvmpi_jpeg_encoder_put_frame_fd`
+
+```c
+int nvmpi_jpeg_encoder_put_frame_fd(nvmpictx* ctx, const nvmpi_fd_frame* frame);
+```
+
+Encodes one frame given as a DMA-BUF fd, without a CPU copy. `frame == NULL`
+signals EOS (returns `0`). The JPEG is staged like `nvmpi_jpeg_encoder_put_frame`
+and fetched with `nvmpi_jpeg_encoder_get_packet`; its `pts` is
+`frame->timestamp`. The descriptor is the one `nvmpi_decoder_get_frame_fd2`,
+`nvmpi_jpeg_decoder_get_frame_fd` and `nvmpi_surface_get_layout` fill: set
+`width` and `height` to the picture to encode, which may be smaller than the
+surface (padding is cropped, not encoded). Colour range is not converted
+(`flags` is ignored), as in `put_frame`. Requires the NvUtils buffer API.
+
+The descriptor must match the surface behind `fd`, else the call returns
+`NVMPI_ERR_INVAL`, encodes nothing and keeps a staged packet:
+
+| Field | Rule |
+| --- | --- |
+| `struct_size` | At least `NVMPI_FD_FRAME_V1_SIZE`. |
+| `fd` | A registered surface (from the allocator, a decoder or a JPEG pool). A `dup`'d or foreign fd is refused, not copied. |
+| `format`, `num_planes` | `NV_PIX_NV12` (2 planes) or `NV_PIX_YUV420` (3 planes), equal to what the surface reports. |
+| `pitch[]`, `offset[]` | Equal to the surface's own values for every plane. |
+| `width`, `height` | 1..8192 and within plane 0 of the surface. |
+
+A YUV420 surface of exactly `width` x `height` goes to the encoder as it is.
+An NV12, padded or larger surface goes through one VIC transform into the
+encoder's internal YUV420 buffer first (under the global transform mutex, VIC
+context created on first use). Both paths copy nothing on the CPU. The caller
+must have finished writing the surface, and synced it for the device if the
+CPU wrote it, before the call. `put_frame` and `put_frame_fd` can be mixed on
+one context, also across size changes.
+
+Ownership: `fd` is borrowed for this synchronous call. It is never closed,
+`dup`'d or retained, and the caller may reuse or release it on return.
+
+| Return | Meaning |
+| --- | --- |
+| `0` | Encoded and staged (or EOS accepted). |
+| `NVMPI_ERR_INVAL` | Descriptor does not match the surface (table above). |
+| `-1` | NULL `ctx`, call after EOS, encode or VIC failure, or a legacy (non-NvUtils) build. |
+
 ### `nvmpi_jpeg_encoder_get_packet`
 
 `nvmpi.h:246` -- `int nvmpi_jpeg_encoder_get_packet(nvmpictx* ctx, nvPacket* packet);`
@@ -956,6 +999,7 @@ Blocking behaviour at a glance:
 | `*_flush`, `*_close` | `0` | see the per-function notes (close can return `-1`) |
 | `nvmpi_jpeg_decoder_get_frame_fd` | `0` | `-1` no frame / timeout / closed, `NVMPI_ERR_INVAL` |
 | `nvmpi_jpeg_decoder_put_packet` (fd mode) | `0` | `-1` error, `NVMPI_ERR_EAGAIN` pool empty |
+| `nvmpi_jpeg_encoder_put_frame_fd` | `0` | `NVMPI_ERR_INVAL` descriptor does not match the surface, `-1` error / after EOS |
 | `nvmpi_jpeg_encoder_get_packet` | `0` | `-1` none ready, `-2` EOS |
 | `nvmpi_surface_*`, `nvmpi_vic_transform` | `0` | `-1` |
 
