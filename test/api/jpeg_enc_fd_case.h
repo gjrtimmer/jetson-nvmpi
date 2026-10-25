@@ -141,8 +141,14 @@ static int jef_decode(const unsigned char *jpg, unsigned long n, struct jef_img 
         f.linesize[i] = im->st[i];
         f.payload_size[i] = (size_t)im->st[i] * (i ? (h + 1) / 2 : h);
     }
-    ok = nvmpi_jpeg_decoder_put_packet(d, &pk) == 0 &&
-         nvmpi_jpeg_decoder_get_frame(d, &f, true) == 0 && f.width == w && f.height == h;
+    {
+        int pr = nvmpi_jpeg_decoder_put_packet(d, &pk);
+        int gr = pr == 0 ? nvmpi_jpeg_decoder_get_frame(d, &f, true) : -99;
+
+        ok = pr == 0 && gr == 0 && f.width == w && f.height == h;
+        if (!ok)
+            fprintf(stderr, "    decode of %lu bytes (want %ux%u): put %d get %d got %ux%u\n", n, w, h, pr, gr, (unsigned)f.width, (unsigned)f.height);
+    }
     nvmpi_jpeg_decoder_close(d);
     if (!ok) jef_free(im);
     return ok ? 0 : -1;
