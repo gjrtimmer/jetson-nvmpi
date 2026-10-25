@@ -444,6 +444,15 @@ if(BUILD_TESTING)
     set_tests_properties(api_mock_dec_color PROPERTIES
       ENVIRONMENT "LD_LIBRARY_PATH=${NVMPI_MOCK_LD}"
       TIMEOUT ${NVMPI_MOCK_TEST_TIMEOUT})
+    # Decoder wait_timeout clamp (mock-only, #164).
+    add_executable(test_api_dec_waitto_mock test/api/test_api_dec_waitto_mock.c)
+    target_include_directories(test_api_dec_waitto_mock PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+      ${JETSON_MULTIMEDIA_API_INCLUDE_DIR} ${CUDA_INCLUDE_DIR})
+    target_link_libraries(test_api_dec_waitto_mock PRIVATE nvmpi ${LIB_NVBUFSURFACE} Threads::Threads)
+    add_test(NAME api_mock_dec_waitto COMMAND test_api_dec_waitto_mock)
+    set_tests_properties(api_mock_dec_waitto PROPERTIES
+      ENVIRONMENT "LD_LIBRARY_PATH=${NVMPI_MOCK_LD}"
+      TIMEOUT ${NVMPI_MOCK_TEST_TIMEOUT})
     # JPEG DMA-BUF output against the NvJPEGDecoder model (mock-only, #128).
     add_executable(test_api_jpeg_mock test/api/test_api_jpeg_mock.c)
     # nvbufsurface.h: the test maps the pool surface behind each borrowed fd.
