@@ -7,7 +7,7 @@
  * The mock encoder writes no pixels, so the mock build skips; so do modules
  * without NVJPG encode (create returns NULL, e.g. Orin Nano) and stub runs.
  *
- *   nv12:      an NV12 surface (640x360, 656x360: padded pitch) goes through
+ *   nv12:      an NV12 surface (640x360, 642x358: padded pitch) goes through
  *              VIC. The JPEG is decoded again and compared with the JPEG the
  *              CPU path (put_frame) makes of the same pixels.
  *   yuv420:    a create_jpeg_decoder_fmt(YUV420) surface goes in as it is
@@ -260,16 +260,12 @@ out:
     return r;
 }
 
-/* 656x360, not 642x358: on Orin the NVJPG encoder writes the picture with
- * the width rounded down to a multiple of 16 (SOF 640x360 for 642x358 and
- * for 648x360, CPU path too), so other sizes cannot be compared after a
- * decode. 656 still pads the pitch (768 > 656). */
 static int test_jpeg_enc_fd_nv12(void)
 {
     nvmpictx *c = jef_create();
 
     if (!c) return 77;
-    if (jef_nv12_one(c, 640, 360) != 0 || jef_nv12_one(c, 656, 360) != 0) return 1;
+    if (jef_nv12_one(c, 640, 360) != 0 || jef_nv12_one(c, 642, 358) != 0) return 1;
     return nvmpi_jpeg_encoder_close(c) == 0 ? 0 : 1;
 }
 
