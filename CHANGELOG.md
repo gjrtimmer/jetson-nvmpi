@@ -38,6 +38,14 @@ including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
 - Decoder frames carry the stream range
 
+### CI
+
+
+**ci**
+
+
+- Link libm when building test_api against the debs
+
 ## 4.10.0 - 2026-10-25
 
 ### Features
