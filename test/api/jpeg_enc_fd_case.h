@@ -158,12 +158,22 @@ static int jef_judge(const char *tag, const struct jef_img *src, const unsigned 
     for (int pl = 0; pl < 3; pl++) {
         double ba = jef_mse(&db, &da, pl), bs = jef_mse(&db, src, pl), as = jef_mse(&da, src, pl);
 
-        printf("    %s plane %d MSE: fd-vs-cpu %.2f, fd-vs-src %.2f, cpu-vs-src %.2f\n", tag, pl, ba, bs, as);
+        fprintf(stderr, "    %s plane %d MSE: fd-vs-cpu %.2f, fd-vs-src %.2f, cpu-vs-src %.2f\n", tag, pl, ba, bs, as);
         if (ba > JEF_AGREE_MSE || bs > as * JEF_LOSS_X + JEF_LOSS_MIN) bad = 1;
     }
     jef_free(&da); jef_free(&db);
     if (bad) JEF_FAIL("fd result differs from the CPU result (wrong plane address?)");
     return 0;
+}
+
+/* NvBufSurface colorFormat of fd (diagnostic print), -1 when unknown. */
+static int jef_cf(int fd)
+{
+    NvBufSurface *s = NULL;
+
+    if (!NvBufSurfaceFromFd || NvBufSurfaceFromFd(fd, (void **)&s) != 0 || !s)
+        return -1;
+    return (int)s->surfaceList[0].colorFormat;
 }
 
 /* NV12 surface of the picture: Y rows and interleaved CbCr rows by pitch. */
@@ -213,7 +223,7 @@ static int jef_nv12_one(nvmpictx *c, unsigned w, unsigned h)
     memset(&d, 0, sizeof(d));
     d.struct_size = sizeof(d);
     if (jef_fill_nv12(fd, &src) != 0 || nvmpi_surface_get_layout(fd, &d) != 0) goto out;
-    printf("    nv12 %ux%u: surface %ux%u pitch %u\n", w, h, d.width, d.height, d.pitch[0]);
+    fprintf(stderr, "    nv12 %ux%u: surface %ux%u pitch %u cf %d\n", w, h, d.width, d.height, d.pitch[0], jef_cf(fd));
     d.width = w; d.height = h; d.timestamp = 3;
     if (jef_enc_cpu(c, &src, &ja, &na) != 0) goto out;
     if (nvmpi_jpeg_encoder_put_frame_fd(c, &d) != 0 || jef_packet(c, &jb, &nb, w, h) != 0) goto out;
@@ -256,8 +266,8 @@ static int test_jpeg_enc_fd_yuv420(void)
     f.struct_size = sizeof(f);
     if (nvmpi_jpeg_decoder_put_packet(fdd, &pk) != 0 ||
         nvmpi_jpeg_decoder_get_frame_fd(fdd, &f, &rel, &op, true) != 0) JEF_FAIL("fd decode");
-    printf("    yuv420 %ux%u: size %llu pitch %u (direct when the surface is exactly the picture)\n",
-           f.width, f.height, (unsigned long long)f.size, f.pitch[0]);
+    fprintf(stderr, "    yuv420 %ux%u: size %llu pitch %u cf %d (direct when the surface is exactly the picture)\n",
+            f.width, f.height, (unsigned long long)f.size, f.pitch[0], jef_cf(f.fd));
     if (jef_decode(jpeg_mock_64x48_jpg, jpeg_mock_64x48_jpg_len, &src, f.width, f.height) != 0) goto out;
     if (jef_enc_cpu(c, &src, &ja, &na) != 0) goto out;
     if (nvmpi_jpeg_encoder_put_frame_fd(c, &f) != 0 || jef_packet(c, &jb, &nb, f.width, f.height) != 0) goto out;
