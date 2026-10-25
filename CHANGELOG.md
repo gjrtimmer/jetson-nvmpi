@@ -3,6 +3,68 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.9.0 - 2026-10-25
+
+### Bug Fixes
+
+
+**jpeg**
+
+
+- New NvJPEGEncoder when the encoded size changes
+
+
+**vic**
+
+
+- Copy at scale 1:1 with the Nearest filter
+
+
+### Features
+
+
+**jpeg**
+
+
+- Add nvmpi_jpeg_encoder_put_frame_fd
+
+
+### Refactor
+
+
+**jpeg**
+
+
+- Split JPEG encoder buffer side from the API file
+
+
+### Testing
+
+
+**jpeg**
+
+
+- Cover nvmpi_jpeg_encoder_put_frame_fd
+- Print put_frame_fd MSEs and surface format on stderr
+- Print plane samples of the fd and CPU results
+- Print surface readback and chroma edge samples
+- Print chroma band errors
+- Judge the yuv420 fd case against the surface pixels
+- Say why a decode in the fd encoder cases failed
+- Print the SOF size of an undecodable JPEG
+- Use 648x360 for the padded-pitch NV12 fd case
+- Use 656x360 for the padded-pitch NV12 fd case
+- Fix the duplicated block in the 656x360 case change
+- Back to 642x358 for the padded-pitch NV12 fd case
+
+### Documentation
+
+
+**api**
+
+
+- Document nvmpi_jpeg_encoder_put_frame_fd
+
 ## 4.8.0 - 2026-10-25
 
 ### Features
