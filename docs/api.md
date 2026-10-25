@@ -858,7 +858,7 @@ release callback), but returns the per-plane geometry in an `nvmpi_fd_frame`
 | `format` | The decoder output format: `NV_PIX_NV12` / `NV_PIX_P010` have 2 planes, `NV_PIX_YUV420` has 3. |
 | `num_planes`, `pitch[]`, `offset[]`, `size` | From the allocator's plane parameters (`dataSize`, falling back to the end of the last plane). `offset[1]` is the real plane start (page aligned), never `pitch*height`. |
 | `timestamp` | As in the copying path, microseconds. |
-| `flags` | 0: the VIC destination surfaces are limited range. |
+| `flags` | `NVMPI_FD_FRAME_FULL_RANGE` for a full-range stream, 0 for limited. The destination surface carries the stream's colorimetry and range, so the copy is not colour converted. |
 
 Ownership, release callback and the close and resolution-change guarantees are
 those of `nvmpi_decoder_get_frame_fd`. The v1 call is unchanged, and its

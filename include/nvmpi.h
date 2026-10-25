@@ -226,7 +226,8 @@ typedef struct {
 	uint64_t size;             //total size of the buffer behind fd in bytes
 	int64_t timestamp;         //pts copied from nvPacket.pts of the input
 	uint32_t flags;            //bit0 (NVMPI_FD_FRAME_FULL_RANGE): full range;
-	                           //0 = limited (all video decoder frames)
+	                           //0 = limited. Decoder frames carry the stream's
+	                           //range (VUI); JPEG decoder frames are full.
 } nvmpi_fd_frame;
 
 #define NVMPI_FD_FRAME_FULL_RANGE 0x1u
@@ -663,7 +664,8 @@ extern "C" {
 	//  pitch[]/offset[]/size  the real surface layout from the allocator:
 	//              plane i starts at offset[i] (page aligned, NOT pitch*height)
 	//  timestamp   as in the copying path, microseconds
-	//  flags       0: the VIC destination surfaces are limited range
+	//  flags       NVMPI_FD_FRAME_FULL_RANGE for a full-range stream,
+	//              0 for limited; the surface is tagged like the stream
 	//Ownership is the one of nvmpi_decoder_get_frame_fd: the fd is valid until
 	//*release(*opaque) runs, which must happen exactly once, from any thread,
 	//also after nvmpi_decoder_close or a resolution change (the buffer then
