@@ -3,6 +3,33 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.10.0 - 2026-10-25
+
+### Features
+
+
+**api**
+
+
+- Add nvmpi_query_codec
+
+
+### Testing
+
+
+**api**
+
+
+- Codec query mock matrix and cases
+
+### Documentation
+
+
+**api**
+
+
+- Document nvmpi_query_codec
+
 ## 4.9.0 - 2026-10-25
 
 ### Bug Fixes
