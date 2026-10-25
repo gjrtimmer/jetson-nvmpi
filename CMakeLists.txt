@@ -410,6 +410,8 @@ if(BUILD_TESTING)
     # The symbol must be exported from the shared library (dlopen callers, #166).
     add_test(NAME caps_exported
       COMMAND sh -c "nm -D --defined-only \"$1\" | grep -qw nvmpi_get_caps" sh $<TARGET_FILE:nvmpi>)
+    add_test(NAME query_exported
+      COMMAND sh -c "nm -D --defined-only \"$1\" | grep -qw nvmpi_query_codec" sh $<TARGET_FILE:nvmpi>)
     # Decoder data path + fault matrix (needs the mock model; mock-only).
     add_executable(test_api_dec_mock test/api/test_api_dec_mock.c)
     # nvbufsurface.h: the zero-copy cases check the surface behind each borrowed fd (#137).

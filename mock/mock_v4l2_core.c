@@ -241,6 +241,7 @@ static int do_ioctl(struct mock_ctx *ctx, unsigned long req, void *arg)
     case VIDIOC_S_FMT:
     case VIDIOC_G_FMT:
     case VIDIOC_TRY_FMT:        return mock_do_fmt(ctx, req, arg);
+    case VIDIOC_ENUM_FMT:       return mock_do_enum_fmt(ctx, arg);
     case VIDIOC_G_CROP:
     case VIDIOC_S_CROP:
     case VIDIOC_S_SELECTION:

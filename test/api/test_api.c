@@ -275,6 +275,10 @@ static int test_encoder_hevc_create_close(void)
 #include "dec_eos_case.h"
 #include "dec_flush_case.h"
 #include "caps_case.h"
+#include "query_case.h"
+#ifdef NVMPI_MOCK_JPEG
+#include "query_mock_case.h"
+#endif
 #include "surf_layout_case.h"
 #include "jpeg_enc_fd_case.h"
 
@@ -320,6 +324,20 @@ int main(void)
     fail += RUN_TEST(test_surface_layout_alloc);
     fail += RUN_TEST(test_surface_layout_invalid);
     fail += RUN_TEST(test_surface_layout_decoder);
+    /* nvmpi_query_codec (#159). */
+    fail += RUN_TEST(test_query_invalid_args);
+    fail += RUN_TEST(test_query_build_table);
+    fail += RUN_TEST(test_query_hw_vs_create);
+#ifdef NVMPI_MOCK_JPEG
+    fail += RUN_TEST(test_query_mock_default_matrix);
+    fail += RUN_TEST(test_query_mock_hw_matrix);
+    fail += RUN_TEST(test_query_mock_open_fault);
+    fail += RUN_TEST(test_query_mock_jpeg_hw);
+    fail += RUN_TEST(test_query_mock_inconclusive);
+    fail += RUN_TEST(test_query_mock_cache);
+    fail += RUN_TEST(test_query_mock_build_no_device);
+    fail += RUN_TEST(test_query_mock_consistency);
+#endif
     /* JPEG DMA-BUF output: real NVJPG or the mock model, SKIP on stubs. */
     fail += RUN_TEST(test_jpeg_fd_nv12);
     fail += RUN_TEST(test_jpeg_fd_yuv420);

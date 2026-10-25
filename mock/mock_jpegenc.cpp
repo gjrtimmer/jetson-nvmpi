@@ -51,6 +51,11 @@ NvJPEGEncoder::~NvJPEGEncoder()
 
 NvJPEGEncoder *NvJPEGEncoder::createJPEGEncoder(const char *comp_name)
 {
+	/* NVMPI_MOCK_NO_JPEGENC=1: a module without the NVJPG encoder (Orin
+	 * Nano): the factory returns NULL like the real class (#159). */
+	const char *no = getenv("NVMPI_MOCK_NO_JPEGENC");
+	if (no && *no && strcmp(no, "0") != 0)
+		return nullptr;
 	/* Freed by the caller (libnvmpi deletes it in close). */
 	return new (std::nothrow) NvJPEGEncoder(comp_name);
 }

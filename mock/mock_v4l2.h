@@ -161,6 +161,8 @@ int  mock_complete_buf(struct mock_ctx *ctx, int qi, uint32_t index,
 int  mock_do_fmt(struct mock_ctx *ctx, unsigned long req, struct v4l2_format *f);
 int  mock_do_crop(struct mock_ctx *ctx, unsigned long req, void *arg);
 int  mock_do_event(struct mock_ctx *ctx, unsigned long req, void *arg);
+/* VIDIOC_ENUM_FMT: coded formats from NVMPI_MOCK_CODECS (#159). */
+int  mock_do_enum_fmt(struct mock_ctx *ctx, struct v4l2_fmtdesc *d);
 /* Model API: queue an event (e.g. V4L2_EVENT_SOURCE_CHANGE); dropped when
  * not subscribed. mu held. */
 void mock_push_event(struct mock_ctx *ctx, uint32_t type, uint32_t u32);

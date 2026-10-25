@@ -5,11 +5,25 @@
  * NvV4l2Element* sample classes see a cooperative driver. Format
  * negotiation that depends on codec/pixel-format knowledge (clamping sizes,
  * rejecting unsupported fourccs) belongs to the decoder/encoder models.
+ *
+ * VIDIOC_ENUM_FMT (#159) lists the coded formats of a decoder (OUTPUT plane)
+ * or encoder (CAPTURE plane) node. The matrix comes from
+ *   NVMPI_MOCK_CODECS = "dec:h264,hevc,...;enc:h264,hevc"
+ * with names h264 hevc mpeg2 mpeg4 vp8 vp9 av1. A section that is absent
+ * keeps the Orin NX set (dec: all seven, enc: h264,hevc,av1); a present but
+ * empty one ("dec:") lists nothing, so index 0 answers EINVAL. The variable
+ * is re-read on every call. The `enumfmt` fault point (mock_faults.h) makes
+ * a call fail with EIO.
  */
 #define _GNU_SOURCE
 #include "mock_v4l2.h"
 
+#include "mock_faults.h"
+#include "mock_log.h"
+#include "v4l2_nv_extensions.h"   /* V4L2_PIX_FMT_H265 (NVIDIA name) */
+
 #include <errno.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -210,5 +224,107 @@ int mock_do_event(struct mock_ctx *ctx, unsigned long req, void *arg)
         errno = ret;
         return -1;
     }
+    return 0;
+}
+
+/* Codec name -> compressed fourcc. AV1 is NVIDIA's own fourcc (V4L2_PIX_FMT_AV1). */
+static const struct { const char *name; uint32_t fourcc; } k_codecs[] = {
+    { "h264",  V4L2_PIX_FMT_H264 },  { "hevc", V4L2_PIX_FMT_H265 },
+    { "mpeg2", V4L2_PIX_FMT_MPEG2 }, { "mpeg4", V4L2_PIX_FMT_MPEG4 },
+    { "vp8",   V4L2_PIX_FMT_VP8 },   { "vp9",  V4L2_PIX_FMT_VP9 },
+    { "av1",   v4l2_fourcc('A', 'V', '1', '0') },
+};
+#define N_CODECS (sizeof(k_codecs) / sizeof(k_codecs[0]))
+
+/* Orin NX set when NVMPI_MOCK_CODECS does not name the direction. */
+static const char k_default_dec[] = "h264,hevc,mpeg2,mpeg4,vp8,vp9,av1";
+static const char k_default_enc[] = "h264,hevc,av1";
+
+/* Copy the comma list of direction `dir` ("dec"/"enc") from the matrix
+ * `spec` into out (NUL-terminated); the default list when the section is
+ * absent. */
+static void section_list(const char *spec, const char *dir,
+                         const char *dflt, char *out, size_t cap)
+{
+    size_t dl = strlen(dir);
+    const char *p = spec;
+
+    snprintf(out, cap, "%s", dflt);
+    while (p && *p) {
+        const char *end = strchr(p, ';');
+        size_t len = end ? (size_t)(end - p) : strlen(p);
+
+        if (len > dl && strncmp(p, dir, dl) == 0 && p[dl] == ':') {
+            len -= dl + 1;
+            if (len >= cap)
+                len = cap - 1;
+            memcpy(out, p + dl + 1, len);
+            out[len] = '\0';
+            return;
+        }
+        p = end ? end + 1 : NULL;
+    }
+}
+
+/* The idx-th fourcc of the comma list, 0 when past the end. Unknown names
+ * are reported (always shown) and skipped. */
+static uint32_t list_nth(const char *list, uint32_t idx)
+{
+    char buf[128], *tok, *save = NULL;
+    uint32_t n = 0;
+
+    snprintf(buf, sizeof(buf), "%s", list);
+    for (tok = strtok_r(buf, ",", &save); tok; tok = strtok_r(NULL, ",", &save)) {
+        size_t i;
+
+        for (i = 0; i < N_CODECS; i++)
+            if (strcmp(tok, k_codecs[i].name) == 0)
+                break;
+        if (i == N_CODECS) {
+            MOCK_ERR("NVMPI_MOCK_CODECS: unknown codec '%s'", tok);
+            continue;
+        }
+        if (n++ == idx)
+            return k_codecs[i].fourcc;
+    }
+    return 0;
+}
+
+int mock_do_enum_fmt(struct mock_ctx *ctx, struct v4l2_fmtdesc *d)
+{
+    int qi = mock_qidx(d->type);
+    bool dec = ctx->ops == &mock_dec_ops, enc = ctx->ops == &mock_enc_ops;
+    bool coded;
+    uint32_t fourcc;
+
+    if (qi < 0 || (!dec && !enc)) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (mock_fault_hit(MFP_ENUMFMT)) {
+        errno = EIO;
+        return -1;
+    }
+    /* The coded plane is OUTPUT on a decoder, CAPTURE on an encoder. */
+    coded = dec ? qi == MOCK_Q_OUTPUT : qi == MOCK_Q_CAPTURE;
+    if (coded) {
+        const char *spec = getenv("NVMPI_MOCK_CODECS");
+        char list[128];
+
+        section_list(spec ? spec : "", dec ? "dec" : "enc",
+                     dec ? k_default_dec : k_default_enc, list, sizeof(list));
+        fourcc = list_nth(list, d->index);
+    } else {
+        /* Raw plane: one 4:2:0 layout is enough, nobody reads it. */
+        fourcc = d->index == 0 ? V4L2_PIX_FMT_NV12M : 0;
+    }
+    if (!fourcc) {
+        errno = EINVAL;               /* end of the list */
+        return -1;
+    }
+    d->flags = coded ? V4L2_FMT_FLAG_COMPRESSED : 0;
+    d->pixelformat = fourcc;
+    snprintf((char *)d->description, sizeof(d->description), "mock %.4s",
+             (const char *)&fourcc);
     return 0;
 }

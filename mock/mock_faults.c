@@ -38,7 +38,7 @@ static const char *const k_names[MFP_COUNT] = {
     [MFP_DQBUF] = "dqbuf",   [MFP_QBUF] = "qbuf",
     [MFP_REQBUFS] = "reqbufs", [MFP_STREAMON] = "streamon",
     [MFP_EXPBUF] = "expbuf", [MFP_ALLOC] = "alloc",
-    [MFP_OPEN] = "open",
+    [MFP_OPEN] = "open", [MFP_ENUMFMT] = "enumfmt",
 };
 
 /* Parse one "name@N[+]" token (already NUL-terminated, no commas). Returns
