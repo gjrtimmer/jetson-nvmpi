@@ -120,6 +120,59 @@ static int jpegfd_direct(int a_, int b_, int c_)
     return nvmpi_jpeg_encoder_close(c) == 0 ? 0 : 1;
 }
 
+/* Deterministic sample of plane k (0 Y, 1 Cb, 2 Cr) at (x, y): distinct per
+ * plane and position, so an edge or a shift cannot hide. */
+static unsigned char ef_pix(unsigned k, unsigned x, unsigned y)
+{
+    return (unsigned char)(k * 71 + x * 5 + y * 13 + 1);
+}
+
+/* Fill surface e (NV12 or YUV420) with ef_pix over its whole area. */
+static void ef_fill(struct efs *e)
+{
+    NvBufSurfaceParams *p = &e->s->surfaceList[0];
+    int nv12 = p->planeParams.num_planes == 2;
+    unsigned x, y, k;
+
+    REQUIRE(NvBufSurfaceMap(e->s, 0, -1, NVBUF_MAP_READ_WRITE) == 0);
+    for (y = 0; y < p->planeParams.height[0]; y++)
+        for (x = 0; x < p->planeParams.width[0]; x++)
+            ((unsigned char *)p->mappedAddr.addr[0])[y * p->planeParams.pitch[0] + x] = ef_pix(0, x, y);
+    for (k = 1; k < 3; k++)
+        for (y = 0; y < p->planeParams.height[1]; y++)
+            for (x = 0; x < p->planeParams.width[1]; x++) {
+                unsigned char *row = (unsigned char *)p->mappedAddr.addr[nv12 ? 1 : k];
+
+                if (nv12)
+                    row[y * p->planeParams.pitch[1] + 2 * x + (k - 1)] = ef_pix(k, x, y);
+                else
+                    row[y * p->planeParams.pitch[k] + x] = ef_pix(k, x, y);
+            }
+    REQUIRE(NvBufSurfaceSyncForDevice(e->s, 0, -1) == 0);
+    REQUIRE(NvBufSurfaceUnMap(e->s, 0, -1) == 0);
+}
+
+/* True when the surface behind fd (YUV420) holds the ef_pix picture of
+ * w x h, byte for byte: a copy must not resample (Smart filter on Orin
+ * bent the chroma edges; the mock models that for any non-Nearest filter). */
+static int ef_exact(int fd, unsigned w, unsigned h)
+{
+    NvBufSurface *s = NULL;
+    NvBufSurfaceParams *p;
+    unsigned x, y, k, bad = 0;
+
+    if (NvBufSurfaceFromFd(fd, (void **)&s) != 0 || !s ||
+        NvBufSurfaceMap(s, 0, -1, NVBUF_MAP_READ) != 0)
+        return 0;
+    p = &s->surfaceList[0];
+    for (k = 0; k < 3; k++)
+        for (y = 0; y < (k ? (h + 1) / 2 : h); y++)
+            for (x = 0; x < (k ? (w + 1) / 2 : w); x++)
+                bad += ((unsigned char *)p->mappedAddr.addr[k])[y * p->planeParams.pitch[k] + x] != ef_pix(k, x, y);
+    NvBufSurfaceUnMap(s, 0, -1);
+    return bad == 0;
+}
+
 /* a = source format (NV12 or YUV420), b/c = allocated size, encoded size is
  * 640 x 356 when the surface is larger (padded), else the surface. */
 static int jpegfd_vic(int a, int b, int c_)
@@ -132,9 +185,13 @@ static int jpegfd_vic(int a, int b, int c_)
 
     REQUIRE(c);
     ef_new(&e, a, (unsigned)b, (unsigned)c_);
+    ef_fill(&e);
     for (i = 0; i < 3; i++) {            /* repeat: VIC context reused    */
         ef_desc(&d, &e, ew, eh, 10 + i);
         REQUIRE(ef_ok(c, &d, 0, ew, eh));
+        /* The engine's input is the picture itself: the VIC step is a
+         * pure copy/convert, no resampling. */
+        REQUIRE(ef_exact(ef_last().fd, ew, eh));
     }
     ef_del(&e);
     return nvmpi_jpeg_encoder_close(c) == 0 ? 0 : 1;

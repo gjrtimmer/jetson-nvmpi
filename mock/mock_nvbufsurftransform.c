@@ -16,6 +16,15 @@
  * whole surface is used and the rect is ignored. A caller that fills a rect
  * but forgets the flag gets a scaled picture, not a crop (issue #128).
  *
+ * Resampling filter: only Nearest (filter 0) is an exact copy at scale 1:1.
+ * Every other kernel (Bilinear ... Algo3/Smart) is not the identity on
+ * hardware: at 1:1 it bends the chroma planes in the outer columns of the
+ * window (measured on Orin: an NV12 -> I420 640x360 copy with Smart came out
+ * up to 12 levels off in the outer 40 chroma columns). The mock models this
+ * as a blend of the first and last chroma column of the destination window
+ * with its inward neighbour (see mock_edge_bend), so a caller that copies
+ * with a resampling filter fails a byte-exact check (#158).
+ *
  * Not modelled yet (decoder/encoder data models, #99/#100): flips, any other colour conversion (10-bit, 4:4:4, RGB), composite/blend,
  * async sync objects.
  *
@@ -55,6 +64,8 @@ struct mock_xparams {
 #define XFORM_CROP_SRC 1u               /* NVBUFSURF_TRANSFORM_CROP_SRC */
 #define XFORM_CROP_DST 2u               /* NVBUFSURF_TRANSFORM_CROP_DST */
 
+#define XFORM_FILTER_NEAREST 0          /* NvBufSurfTransformInter_Nearest */
+
 /* Serialises the memcpy engine (see file comment). */
 static pthread_mutex_t g_xform_lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -78,6 +89,37 @@ MOCK_EXPORT int NvBufSurfTransformGetSessionParams(void *config)
         return XFORM_BAD;
     memcpy(config, &t_cfg, sizeof(t_cfg));
     return XFORM_OK;
+}
+
+/* Model of a resampling kernel run at scale 1:1: blend the first and last
+ * column of each chroma plane window of dst with the inward neighbour. */
+static void mock_edge_bend(const NvBufSurfaceParams *d, const struct mock_rect *dr)
+{
+    uint32_t pl, y, c, win[4];
+
+    for (pl = 1; pl < d->planeParams.num_planes; pl++) {
+        uint32_t bpp = d->planeParams.bytesPerPix[pl];
+        int tmp;
+        unsigned char *m;
+
+        if (!mock_plane_fits(d, pl) || mock_plane_win(d, pl, dr, win) < 0 ||
+            win[2] < 2)
+            continue;
+        m = mock_plane_acquire(d, pl, &tmp);
+        if (!m)
+            continue;
+        for (y = 0; y < win[3]; y++) {
+            unsigned char *row = m + (uint64_t)(win[1] + y) * d->planeParams.pitch[pl] +
+                                 (uint64_t)win[0] * bpp;
+            unsigned char *last = row + (size_t)(win[2] - 1) * bpp;
+
+            for (c = 0; c < bpp; c++) {
+                row[c] = (unsigned char)((row[c] + row[bpp + c]) / 2);
+                last[c] = (unsigned char)((last[c] + *(last - bpp + c)) / 2);
+            }
+        }
+        mock_plane_release(d, pl, m, tmp);
+    }
 }
 
 MOCK_EXPORT int NvBufSurfTransform(NvBufSurface *src, NvBufSurface *dst,
@@ -107,8 +149,17 @@ MOCK_EXPORT int NvBufSurfTransform(NvBufSurface *src, NvBufSurface *dst,
             pdr = &dr;
         }
         if (mock_copy_rect(&src->surfaceList[i], psr, &dst->surfaceList[i],
-                           pdr) < 0)
+                           pdr) < 0) {
             rc = XFORM_UNSUPP;
+            continue;
+        }
+        /* Resampling kernel at scale 1:1 (see file comment). */
+        if (tp && tp->filter != XFORM_FILTER_NEAREST &&
+            (psr ? psr->w : src->surfaceList[i].width) ==
+                (pdr ? pdr->w : dst->surfaceList[i].width) &&
+            (psr ? psr->h : src->surfaceList[i].height) ==
+                (pdr ? pdr->h : dst->surfaceList[i].height))
+            mock_edge_bend(&dst->surfaceList[i], pdr);
     }
     pthread_mutex_unlock(&g_xform_lock);
     if (rc)

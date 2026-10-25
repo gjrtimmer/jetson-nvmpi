@@ -156,10 +156,14 @@ int nvmpi_vic_transform(nvmpi_vic_ctx *ctx,
     memset(&ctx->transform_params, 0, sizeof(ctx->transform_params));
     ctx->transform_params.transform_flip   = NvBufferTransform_None;
     ctx->transform_params.transform_filter = NvBufferTransform_Filter_Smart;
-    if (getenv("NVMPI_EXP_FILTER")) /* EXPERIMENT */
-        ctx->transform_params.transform_filter = (NvBufSurfTransform_Inter)atoi(getenv("NVMPI_EXP_FILTER"));
 
     if (src_w == dst_w && src_h == dst_h) {
+        /* A copy/crop/convert must not resample: the Smart (Algo3) kernel
+         * is not the identity at scale 1:1 and bends the chroma planes at
+         * the picture edges (MSE ~15, up to 12 levels in the outer 40
+         * columns of an NV12 -> YUV420 640x360 copy on Orin). Nearest is
+         * exact (bit-identical to the source on hardware). */
+        ctx->transform_params.transform_filter = NvBufferTransform_Filter_Nearest;
         ctx->transform_params.transform_flag =
             NVBUFFER_TRANSFORM_FILTER |
             NVBUFSURF_TRANSFORM_CROP_SRC |
