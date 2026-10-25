@@ -79,6 +79,66 @@ NvBufferColorFormat getNvColorFormatFromV4l2Format(v4l2_format &format, bool wan
 }
 
 
+//Colorimetry (BT.601/709/2020) and luma range of an NV12-family colour format
+//(8-bit and, on NvUtils, 10-bit variants); false for anything else.
+static bool cf_decompose(NvBufferColorFormat cf, int *matrix, bool *er)
+{
+	*er = false;
+	switch (cf)
+	{
+		case NvBufferColorFormat_NV12:           *matrix = 601;  return true;
+		case NvBufferColorFormat_NV12_ER:        *matrix = 601;  *er = true; return true;
+		case NvBufferColorFormat_NV12_709:       *matrix = 709;  return true;
+		case NvBufferColorFormat_NV12_709_ER:    *matrix = 709;  *er = true; return true;
+		case NvBufferColorFormat_NV12_2020:      *matrix = 2020; return true;
+#ifdef WITH_NVUTILS
+		case NvBufferColorFormat_NV12_10LE:      *matrix = 601;  return true;
+		case NvBufferColorFormat_NV12_10LE_ER:   *matrix = 601;  *er = true; return true;
+		case NvBufferColorFormat_NV12_10LE_709:  *matrix = 709;  return true;
+		case NvBufferColorFormat_NV12_10LE_709_ER: *matrix = 709; *er = true; return true;
+		case NvBufferColorFormat_NV12_10LE_2020: *matrix = 2020; return true;
+#endif
+		default: return false;
+	}
+}
+
+bool nvmpi_dec_cf_full_range(NvBufferColorFormat cf)
+{
+	int m;
+	bool er;
+	return cf_decompose(cf, &m, &er) && er;
+}
+
+//Pick the destination format of the VIC copy: layout from the requested
+//output (NV12, planar YUV420, P010), colorimetry and range from the CAPTURE
+//surface. A destination that differs in either makes NvBufSurfTransform
+//run a matrix/range conversion instead of a copy (#163). BT.2020 has no
+//extended-range variant. An unknown capture format falls back to BT.601
+//limited, the previous behaviour.
+NvBufferColorFormat nvmpi_dec_dest_format(NvBufferColorFormat capture_cf, nvPixFormat out)
+{
+	int m = 601;
+	bool er = false;
+	if (!cf_decompose(capture_cf, &m, &er))
+	{
+		m = 601;
+		er = false;
+	}
+#ifdef WITH_NVUTILS
+	if (out == NV_PIX_P010)
+		return m == 709 ? (er ? NvBufferColorFormat_NV12_10LE_709_ER : NvBufferColorFormat_NV12_10LE_709)
+		     : m == 2020 ? NvBufferColorFormat_NV12_10LE_2020
+		     : (er ? NvBufferColorFormat_NV12_10LE_ER : NvBufferColorFormat_NV12_10LE);
+#endif
+	if (out == NV_PIX_NV12)
+		return m == 709 ? (er ? NvBufferColorFormat_NV12_709_ER : NvBufferColorFormat_NV12_709)
+		     : m == 2020 ? NvBufferColorFormat_NV12_2020
+		     : (er ? NvBufferColorFormat_NV12_ER : NvBufferColorFormat_NV12);
+	return m == 709 ? (er ? NvBufferColorFormat_YUV420_709_ER : NvBufferColorFormat_YUV420_709)
+	     : m == 2020 ? NvBufferColorFormat_YUV420_2020
+	     : (er ? NvBufferColorFormat_YUV420_ER : NvBufferColorFormat_YUV420);
+}
+
 //(Re)initialize the decoder CAPTURE plane after a resolution-change event:
 //set the negotiated plane format, allocate numberCaptureBuffers block-linear
 //NV12 DMA buffers sized to the coded resolution, REQBUFS them as
@@ -103,6 +163,8 @@ void nvmpi_dec_ctx::initDecoderCapturePlane(v4l2_format &format)
 	//Block-linear layout matches what the hw decoder writes natively; the
 	//buffers are converted to pitch-linear later by the VIC transform.
 	cParams.colorFormat = getNvColorFormatFromV4l2Format(format, out_pixfmt == NV_PIX_P010);
+	//remembered for the destination pool (same colorimetry/range, #163)
+	capture_cf = cParams.colorFormat;
 	cParams.width = coded_width;
 	cParams.height = coded_height;
 	cParams.layout = NvBufferLayout_BlockLinear;

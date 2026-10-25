@@ -158,14 +158,14 @@ void nvmpi_dec_ctx::initFramePool()
 		retireFramePool();
 	}
 
-	//VIC destination format: NV12 or planar YUV420 (8-bit), or NV12_10LE
-	//(P010, 10-bit). The 10-bit branch is NvUtils-only — out_pixfmt can
-	//never be NV_PIX_P010 on legacy builds (rejected at decoder init), but
-	//the constant must still be compiled out there.
-	NvBufferColorFormat cFmt = out_pixfmt==NV_PIX_NV12?NvBufferColorFormat_NV12: NvBufferColorFormat_YUV420;
-#ifdef WITH_NVUTILS
-	if(out_pixfmt==NV_PIX_P010) cFmt = NvBufferColorFormat_NV12_10LE;
-#endif
+	//VIC destination format: the requested layout (NV12, planar YUV420, or
+	//P010 on NvUtils) tagged with the colorimetry and range of the CAPTURE
+	//surfaces. The tag decides whether NvBufSurfTransform copies or
+	//colour-converts: a plain NV12/YUV420 destination (BT.601 limited) made
+	//every BT.709, BT.2020 and full-range stream matrix/range-converted
+	//(#163). P010 is never requested on legacy builds (rejected at decoder
+	//init); nvmpi_dec_dest_format compiles those constants out there.
+	const NvBufferColorFormat cFmt = nvmpi_dec_dest_format(capture_cf, out_pixfmt);
 
 	NvBufferCreateParams input_params;
 	memset(&input_params, 0, sizeof(input_params));
@@ -188,6 +188,7 @@ void nvmpi_dec_ctx::initFramePool()
 	g->pool = framePool;
 	g->w = output_width;
 	g->h = output_height;
+	g->cf = cFmt;
 	//reserve so &slots[i] stays valid: the slots are queued by address
 	g->slots.reserve((size_t)frame_pool_size);
 
@@ -203,13 +204,15 @@ void nvmpi_dec_ctx::initFramePool()
 	cacheGeometry(*g);
 	//fd2 layout: all slots share one allocation recipe, so slot 0 stands
 	//for the generation. Output size is the crop/resize target, not the
-	//padded plane size. flags stay 0: VIC destination surfaces are limited
-	//range (no full-range request is made on the transform).
+	//padded plane size. flags carry FULL_RANGE for an extended-range
+	//stream: the destination keeps the stream's range (#163).
 	if (!g->slots.empty() &&
 	    nvmpi_fd_fill_geometry(out_pixfmt, g->slots[0].fb, &g->fd_geom))
 	{
 		g->fd_geom.width = g->w;
 		g->fd_geom.height = g->h;
+		if (nvmpi_dec_cf_full_range(capture_cf))
+			g->fd_geom.flags |= NVMPI_FD_FRAME_FULL_RANGE;
 		g->fd_geom_ok = true;
 	}
 

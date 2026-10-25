@@ -147,7 +147,9 @@ void respondToResolutionEvent(v4l2_format &format, v4l2_crop &crop,nvmpi_dec_ctx
 #endif
 
 	/* Skip the rebuild only if the CURRENT generation already has the new
-	 * output size (e.g. pre-allocated from container hints that turned out
+	 * output size and the colour format the new CAPTURE surfaces need (a
+	 * pool pre-allocated from container hints assumes BT.601 limited; a
+	 * stream with other colorimetry or range must not reuse it, #163) (e.g. pre-allocated from container hints that turned out
 	 * accurate): saves one alloc/free cycle and first-frame latency. The
 	 * comparison must be against the generation's own size: output_width/
 	 * height were just overwritten above, so comparing them with the same
@@ -155,7 +157,8 @@ void respondToResolutionEvent(v4l2_format &format, v4l2_crop &crop,nvmpi_dec_ctx
 	 * rebuilt the pool (#137). A generation without buffers (allocation
 	 * failed earlier) is rebuilt too. */
 	if (ctx->gen && !ctx->gen->slots.empty() &&
-	    ctx->gen->w == ctx->output_width && ctx->gen->h == ctx->output_height)
+	    ctx->gen->w == ctx->output_width && ctx->gen->h == ctx->output_height &&
+	    ctx->gen->cf == nvmpi_dec_dest_format(ctx->capture_cf, ctx->out_pixfmt))
 	{
 		NVMPI_LOG(NVMPI_LOG_DEBUG, "frame pool already allocated at %ux%u, skipping rebuild",
 		          ctx->output_width, ctx->output_height);

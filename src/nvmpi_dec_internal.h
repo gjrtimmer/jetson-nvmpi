@@ -73,6 +73,9 @@ struct dec_gen {
 	NVMPI_bufPool<dec_slot*> *pool{nullptr};
 	std::vector<dec_slot> slots;        //reserved up front: slot addresses stay stable
 	unsigned int w{0}, h{0};            //output size of this generation
+	//colour format of the destination surfaces (same colorimetry/range as
+	//the CAPTURE surfaces, #163); a change of stream colorimetry rebuilds
+	NvBufferColorFormat cf{};
 	//geometry of the pitch-linear buffers (filled once, before any slot is
 	//queued; read-only afterwards, so lock-free reads are safe)
 	unsigned int num_planes{0};
@@ -152,6 +155,10 @@ struct nvmpi_dec_ctx : nvmpictx
 	NvBufferRect src_rect, dest_rect;
 
 	nvPixFormat out_pixfmt;             //user-requested output layout (NV12/YUV420)
+	//colour format of the CAPTURE surfaces (stream colorimetry/range);
+	//capture thread only, set by initDecoderCapturePlane. Plain NV12 (BT.601
+	//limited) until the first resolution event.
+	NvBufferColorFormat capture_cf{NvBufferColorFormat_NV12};
 	unsigned int decoder_pixfmt{0};     //V4L2 fourcc of the compressed input
 	/* AV1 input gate (nvmpi_dec_av1.cpp, #147). User thread only: put_packet
 	 * and flush are the same caller thread, so plain fields suffice. */
@@ -225,6 +232,13 @@ struct nvmpi_dec_ctx : nvmpictx
 //codingType -> V4L2 compressed fourcc; 0 (after logging) when unsupported
 unsigned int nvmpi_dec_codec_pixfmt(nvCodingType codec);
 NvBufferColorFormat getNvColorFormatFromV4l2Format(v4l2_format &format, bool want_10bit);
+//Destination (VIC output) colour format for CAPTURE format `capture_cf` and
+//output layout `out`: the layout of `out` with the colorimetry and range of
+//`capture_cf`, so the transform only converts block-linear -> pitch-linear
+//(and NV12 -> I420 packing), never the matrix or range (#163)
+NvBufferColorFormat nvmpi_dec_dest_format(NvBufferColorFormat capture_cf, nvPixFormat out);
+//true when the NV12-family CAPTURE format `cf` is an extended (full) luma range variant
+bool nvmpi_dec_cf_full_range(NvBufferColorFormat cf);
 //true: drop this AV1 packet (no sequence header seen yet); see nvmpi_dec_av1.cpp
 bool nvmpi_dec_av1_drop(nvmpi_dec_ctx* ctx, const nvPacket* packet);
 void dec_capture_loop_fcn(void *arg);
