@@ -3,6 +3,25 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.10.2 - 2026-10-25
+
+### Bug Fixes
+
+
+**decoder**
+
+
+- Clamp wait_timeout to 50..5000 ms
+
+
+### Testing
+
+
+**api**
+
+
+- Wait_timeout clamp cases
+
 ## 4.10.1 - 2026-10-25
 
 ### Bug Fixes
