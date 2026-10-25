@@ -14,6 +14,9 @@
  *   - fail: anything larger. A pass on bt601_limited with a fail on the other
  *     clips points at the colour tag; a fail on bt601_limited too points at
  *     the transform filter (see #163).
+ * Both fixes together (destination tagged like the stream, Nearest filter at
+ * scale 1:1) make all 8 combinations (BT.601 / BT.709 x limited / full x NV12
+ * / YUV420) land within 1 level of the software decode.
  * Max difference and PSNR per plane are printed for information.
  * Skipped on stubs (no frame) and on the mock (it only produces gray; the
  * tag is checked by test_api_dec_color_mock.c).
