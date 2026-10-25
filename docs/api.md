@@ -10,6 +10,7 @@ Contents:
 - [Concepts](#concepts)
 - [Constants](#constants)
 - [Library capabilities](#library-capabilities)
+- [Codec query](#codec-query)
 - [Enums](#enums)
 - [Structures](#structures)
 - [Video decoder](#video-decoder)
@@ -108,6 +109,46 @@ The symbol does not exist in releases that predate it. A caller that loads
 libnvmpi at run time should resolve it as optional (`dlsym` returning NULL) and
 treat a missing symbol like `0`: no bit set, old behaviour. Example: send the
 EOS packet only when `nvmpi_get_caps() & NVMPI_CAP_DEC_EOS_DRAIN`.
+
+## Codec query
+
+Ask whether a codec works on this module before opening a session, for callers
+that choose between hardware and software paths.
+
+### `nvmpi_query_codec`
+
+`nvmpi.h` -- `int nvmpi_query_codec(nvCodingType type, int is_encoder, nvPixFormat pix_fmt);`
+
+`type` is the compressed codec (`NV_VIDEO_CodingMJPEG` selects the JPEG
+encoder or decoder), `is_encoder` is `0` for decode and `1` for encode, and
+`pix_fmt` is the raw layout on the other side of the codec.
+
+| Return | Meaning |
+| --- | --- |
+| `NVMPI_CODEC_SUPPORTED` (0) | The build and this module can do it. |
+| `NVMPI_CODEC_UNSUPPORTED_HW` (1) | The build can, this module or driver cannot (no engine, codec not listed, no NVJPG encoder on an Orin Nano). |
+| `NVMPI_CODEC_UNSUPPORTED_BUILD` (2) | This libnvmpi build cannot, on any module. |
+| `NVMPI_ERR_INVAL` | `NV_VIDEO_CodingUnused` or an out-of-range `type`, `is_encoder` not 0/1, `pix_fmt` out of range. |
+| `-1` | The probe was inconclusive: the device node exists but cannot be used right now (open failed with `EACCES`/`EBUSY`, or listing the formats failed). Not cached; create as usual and let it report. |
+
+The build table is checked first and needs no device. It mirrors the create
+calls: encode is H.264, HEVC, AV1 and JPEG only; AV1 decode needs the JetPack 6
+headers and AV1 encode additionally the R36 encode controls; P010 encode is
+HEVC only; P010 decode is HEVC Main10 and needs the NvUtils buffer API; JPEG
+takes NV12 and YUV420, never P010.
+
+Then the hardware probe opens the same device node the create call would use
+and lists its coded formats (`VIDIOC_ENUM_FMT`: the OUTPUT plane for decode,
+the CAPTURE plane for encode); for JPEG it creates and deletes one
+`NvJPEGEncoder`/`NvJPEGDecoder`. A missing node or driver reads as
+`NVMPI_CODEC_UNSUPPORTED_HW`. Each direction (video decode, video encode, JPEG
+decode, JPEG encode) is probed at most once per process and the answer is
+cached, so call this at startup before opening sessions. Thread-safe. The
+create calls and their `NULL` contract are unchanged.
+
+The symbol does not exist in releases that predate it: a caller that loads
+libnvmpi at run time should resolve it as optional and fall back to trying
+create.
 
 ## Enums
 
@@ -1002,6 +1043,7 @@ Blocking behaviour at a glance:
 | `nvmpi_jpeg_encoder_put_frame_fd` | `0` | `NVMPI_ERR_INVAL` descriptor does not match the surface, `-1` error / after EOS |
 | `nvmpi_jpeg_encoder_get_packet` | `0` | `-1` none ready, `-2` EOS |
 | `nvmpi_surface_*`, `nvmpi_vic_transform` | `0` | `-1` |
+| `nvmpi_query_codec` | `NVMPI_CODEC_SUPPORTED` (0) | `1` hardware, `2` build, `NVMPI_ERR_INVAL`, `-1` inconclusive |
 
 ## Minimal usage
 
