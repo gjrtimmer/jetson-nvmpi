@@ -274,6 +274,34 @@ extern "C" {
 	//release) or an unset bit means the old behaviour, treat it as 0.
 	unsigned int nvmpi_get_caps(void);
 
+	//Answers nvmpi_query_codec: can this process, on this module, use the codec?
+	typedef enum {
+		NVMPI_CODEC_SUPPORTED         = 0,
+		NVMPI_CODEC_UNSUPPORTED_HW    = 1, /* this build can, this module/driver cannot */
+		NVMPI_CODEC_UNSUPPORTED_BUILD = 2, /* this libnvmpi build cannot, on any module */
+	} nvmpi_codec_support;
+#ifdef NVMPI_STATIC_ASSERT
+	NVMPI_STATIC_ASSERT(NVMPI_CODEC_SUPPORTED == 0, "NVMPI_CODEC_SUPPORTED ABI");
+	NVMPI_STATIC_ASSERT(NVMPI_CODEC_UNSUPPORTED_HW == 1, "NVMPI_CODEC_UNSUPPORTED_HW ABI");
+	NVMPI_STATIC_ASSERT(NVMPI_CODEC_UNSUPPORTED_BUILD == 2, "NVMPI_CODEC_UNSUPPORTED_BUILD ABI");
+#endif
+
+	//Reports whether a codec / direction / raw pixel layout works, without
+	//creating a session. type is the compressed codec (NV_VIDEO_CodingMJPEG
+	//selects the JPEG encoder or decoder), is_encoder is 0 (decode) or 1
+	//(encode), pix_fmt the raw layout on the other side of the codec.
+	//Returns an nvmpi_codec_support value (0, 1 or 2), NVMPI_ERR_INVAL for
+	//NV_VIDEO_CodingUnused or an out-of-range type, is_encoder or pix_fmt, or
+	//-1 when the hardware probe was inconclusive (device node present but not
+	//usable right now, e.g. EACCES/EBUSY or ENUM_FMT failed): then create as
+	//before and let it report. -1 is not cached; 0/1/2 are.
+	//The build table is checked first and needs no device. The hardware probe
+	//opens the codec device node once per direction (video decode, video
+	//encode, JPEG decode, JPEG encode) and caches the result for the life of
+	//the process, so call this at startup before opening sessions. Thread-safe.
+	//The create calls and their NULL contract are unchanged.
+	int nvmpi_query_codec(nvCodingType type, int is_encoder, nvPixFormat pix_fmt);
+
 	//Create a decoder context: opens the V4L2 decoder device, sets up the
 	//bitstream (OUTPUT) plane and spawns the internal capture thread.
 	//Returns an opaque handle; param is read once and not retained.
