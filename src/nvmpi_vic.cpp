@@ -156,6 +156,8 @@ int nvmpi_vic_transform(nvmpi_vic_ctx *ctx,
     memset(&ctx->transform_params, 0, sizeof(ctx->transform_params));
     ctx->transform_params.transform_flip   = NvBufferTransform_None;
     ctx->transform_params.transform_filter = NvBufferTransform_Filter_Smart;
+    if (getenv("NVMPI_EXP_FILTER")) /* EXPERIMENT */
+        ctx->transform_params.transform_filter = (NvBufSurfTransform_Inter)atoi(getenv("NVMPI_EXP_FILTER"));
 
     if (src_w == dst_w && src_h == dst_h) {
         ctx->transform_params.transform_flag =

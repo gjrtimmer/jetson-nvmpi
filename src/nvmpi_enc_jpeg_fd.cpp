@@ -82,6 +82,8 @@ static bool jpegfdIsDirect(const nvmpi_fd_frame *frame, const nvmpi_fd_frame *la
 {
 	NvBufSurface *surf = NULL;
 
+	if (getenv("NVMPI_EXP_DIRECT") && lay->format == NV_PIX_NV12 && lay->width == frame->width && lay->height == frame->height) /* EXPERIMENT */
+		return true;
 	if (lay->format != NV_PIX_YUV420 || lay->width != frame->width ||
 	    lay->height != frame->height)
 		return false;

@@ -297,6 +297,19 @@ static int test_jpeg_enc_fd_nv12(void)
     nvmpictx *c = jef_create();
 
     if (!c) return 77;
+    if (getenv("NVMPI_EXP_RUN") || 1) { /* EXPERIMENT */
+        const char *f[] = {"0", "1", "2", "3", "4", "5", "6", NULL};
+        for (int i = 0; f[i]; i++) {
+            setenv("NVMPI_EXP_FILTER", f[i], 1);
+            fprintf(stderr, "  EXP filter %s\n", f[i]);
+            jef_nv12_one(c, 640, 360);
+        }
+        unsetenv("NVMPI_EXP_FILTER");
+        setenv("NVMPI_EXP_DIRECT", "1", 1);
+        fprintf(stderr, "  EXP direct\n");
+        jef_nv12_one(c, 640, 360);
+        unsetenv("NVMPI_EXP_DIRECT");
+    }
     if (jef_nv12_one(c, 640, 360) != 0 || jef_nv12_one(c, 642, 358) != 0) return 1;
     return nvmpi_jpeg_encoder_close(c) == 0 ? 0 : 1;
 }
