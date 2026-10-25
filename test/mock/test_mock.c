@@ -290,6 +290,7 @@ int main(void)
     test_nvbufsurface();
     test_transform_nv12_i420();
     test_transform_crop();
+    test_transform_strict_color();
     test_decoder_model();
     test_decoder_reorder();
     test_fault_injection();

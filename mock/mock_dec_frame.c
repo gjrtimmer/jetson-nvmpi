@@ -59,7 +59,11 @@ void mock_dec_announce(struct mock_ctx *ctx, struct dec_model *m, uint32_t w,
     pix->height = h;
     pix->pixelformat = V4L2_PIX_FMT_NV12M;
     pix->field = V4L2_FIELD_NONE;
-    pix->colorspace = V4L2_COLORSPACE_SMPTE170M;
+    pix->colorspace = m->colorspace == 709 ? V4L2_COLORSPACE_REC709 :
+                      m->colorspace == 2020 ? V4L2_COLORSPACE_BT2020 :
+                      V4L2_COLORSPACE_SMPTE170M;
+    pix->quantization = m->full_range ? V4L2_QUANTIZATION_FULL_RANGE :
+                                        V4L2_QUANTIZATION_DEFAULT;
     pix->num_planes = 2;
     pix->plane_fmt[0].sizeimage = w * h;
     pix->plane_fmt[0].bytesperline = w;

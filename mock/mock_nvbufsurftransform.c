@@ -25,6 +25,13 @@
  * with its inward neighbour (see mock_edge_bend), so a caller that copies
  * with a resampling filter fails a byte-exact check (#158).
  *
+ * Strict colour mode: with NVMPI_MOCK_XFORM_STRICT_COLOR=1 a transform whose
+ * source and destination carry different colorimetry/range tags fails with
+ * XFORM_UNSUPP (and logs both formats). The real VIC converts matrix/range
+ * in that case instead of copying, so a decoder that wants bit-exact output
+ * must tag its destination like the CAPTURE surface (#163). Off by default:
+ * the mock itself never does colour maths.
+ *
  * Not modelled yet (decoder/encoder data models, #99/#100): flips, any other colour conversion (10-bit, 4:4:4, RGB), composite/blend,
  * async sync objects.
  *
@@ -126,14 +133,26 @@ MOCK_EXPORT int NvBufSurfTransform(NvBufSurface *src, NvBufSurface *dst,
                                    void *params)
 {
     uint32_t n, i;
-    int rc = XFORM_OK;
+    int rc = XFORM_OK, strict;
 
     const struct mock_xparams *tp = params;
     if (!src || !dst || !src->surfaceList || !dst->surfaceList)
         return XFORM_BAD;
     n = src->numFilled < dst->batchSize ? src->numFilled : dst->batchSize;
+    strict = getenv("NVMPI_MOCK_XFORM_STRICT_COLOR") != NULL &&
+             getenv("NVMPI_MOCK_XFORM_STRICT_COLOR")[0] == '1';
     pthread_mutex_lock(&g_xform_lock);
     for (i = 0; i < n && rc == XFORM_OK; i++) {
+        int sc = mock_color_class((int)src->surfaceList[i].colorFormat);
+        int dc = mock_color_class((int)dst->surfaceList[i].colorFormat);
+
+        if (strict && sc >= 0 && dc >= 0 && sc != dc) {
+            MOCK_ERR("NvBufSurfTransform: colour conversion (src format %d, "
+                     "dst format %d)", (int)src->surfaceList[i].colorFormat,
+                     (int)dst->surfaceList[i].colorFormat);
+            rc = XFORM_UNSUPP;
+            break;
+        }
         /* Rect lists are indexed per batch entry, like the real API. */
         struct mock_rect sr, dr;
         const struct mock_rect *psr = NULL, *pdr = NULL;

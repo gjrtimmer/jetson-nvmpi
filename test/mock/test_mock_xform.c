@@ -204,3 +204,35 @@ void test_transform_crop(void)
     NvBufSurfaceDestroy(src);
     NvBufSurfaceDestroy(dst);
 }
+
+/* Strict colour mode (NVMPI_MOCK_XFORM_STRICT_COLOR=1, #163): a transform
+ * between differently tagged surfaces fails, matching tags (also across the
+ * NV12 <-> I420 packing) pass, and without the variable nothing is checked. */
+void test_transform_strict_color(void)
+{
+    NvBufSurface *src = mk(NVBUF_COLOR_FORMAT_NV12_709, 32, 16);
+    NvBufSurface *d601 = mk(NVBUF_COLOR_FORMAT_NV12, 32, 16);
+    NvBufSurface *d709 = mk(NVBUF_COLOR_FORMAT_NV12_709, 32, 16);
+    NvBufSurface *i709 = mk(NVBUF_COLOR_FORMAT_YUV420_709, 32, 16);
+    NvBufSurface *i601 = mk(NVBUF_COLOR_FORMAT_YUV420, 32, 16);
+    struct xparams tp;
+
+    if (!src || !d601 || !d709 || !i709 || !i601)
+        return;
+    memset(&tp, 0, sizeof(tp));
+    fill_nv12(src);
+
+    CHECK(NvBufSurfTransform(src, d601, &tp) == 0);     /* not strict */
+    setenv("NVMPI_MOCK_XFORM_STRICT_COLOR", "1", 1);
+    CHECK(NvBufSurfTransform(src, d601, &tp) != 0);     /* matrix differs */
+    CHECK(NvBufSurfTransform(src, i601, &tp) != 0);
+    CHECK(NvBufSurfTransform(src, d709, &tp) == 0);
+    CHECK(NvBufSurfTransform(src, i709, &tp) == 0);
+    unsetenv("NVMPI_MOCK_XFORM_STRICT_COLOR");
+
+    NvBufSurfaceDestroy(src);
+    NvBufSurfaceDestroy(d601);
+    NvBufSurfaceDestroy(d709);
+    NvBufSurfaceDestroy(i709);
+    NvBufSurfaceDestroy(i601);
+}

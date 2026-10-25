@@ -59,6 +59,7 @@ static inline int mock_fmt_info(int cf, struct mock_plane_fmt *f)
     case NVBUF_COLOR_FORMAT_YUV420_ER:
     case NVBUF_COLOR_FORMAT_YUV420_709:
     case NVBUF_COLOR_FORMAT_YUV420_709_ER:
+    case NVBUF_COLOR_FORMAT_YUV420_2020:
         *f = (struct mock_plane_fmt){3, {1, 2, 2}, {1, 2, 2}, {1, 1, 1}};
         return 0;
     case NVBUF_COLOR_FORMAT_NV24:
@@ -206,7 +207,40 @@ static inline int mock_is_i420(int cf)
     return cf == NVBUF_COLOR_FORMAT_YUV420 ||
            cf == NVBUF_COLOR_FORMAT_YUV420_ER ||
            cf == NVBUF_COLOR_FORMAT_YUV420_709 ||
-           cf == NVBUF_COLOR_FORMAT_YUV420_709_ER;
+           cf == NVBUF_COLOR_FORMAT_YUV420_709_ER ||
+           cf == NVBUF_COLOR_FORMAT_YUV420_2020;
+}
+
+/* Colorimetry + range class of a 4:2:0 colour format: 0 = BT.601 limited,
+ * 1 = BT.601 full, 2/3 = BT.709 limited/full, 4 = BT.2020, -1 = not a
+ * colour-tagged format (the tag is then irrelevant). The real VIC runs a
+ * matrix/range conversion when src and dst classes differ (#163). */
+static inline int mock_color_class(int cf)
+{
+    switch (cf) {
+    case NVBUF_COLOR_FORMAT_NV12:
+    case NVBUF_COLOR_FORMAT_NV12_10LE:
+    case NVBUF_COLOR_FORMAT_YUV420:
+        return 0;
+    case NVBUF_COLOR_FORMAT_NV12_ER:
+    case NVBUF_COLOR_FORMAT_NV12_10LE_ER:
+    case NVBUF_COLOR_FORMAT_YUV420_ER:
+        return 1;
+    case NVBUF_COLOR_FORMAT_NV12_709:
+    case NVBUF_COLOR_FORMAT_NV12_10LE_709:
+    case NVBUF_COLOR_FORMAT_YUV420_709:
+        return 2;
+    case NVBUF_COLOR_FORMAT_NV12_709_ER:
+    case NVBUF_COLOR_FORMAT_NV12_10LE_709_ER:
+    case NVBUF_COLOR_FORMAT_YUV420_709_ER:
+        return 3;
+    case NVBUF_COLOR_FORMAT_NV12_2020:
+    case NVBUF_COLOR_FORMAT_NV12_10LE_2020:
+    case NVBUF_COLOR_FORMAT_YUV420_2020:
+        return 4;
+    default:
+        return -1;
+    }
 }
 
 /*

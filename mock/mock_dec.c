@@ -37,6 +37,10 @@
  *                        until EOS drains them (the loss of #161
  *                        when the capture thread stops before the LAST
  *                        buffer). Frames come out in input order.
+ *   Colorimetry          NVMPI_MOCK_DEC_COLORSPACE=601|709|2020 (default 601) and
+ *                        NVMPI_MOCK_DEC_FULL_RANGE=0|1 set the CAPTURE format's
+ *                        colorspace/quantization, as the real decoder reports
+ *                        the stream's VUI (#163).
  *   EOS                  Frames already decoded are delivered first; the
  *                        newest undelivered one is flagged V4L2_BUF_FLAG_LAST.
  *                        With a reorder delay the EOS marker stays QUEUED
@@ -116,6 +120,14 @@ static void dec_on_open(struct mock_ctx *ctx)
     (void)mock_env_uint("NVMPI_MOCK_DEC_REORDER", 0, MOCK_DEC_REORDER_MAX,
                         &m->reorder);
     (void)mock_env_uint("NVMPI_MOCK_DEC_REANNOUNCE", 0, 1, &reannounce);
+    {
+        uint32_t cs = 601, fr = 0;
+
+        (void)mock_env_uint("NVMPI_MOCK_DEC_COLORSPACE", 601, 2020, &cs);
+        (void)mock_env_uint("NVMPI_MOCK_DEC_FULL_RANGE", 0, 1, &fr);
+        m->colorspace = cs;
+        m->full_range = fr != 0;
+    }
     m->reannounce = reannounce != 0;
     (void)mock_env_uint("NVMPI_MOCK_DQBUF_WAIT_MS", 0, 60000, &wait);
     ctx->dq_wait_ms = wait;

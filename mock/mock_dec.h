@@ -38,6 +38,11 @@ struct dec_model {
     bool reannounce;               /* OUTPUT flush re-announces the stream  */
     bool env_dims;                 /* NVMPI_MOCK_WIDTH/HEIGHT given         */
     uint32_t env_w, env_h;
+    /* CAPTURE colorimetry the model reports (NVMPI_MOCK_DEC_COLORSPACE =
+     * 601|709|2020, default 601; NVMPI_MOCK_DEC_FULL_RANGE = 0|1): what the
+     * real decoder derives from the stream's VUI (#163). */
+    uint32_t colorspace;
+    bool full_range;
     /* Reorder delay (NVMPI_MOCK_DEC_REORDER = N, 0 = off): the DPB depth of
      * a real decoder. The timestamps of the frames the model holds back are
      * kept in a FIFO; a VCL AU produces a frame (the oldest held one) only
