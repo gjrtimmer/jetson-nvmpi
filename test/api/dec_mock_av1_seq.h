@@ -109,8 +109,12 @@ static int av1s_close(nvmpictx *c)
     c = av1s_create();                                                    \
     REQUIRE(c)
 #else
-/* No AV1 fourcc: create returns NULL by design (dec_mock_av1.h asserts it). */
-#define AV1S_BEGIN(c) return 0
+/* No AV1 fourcc: create returns NULL by design (dec_mock_av1.h asserts it),
+ * so the case skips; c stays declared so the unreachable body still compiles. */
+#define AV1S_BEGIN(c)                                                     \
+    nvmpictx *c = NULL;                                                   \
+    (void)c;                                                              \
+    return 0
 #endif
 
 static int av1s_noseq_first(void)
