@@ -262,6 +262,12 @@ build and test too, so a release is gated on the Jetson test of that commit.
    with `NOTES.md` as body and uploads the tarballs, debs and `CHANGELOG.md`
    as assets. Needs the masked CI/CD variable `GITHUB_RELEASE_TOKEN`
    (contents: write on the GitHub repo). Re-runs replace same-named assets.
+   `GITHUB_REPO` may be `owner/repo` or a URL; it is normalised to `owner/repo`.
+   The optional masked variable `GITLAB_MIRROR_TOKEN` (api scope, Maintainer)
+   lets the job trigger the GitLab push mirror before waiting; unset = the job
+   only waits (up to `MIRROR_WAIT_TIMEOUT`, default 1800 s) for the scheduled
+   mirror run. A failed trigger only warns. Fake-API test:
+   `test/integration/release-github-fake.sh` (run by hand, no hardware).
 
 ## Cutting a release
 
