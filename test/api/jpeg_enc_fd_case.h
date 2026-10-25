@@ -146,6 +146,14 @@ static int jef_decode(const unsigned char *jpg, unsigned long n, struct jef_img 
         int gr = pr == 0 ? nvmpi_jpeg_decoder_get_frame(d, &f, true) : -99;
 
         ok = pr == 0 && gr == 0 && f.width == w && f.height == h;
+        if (!ok) {
+            unsigned long i;
+            for (i = 2; i + 9 < n; i++)
+                if (jpg[i] == 0xff && (jpg[i + 1] == 0xc0 || jpg[i + 1] == 0xc2)) {
+                    fprintf(stderr, "    SOF%x of the JPEG: %ux%u\n", jpg[i + 1] & 15, (jpg[i + 7] << 8) | jpg[i + 8], (jpg[i + 5] << 8) | jpg[i + 6]);
+                    break;
+                }
+        }
         if (!ok)
             fprintf(stderr, "    decode of %lu bytes (want %ux%u): put %d get %d got %ux%u\n", n, w, h, pr, gr, (unsigned)f.width, (unsigned)f.height);
     }
