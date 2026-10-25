@@ -168,7 +168,27 @@ static int jef_judge(const char *tag, const struct jef_img *src, const unsigned 
             }
             fprintf(stderr, "\n");
             if (pl == 1) {
-                fprintf(stderr, "      dbg plane 1 right part (src/fd):");
+                fprintf(stderr, "      dbg plane 1 column-band MSE fd-vs-src (8 bands):");
+                for (unsigned b = 0; b < 8; b++) {
+                    double se = 0; unsigned n = 0;
+                    for (unsigned y = 0; y < ph; y++)
+                        for (unsigned x = b * pw / 8; x < (b + 1) * pw / 8; x++, n++) {
+                            double d = (double)db.p[1][(size_t)y * src->st[1] + x] - src->p[1][(size_t)y * src->st[1] + x];
+                            se += d * d;
+                        }
+                    fprintf(stderr, " %.1f", se / n);
+                }
+                fprintf(stderr, "\n      dbg plane 1 row-band MSE fd-vs-src (8 bands):");
+                for (unsigned b = 0; b < 8; b++) {
+                    double se = 0; unsigned n = 0;
+                    for (unsigned y = b * ph / 8; y < (b + 1) * ph / 8; y++)
+                        for (unsigned x = 0; x < pw; x++, n++) {
+                            double d = (double)db.p[1][(size_t)y * src->st[1] + x] - src->p[1][(size_t)y * src->st[1] + x];
+                            se += d * d;
+                        }
+                    fprintf(stderr, " %.1f", se / n);
+                }
+                fprintf(stderr, "\n      dbg plane 1 right part (src/fd):");
                 for (unsigned x = pw > 90 ? pw - 90 : 0; x < pw; x += 10) {
                     size_t o = (size_t)(ph / 2) * src->st[pl] + x;
                     fprintf(stderr, " %u/%u", src->p[pl][o], db.p[pl][o]);
