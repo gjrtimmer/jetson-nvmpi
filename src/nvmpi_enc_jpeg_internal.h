@@ -86,3 +86,17 @@ struct nvmpictx_jpegenc
 	/* Query plane geometry from the allocated input buffer and cache it. */
 	void updatePlaneParams();
 };
+
+/* Buffer side (nvmpi_enc_jpeg_buf.cpp). */
+
+/* Copy the caller's planes into the input DMA buffer. 0 on success. */
+int jpegCopyFromFrame(nvmpictx_jpegenc *ctx, const nvFrame *frame);
+
+/* Drop (zero + free) an un-consumed staged packet. Safe when none. */
+void jpegDropStaged(nvmpictx_jpegenc *ctx);
+
+/* Encode the surface behind fd (a w x h picture) and stage the JPEG with the
+ * given pts. A previously staged packet must already be dropped. 0 on
+ * success, -1 on failure (nothing staged). */
+int jpegEncodeStage(nvmpictx_jpegenc *ctx, int fd, uint32_t w, uint32_t h,
+                    unsigned long pts);
