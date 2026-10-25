@@ -3,6 +3,32 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.7.1 - 2026-10-25
+
+### Bug Fixes
+
+
+**decoder**
+
+
+- Re-arm the capture plane on flush so a resume needs no event
+
+
+### Testing
+
+
+**api**
+
+
+- Cover flush after the first event with the mock decoder
+- Add hardware case for flush after the first event
+
+
+**mock**
+
+
+- Make decoder re-announce after OUTPUT flush switchable
+
 ## 4.7.0 - 2026-10-24
 
 ### Features
