@@ -167,6 +167,14 @@ static int jef_judge(const char *tag, const struct jef_img *src, const unsigned 
                 fprintf(stderr, " %u/%u/%u", src->p[pl][o], db.p[pl][o], da.p[pl][o]);
             }
             fprintf(stderr, "\n");
+            if (pl == 1) {
+                fprintf(stderr, "      dbg plane 1 right part (src/fd):");
+                for (unsigned x = pw > 90 ? pw - 90 : 0; x < pw; x += 10) {
+                    size_t o = (size_t)(ph / 2) * src->st[pl] + x;
+                    fprintf(stderr, " %u/%u", src->p[pl][o], db.p[pl][o]);
+                }
+                fprintf(stderr, "\n");
+            }
         }
         if (ba > JEF_AGREE_MSE || bs > as * JEF_LOSS_X + JEF_LOSS_MIN) bad = 1;
     }
@@ -183,6 +191,26 @@ static int jef_cf(int fd)
     if (!NvBufSurfaceFromFd || NvBufSurfaceFromFd(fd, (void **)&s) != 0 || !s)
         return -1;
     return (int)s->surfaceList[0].colorFormat;
+}
+
+/* Read the w x h picture of a 3-plane YUV420 surface back into im. */
+static int jef_read_yuv420(int fd, struct jef_img *im, unsigned w, unsigned h)
+{
+    NvBufSurface *s = NULL;
+    NvBufSurfaceParams *sp;
+
+    if (jef_alloc(im, w, h) != 0) return -1;
+    if (!NvBufSurfaceFromFd || NvBufSurfaceFromFd(fd, (void **)&s) != 0 || !s ||
+        NvBufSurfaceMap(s, 0, -1, NVBUF_MAP_READ) != 0) { jef_free(im); return -1; }
+    NvBufSurfaceSyncForCpu(s, 0, -1);
+    sp = &s->surfaceList[0];
+    for (int pl = 0; pl < 3; pl++)
+        for (unsigned y = 0; y < (pl ? (h + 1) / 2 : h); y++)
+            memcpy(im->p[pl] + (size_t)y * im->st[pl],
+                   (unsigned char *)sp->mappedAddr.addr[pl] + (size_t)y * sp->planeParams.pitch[pl],
+                   pl ? (w + 1) / 2 : w);
+    NvBufSurfaceUnMap(s, 0, -1);
+    return 0;
 }
 
 /* NV12 surface of the picture: Y rows and interleaved CbCr rows by pitch. */
@@ -278,6 +306,14 @@ static int test_jpeg_enc_fd_yuv420(void)
     fprintf(stderr, "    yuv420 %ux%u: size %llu pitch %u cf %d (direct when the surface is exactly the picture)\n",
             f.width, f.height, (unsigned long long)f.size, f.pitch[0], jef_cf(f.fd));
     if (jef_decode(jpeg_mock_64x48_jpg, jpeg_mock_64x48_jpg_len, &src, f.width, f.height) != 0) goto out;
+    {
+        struct jef_img sf;
+        if (jef_read_yuv420(f.fd, &sf, f.width, f.height) == 0) {
+            for (int pl = 0; pl < 3; pl++)
+                fprintf(stderr, "    dbg surface-vs-decoded plane %d MSE %.2f\n", pl, jef_mse(&sf, &src, pl));
+            jef_free(&sf);
+        }
+    }
     if (jef_enc_cpu(c, &src, &ja, &na) != 0) goto out;
     if (nvmpi_jpeg_encoder_put_frame_fd(c, &f) != 0 || jef_packet(c, &jb, &nb, f.width, f.height) != 0) goto out;
     r = jef_judge("yuv420", &src, ja, na, jb, nb);
