@@ -77,7 +77,7 @@ MM_API="${JETSON_MULTIMEDIA_API_DIR:-/usr/src/jetson_multimedia_api}"
 # shellcheck disable=SC2046 # pkg-config output must word-split
 gcc -O1 -DNVMPI_REQUIRE_SURF -o "${WORK}/test_api" "${ROOT}/test/api/test_api.c" \
     $(pkg-config --cflags --libs nvmpi) -I"${MM_API}/include" \
-    -L/usr/lib/aarch64-linux-gnu/nvidia -L/usr/lib/aarch64-linux-gnu/tegra -lnvbufsurface -pthread
+    -L/usr/lib/aarch64-linux-gnu/nvidia -L/usr/lib/aarch64-linux-gnu/tegra -lnvbufsurface -pthread -lm
 
 ldd "${WORK}/test_api" | tee "${WORK}/ldd.txt"
 ! grep -F 'not found' "${WORK}/ldd.txt" || { echo "[FAIL] unresolved libs" >&2; exit 1; }
