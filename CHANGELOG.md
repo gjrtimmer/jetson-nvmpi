@@ -7,6 +7,12 @@ including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
 ### Testing
 
+
+**integration**
+
+
+- Add fake-API test for release-github.sh
+
 ### CI
 
 
