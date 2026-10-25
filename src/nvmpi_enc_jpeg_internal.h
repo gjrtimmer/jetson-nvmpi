@@ -76,6 +76,10 @@ struct nvmpictx_jpegenc
 	unsigned long out_pts{0};
 	bool packet_ready{false};
 
+	/* VIC context of the DMA-BUF input path (put_frame_fd), created on first
+	 * use. Allocated by nvmpi_vic_create(); freed in close(). */
+	nvmpi_vic_ctx *vic{nullptr};
+
 	/* Allocate (or reallocate) the input DMA buffer for width×height YUV420.
 	 * Returns true on success. */
 	bool allocInputBuffer(uint32_t w, uint32_t h);

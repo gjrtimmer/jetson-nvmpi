@@ -462,6 +462,31 @@ extern "C" {
 	//accepted, the caller guarantees the plane is large enough.
 	int nvmpi_jpeg_encoder_put_frame(nvmpictx* ctx, nvFrame* frame);
 
+	//Encode one frame given as a DMA-BUF fd, without a CPU copy (#158).
+	//frame==NULL signals EOS (returns 0). The encoded JPEG is staged for
+	//nvmpi_jpeg_encoder_get_packet() like put_frame; the packet pts is
+	//frame->timestamp. The descriptor is the one nvmpi_decoder_get_frame_fd2,
+	//nvmpi_jpeg_decoder_get_frame_fd or nvmpi_surface_get_layout fills.
+	//Accepted: struct_size >= NVMPI_FD_FRAME_V1_SIZE; fd registered in the
+	//NvBufSurface table (a dup'd or foreign fd is refused, not copied);
+	//format NV_PIX_NV12 or NV_PIX_YUV420 with the surface's own num_planes;
+	//pitch[] and offset[] equal to the surface's planes exactly (the first
+	//num_planes entries); width and height in 1..8192 and within plane 0 of
+	//the surface. Range is not converted (flags are ignored, as in put_frame).
+	//A YUV420 surface of exactly width x height is encoded directly; NV12,
+	//padded or larger surfaces go through one VIC transform into the
+	//encoder's internal YUV420 buffer (nvmpi_transform_mutex applies). The
+	//caller must have finished writing the surface (and synced it for the
+	//device) before the call.
+	//Ownership: fd is borrowed for this synchronous call only. It is never
+	//closed, dup'd or retained; the caller may reuse or release it on return.
+	//Can be mixed with put_frame on one context, also across size changes.
+	//Returns 0 on success; NVMPI_ERR_INVAL when the descriptor does not match
+	//the surface (nothing is encoded, a staged packet is kept); -1 for a
+	//NULL ctx, after EOS, on an encode or VIC failure, and on legacy
+	//(non-NvUtils) builds.
+	int nvmpi_jpeg_encoder_put_frame_fd(nvmpictx* ctx, const nvmpi_fd_frame* frame);
+
 	//Retrieve the encoded JPEG packet. Copies JPEG data into
 	//packet->payload (caller must pre-allocate). Returns 0 on success,
 	//-1 when no packet is ready, -2 on EOS with no packet.

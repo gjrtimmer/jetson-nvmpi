@@ -211,7 +211,7 @@ int nvmpi_jpeg_encoder_get_packet(nvmpictx *handle, nvPacket *packet)
  * Teardown order:
  *   1. Set EOS.
  *   2. Free any staged output buffer.
- *   3. Free input DMA buffer.
+ *   3. Free input DMA buffer and the VIC context.
  *   4. Delete NvJPEGEncoder and context.
  *
  * The handle is invalid after this call.
@@ -231,6 +231,10 @@ int nvmpi_jpeg_encoder_close(nvmpictx *handle)
 	/* Free input DMA buffer.
 	 * Allocated by allocInputBuffer(); freed here. */
 	ctx->freeInputBuffer();
+
+	/* Allocated by put_frame_fd() via nvmpi_vic_create(); freed here (NULL-safe). */
+	nvmpi_vic_close(ctx->vic);
+	ctx->vic = nullptr;
 
 	/* Allocated by nvmpi_create_jpeg_encoder() via createJPEGEncoder();
 	 * freed here. Destructor calls jpeg_destroy_compress. */
