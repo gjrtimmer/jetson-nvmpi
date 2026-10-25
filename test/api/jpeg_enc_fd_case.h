@@ -11,7 +11,8 @@
  *              VIC. The JPEG is decoded again and compared with the JPEG the
  *              CPU path (put_frame) makes of the same pixels.
  *   yuv420:    a create_jpeg_decoder_fmt(YUV420) surface goes in as it is
- *              (direct when the decoder's surface is exactly the picture).
+ *              (direct when the decoder's surface is exactly the picture);
+ *              the CPU path encodes the pixels read back from that surface.
  *   dup:       a dup'd fd is refused with NVMPI_ERR_INVAL.
  *
  * Judged by the failure mode, not by an absolute number: a wrong plane
@@ -159,58 +160,11 @@ static int jef_judge(const char *tag, const struct jef_img *src, const unsigned 
         double ba = jef_mse(&db, &da, pl), bs = jef_mse(&db, src, pl), as = jef_mse(&da, src, pl);
 
         fprintf(stderr, "    %s plane %d MSE: fd-vs-cpu %.2f, fd-vs-src %.2f, cpu-vs-src %.2f\n", tag, pl, ba, bs, as);
-        {
-            unsigned pw = pl ? (src->w + 1) / 2 : src->w, ph = pl ? (src->h + 1) / 2 : src->h;
-            fprintf(stderr, "      dbg plane %d row %u samples x=0,w/4,w/2,3w/4,w-1 (src/fd/cpu):", pl, ph / 2);
-            for (unsigned k = 0; k < 5; k++) {
-                size_t o = (size_t)(ph / 2) * src->st[pl] + (k == 4 ? pw - 1 : k * pw / 4);
-                fprintf(stderr, " %u/%u/%u", src->p[pl][o], db.p[pl][o], da.p[pl][o]);
-            }
-            fprintf(stderr, "\n");
-            if (pl == 1) {
-                fprintf(stderr, "      dbg plane 1 column-band MSE fd-vs-src (8 bands):");
-                for (unsigned b = 0; b < 8; b++) {
-                    double se = 0; unsigned n = 0;
-                    for (unsigned y = 0; y < ph; y++)
-                        for (unsigned x = b * pw / 8; x < (b + 1) * pw / 8; x++, n++) {
-                            double d = (double)db.p[1][(size_t)y * src->st[1] + x] - src->p[1][(size_t)y * src->st[1] + x];
-                            se += d * d;
-                        }
-                    fprintf(stderr, " %.1f", se / n);
-                }
-                fprintf(stderr, "\n      dbg plane 1 row-band MSE fd-vs-src (8 bands):");
-                for (unsigned b = 0; b < 8; b++) {
-                    double se = 0; unsigned n = 0;
-                    for (unsigned y = b * ph / 8; y < (b + 1) * ph / 8; y++)
-                        for (unsigned x = 0; x < pw; x++, n++) {
-                            double d = (double)db.p[1][(size_t)y * src->st[1] + x] - src->p[1][(size_t)y * src->st[1] + x];
-                            se += d * d;
-                        }
-                    fprintf(stderr, " %.1f", se / n);
-                }
-                fprintf(stderr, "\n      dbg plane 1 right part (src/fd):");
-                for (unsigned x = pw > 90 ? pw - 90 : 0; x < pw; x += 10) {
-                    size_t o = (size_t)(ph / 2) * src->st[pl] + x;
-                    fprintf(stderr, " %u/%u", src->p[pl][o], db.p[pl][o]);
-                }
-                fprintf(stderr, "\n");
-            }
-        }
         if (ba > JEF_AGREE_MSE || bs > as * JEF_LOSS_X + JEF_LOSS_MIN) bad = 1;
     }
     jef_free(&da); jef_free(&db);
     if (bad) JEF_FAIL("fd result differs from the CPU result (wrong plane address?)");
     return 0;
-}
-
-/* NvBufSurface colorFormat of fd (diagnostic print), -1 when unknown. */
-static int jef_cf(int fd)
-{
-    NvBufSurface *s = NULL;
-
-    if (!NvBufSurfaceFromFd || NvBufSurfaceFromFd(fd, (void **)&s) != 0 || !s)
-        return -1;
-    return (int)s->surfaceList[0].colorFormat;
 }
 
 /* Read the w x h picture of a 3-plane YUV420 surface back into im. */
@@ -280,7 +234,7 @@ static int jef_nv12_one(nvmpictx *c, unsigned w, unsigned h)
     memset(&d, 0, sizeof(d));
     d.struct_size = sizeof(d);
     if (jef_fill_nv12(fd, &src) != 0 || nvmpi_surface_get_layout(fd, &d) != 0) goto out;
-    fprintf(stderr, "    nv12 %ux%u: surface %ux%u pitch %u cf %d\n", w, h, d.width, d.height, d.pitch[0], jef_cf(fd));
+    fprintf(stderr, "    nv12 %ux%u: surface %ux%u pitch %u\n", w, h, d.width, d.height, d.pitch[0]);
     d.width = w; d.height = h; d.timestamp = 3;
     if (jef_enc_cpu(c, &src, &ja, &na) != 0) goto out;
     if (nvmpi_jpeg_encoder_put_frame_fd(c, &d) != 0 || jef_packet(c, &jb, &nb, w, h) != 0) goto out;
@@ -297,25 +251,12 @@ static int test_jpeg_enc_fd_nv12(void)
     nvmpictx *c = jef_create();
 
     if (!c) return 77;
-    if (getenv("NVMPI_EXP_RUN") || 1) { /* EXPERIMENT */
-        const char *f[] = {"0", "1", "2", "3", "4", "5", "6", NULL};
-        for (int i = 0; f[i]; i++) {
-            setenv("NVMPI_EXP_FILTER", f[i], 1);
-            fprintf(stderr, "  EXP filter %s\n", f[i]);
-            jef_nv12_one(c, 640, 360);
-        }
-        unsetenv("NVMPI_EXP_FILTER");
-        setenv("NVMPI_EXP_DIRECT", "1", 1);
-        fprintf(stderr, "  EXP direct\n");
-        jef_nv12_one(c, 640, 360);
-        unsetenv("NVMPI_EXP_DIRECT");
-    }
     if (jef_nv12_one(c, 640, 360) != 0 || jef_nv12_one(c, 642, 358) != 0) return 1;
     return nvmpi_jpeg_encoder_close(c) == 0 ? 0 : 1;
 }
 
-/* A YUV420 pool surface of the fd decoder goes in as it is. The same JPEG
- * decoded by the copy-out decoder is the source of the CPU-path encode. */
+/* A YUV420 pool surface of the fd decoder goes in as it is. The CPU-path encode
+ * takes the pixels read back from the same surface. */
 static int test_jpeg_enc_fd_yuv420(void)
 {
     nvmpictx *c = jef_create(), *fdd = c ? jfd_create(NV_PIX_YUV420, 2) : NULL;
@@ -336,17 +277,12 @@ static int test_jpeg_enc_fd_yuv420(void)
     f.struct_size = sizeof(f);
     if (nvmpi_jpeg_decoder_put_packet(fdd, &pk) != 0 ||
         nvmpi_jpeg_decoder_get_frame_fd(fdd, &f, &rel, &op, true) != 0) JEF_FAIL("fd decode");
-    fprintf(stderr, "    yuv420 %ux%u: size %llu pitch %u cf %d (direct when the surface is exactly the picture)\n",
-            f.width, f.height, (unsigned long long)f.size, f.pitch[0], jef_cf(f.fd));
-    if (jef_decode(jpeg_mock_64x48_jpg, jpeg_mock_64x48_jpg_len, &src, f.width, f.height) != 0) goto out;
-    {
-        struct jef_img sf;
-        if (jef_read_yuv420(f.fd, &sf, f.width, f.height) == 0) {
-            for (int pl = 0; pl < 3; pl++)
-                fprintf(stderr, "    dbg surface-vs-decoded plane %d MSE %.2f\n", pl, jef_mse(&sf, &src, pl));
-            jef_free(&sf);
-        }
-    }
+    fprintf(stderr, "    yuv420 %ux%u: size %llu pitch %u (direct when the surface is exactly the picture)\n",
+           f.width, f.height, (unsigned long long)f.size, f.pitch[0]);
+    /* The source is what the surface holds: the fd decoder's pixels are not
+     * those of the copy-out decoder (MSE ~64 on this picture), and the
+     * hardware reads the surface, not a re-decode of the JPEG. */
+    if (jef_read_yuv420(f.fd, &src, f.width, f.height) != 0) goto out;
     if (jef_enc_cpu(c, &src, &ja, &na) != 0) goto out;
     if (nvmpi_jpeg_encoder_put_frame_fd(c, &f) != 0 || jef_packet(c, &jb, &nb, f.width, f.height) != 0) goto out;
     r = jef_judge("yuv420", &src, ja, na, jb, nb);
