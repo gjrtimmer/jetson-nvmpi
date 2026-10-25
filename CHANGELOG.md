@@ -3,6 +3,39 @@
 libnvmpi was split out of jetson-ffmpeg after v3.10.0. History up to and
 including v3.10.0 is in the jetson-ffmpeg CHANGELOG.
 
+## 4.8.0 - 2026-10-25
+
+### Features
+
+
+**api**
+
+
+- Add nvmpi_surface_get_layout
+
+
+### Testing
+
+
+**api**
+
+
+- Surface layout cases
+
+### Documentation
+
+
+**api**
+
+
+- Document nvmpi_surface_get_layout
+
+
+**general**
+
+
+- Remove internal references from public docs
+
 ## 4.7.1 - 2026-10-25
 
 ### Bug Fixes
