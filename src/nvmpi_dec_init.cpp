@@ -52,7 +52,12 @@ void nvmpi_dec_ctx::updateBufferTransformParams()
 	transform_params.transform_flag = NVBUFFER_TRANSFORM_FILTER;
 	transform_params.transform_flip = NvBufferTransform_None;
 	transform_params.transform_filter = NvBufferTransform_Filter_Smart;
-	//ctx->transform_params.transform_filter = NvBufSurfTransformInter_Nearest;
+	//No resize requested: the copy must not resample. Smart (Algo3) is not
+	//the identity at scale 1:1 (chroma up to 12 levels off near the edges of
+	//an NV12 -> YUV420 copy on Orin); Nearest is bit-exact (#163, see #158).
+	//A real downscale keeps Smart for quality.
+	if (output_width == coded_width && output_height == coded_height)
+		transform_params.transform_filter = NvBufferTransform_Filter_Nearest;
 #ifdef WITH_NVUTILS
 	transform_params.src_rect = &src_rect;
 	transform_params.dst_rect = &dest_rect;

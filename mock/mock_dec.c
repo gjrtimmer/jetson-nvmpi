@@ -41,6 +41,9 @@
  *                        NVMPI_MOCK_DEC_FULL_RANGE=0|1 set the CAPTURE format's
  *                        colorspace/quantization, as the real decoder reports
  *                        the stream's VUI (#163).
+ *   Frame content        gray by default; NVMPI_MOCK_DEC_PATTERN=1 writes
+ *                        alternating 0x40/0xC0 chroma samples instead, so a
+ *                        resampling copy shows (the transform bends edges).
  *   EOS                  Frames already decoded are delivered first; the
  *                        newest undelivered one is flagged V4L2_BUF_FLAG_LAST.
  *                        With a reorder delay the EOS marker stays QUEUED
@@ -127,6 +130,8 @@ static void dec_on_open(struct mock_ctx *ctx)
         (void)mock_env_uint("NVMPI_MOCK_DEC_FULL_RANGE", 0, 1, &fr);
         m->colorspace = cs;
         m->full_range = fr != 0;
+        (void)mock_env_uint("NVMPI_MOCK_DEC_PATTERN", 0, 1, &fr);
+        m->pattern = fr != 0;
     }
     m->reannounce = reannounce != 0;
     (void)mock_env_uint("NVMPI_MOCK_DQBUF_WAIT_MS", 0, 60000, &wait);

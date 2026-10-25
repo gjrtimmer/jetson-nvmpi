@@ -43,6 +43,7 @@ struct dec_model {
      * real decoder derives from the stream's VUI (#163). */
     uint32_t colorspace;
     bool full_range;
+    bool pattern;                  /* NVMPI_MOCK_DEC_PATTERN=1: striped frames */
     /* Reorder delay (NVMPI_MOCK_DEC_REORDER = N, 0 = off): the DPB depth of
      * a real decoder. The timestamps of the frames the model holds back are
      * kept in a FIFO; a VCL AU produces a frame (the oldest held one) only

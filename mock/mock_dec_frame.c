@@ -21,8 +21,12 @@
 #define DEC_MAX_FILL    (1u << 28) /* never touch a surface bigger than this */
 
 /* Fill every byte of a buffer's backing memfd with 0x80: Y = 128 and
- * CbCr = 128 is mid-gray in NV12 whatever the plane layout. -1 on failure. */
-static int fill_gray(int fd)
+ * CbCr = 128 is mid-gray in NV12 whatever the plane layout. With pattern
+ * set, byte i is 0xC0 when bit 1 of i is set, else 0x40: in NV12 chroma
+ * (CbCr pairs) every other chroma sample then flips, so a resampling copy
+ * (see mock_nvbufsurftransform.c, mock_edge_bend) is visible (#163).
+ * -1 on failure. */
+static int fill_gray(int fd, bool pattern)
 {
     struct stat st;
     void *p;
@@ -33,7 +37,15 @@ static int fill_gray(int fd)
     p = mmap(NULL, (size_t)st.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (p == MAP_FAILED)
         return -1;
-    memset(p, 0x80, (size_t)st.st_size);
+    if (pattern) {
+        unsigned char *b = p;
+        size_t i;
+
+        for (i = 0; i < (size_t)st.st_size; i++)
+            b[i] = (i & 2) ? 0xC0 : 0x40;
+    } else {
+        memset(p, 0x80, (size_t)st.st_size);
+    }
     munmap(p, (size_t)st.st_size);
     return 0;
 }
@@ -94,7 +106,7 @@ void mock_dec_produce(struct mock_ctx *ctx, struct dec_model *m, int ci,
     } else {
         used[0] = (uint32_t)(luma * 3 / 2);
     }
-    if (fill_gray(fd) < 0)
+    if (fill_gray(fd, m->pattern) < 0)
         flags |= V4L2_BUF_FLAG_ERROR;  /* USERPTR or a foreign fd: no data */
     cb->ts_ns = ts_ns;                    /* timestamp copy (pts passthrough)  */
     (void)mock_complete_buf(ctx, MOCK_Q_CAPTURE, (uint32_t)ci, used, flags);

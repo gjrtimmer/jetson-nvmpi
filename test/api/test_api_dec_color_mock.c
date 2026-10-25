@@ -107,6 +107,51 @@ static int color_case(void *arg)
     return 0;
 }
 
+/* Copy path at scale 1:1 must be bit-exact (#163, #158): the mock source is
+ * striped (alternating 0x40 / 0xC0 chroma samples per row) and the transform
+ * bends the edge columns of any non-Nearest copy at 1:1. Every chroma sample
+ * of the delivered frame must still equal the source stripe. */
+static int exact_case(void *arg)
+{
+    const nvPixFormat pf = *(const nvPixFormat *)arg;
+    static unsigned char y[COLOR_W * COLOR_H], uv[COLOR_W * COLOR_H / 2];
+    static unsigned char u[COLOR_W * COLOR_H / 4], v[COLOR_W * COLOR_H / 4];
+    uint8_t au[4096];
+    nvmpictx *c;
+    nvFrame f;
+    unsigned r, x;
+
+    setenv("NVMPI_MOCK_DEC_PATTERN", "1", 1);
+    c = create(pf, 0);
+    REQUIRE(c);
+    REQUIRE(put(c, au, fx_idr(au, COLOR_W, COLOR_H), 1) == 0);
+    memset(&f, 0, sizeof(f));
+    f.payload[0] = y;
+    f.linesize[0] = COLOR_W;
+    if (pf == NV_PIX_NV12) {
+        f.payload[1] = uv;
+        f.linesize[1] = COLOR_W;
+    } else {
+        f.payload[1] = u;
+        f.payload[2] = v;
+        f.linesize[1] = f.linesize[2] = COLOR_W / 2;
+    }
+    REQUIRE(nvmpi_decoder_get_frame(c, &f, true) == 0);
+    for (r = 0; r < COLOR_H / 2; r++)
+        for (x = 0; x < COLOR_W / 2; x++) {
+            const unsigned char want = (x & 1) ? 0xC0 : 0x40;
+            const size_t k = (size_t)r * (COLOR_W / 2) + x;
+
+            if (pf == NV_PIX_NV12) {
+                REQUIRE(uv[2 * k] == want && uv[2 * k + 1] == want);
+            } else {
+                REQUIRE(u[k] == want && v[k] == want);
+            }
+        }
+    REQUIRE(nvmpi_decoder_close(c) == 0);
+    return 0;
+}
+
 #define N12(x) NVBUF_COLOR_FORMAT_NV12##x
 #define I420(x) NVBUF_COLOR_FORMAT_YUV420##x
 #define PAIR(x) N12(x), I420(x)
@@ -137,6 +182,16 @@ int main(int argc, char **argv)
             continue;
         fails += case_log_run(k_cases[i].name, NULL, 1, 0, CASE_TIMEOUT_S,
                               color_case, (void *)&k_cases[i]);
+        ran++;
+    }
+    for (i = 0; i < 2; i++) {
+        static const nvPixFormat pfs[2] = { NV_PIX_NV12, NV_PIX_YUV420 };
+        static const char *const names[2] = { "exact_copy_nv12", "exact_copy_yuv420" };
+
+        if (argc > 1 && strstr(names[i], argv[1]) == NULL)
+            continue;
+        fails += case_log_run(names[i], NULL, 1, 0, CASE_TIMEOUT_S,
+                              exact_case, (void *)&pfs[i]);
         ran++;
     }
     printf("\n%d cases, %d failed\n", ran, fails);
