@@ -276,6 +276,7 @@ static int test_encoder_hevc_create_close(void)
 #include "dec_flush_case.h"
 #include "caps_case.h"
 #include "surf_layout_case.h"
+#include "jpeg_enc_fd_case.h"
 
 int main(void)
 {
@@ -324,6 +325,10 @@ int main(void)
     fail += RUN_TEST(test_jpeg_fd_yuv420);
     fail += RUN_TEST(test_jpeg_fd_close_order);
     fail += RUN_TEST(test_jpeg_fd_loop_fd_count);
+    /* JPEG encoder DMA-BUF input (#158): real NVJPG only, SKIP on mock/stubs/Orin Nano. */
+    fail += RUN_TEST(test_jpeg_enc_fd_nv12);
+    fail += RUN_TEST(test_jpeg_enc_fd_yuv420);
+    fail += RUN_TEST(test_jpeg_enc_fd_dup);
 
     printf("\n%d tests: %d passed, %d skipped",
            tests_run, tests_passed, tests_skipped);

@@ -9,14 +9,28 @@
  * links). encodeFromFd checks the fd is a live NvBufSurface and returns a
  * 4-byte stand-in bitstream (SOI, EOI) in a malloc'd buffer, the way libjpeg
  * hands the output back: the caller frees it with free(). No pixels are
- * encoded.
+ * encoded. The fd and surface format/size of the last call are recorded for
+ * tests (mock_jpegenc.h, #158).
  */
 #include "NvJpegEncoder.h"
+#include "mock_jpegenc.h"
 #include "nvbufsurface.h"
 
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <new>
+
+/* Guards g_last: the getter may be called from another thread than the
+ * encoder's. Held for a struct copy only. */
+static std::mutex g_last_lock;
+static mock_jpegenc_last g_last = { 0, -1, 0, 0, 0 };
+
+extern "C" void nvmpi_mock_jpegenc_last(struct mock_jpegenc_last *out)
+{
+	std::lock_guard<std::mutex> g(g_last_lock);
+	*out = g_last;
+}
 
 NvJPEGEncoder::NvJPEGEncoder(const char *comp_name)
 	: NvElement(comp_name, valid_fields)
@@ -44,6 +58,15 @@ int NvJPEGEncoder::encodeFromFd(int fd, J_COLOR_SPACE /* color_space */,
 
 	if (!out_buf || NvBufSurfaceFromFd(fd, (void **)&s) != 0 || !s)
 		return -1;
+	{
+		std::lock_guard<std::mutex> g(g_last_lock);
+		const NvBufSurfaceParams &sp = s->surfaceList[0];
+		g_last.calls++;
+		g_last.fd = fd;
+		g_last.color_format = (uint32_t)sp.colorFormat;
+		g_last.width = sp.planeParams.width[0];
+		g_last.height = sp.planeParams.height[0];
+	}
 	if (!*out_buf || out_buf_size < sizeof(k_jpeg)) {
 		/* Like libjpeg: grow (or allocate) the caller's malloc'd buffer. */
 		unsigned char *n = (unsigned char *)realloc(*out_buf, sizeof(k_jpeg));

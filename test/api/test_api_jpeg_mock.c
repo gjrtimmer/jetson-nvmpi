@@ -16,6 +16,7 @@
  *   fault_*         allocation failures end in a clean error path
  *   legacy_*        the copy-out (non-fd) JPEG decoder still works
  *   enc_*           JPEG encoder put_frame plane size checks (#151)
+ *   encfd_*         JPEG encoder put_frame_fd (#158, jpeg_mock_encfd.h)
  *
  * Each case runs in a forked child under alarm() with its stderr captured
  * (case_log.h): an unexpected [libnvmpi][..][E] line fails the case, a
@@ -247,6 +248,8 @@ static int fd_size_churn(int fmt, int b_, int c_)
 
 #include "jpeg_mock_misc.h"
 #include "jpeg_mock_enc.h"
+#include "jpeg_mock_encfd.h"
+#include "jpeg_mock_encfd_mix.h"
 
 /* ---- table and runner --------------------------------------------------- */
 
@@ -288,6 +291,22 @@ static const struct tcase k_cases[] = {
     { "enc_size_refused", NEVER_FIRES, jpeg_enc_size_refused, 0, 0, 0 },
     { "enc_size_legacy", NEVER_FIRES, jpeg_enc_size_legacy, 0, 0, 0 },
     { "enc_linesize_short", NEVER_FIRES, jpeg_enc_linesize_short, 0, 0, 0 },
+    { "encfd_direct", NULL, jpegfd_direct, 0, 0, 0 },
+    { "encfd_vic_nv12", NULL, jpegfd_vic, NV12, 640, 360 },
+    { "encfd_vic_nv12_padded", NULL, jpegfd_vic, NV12, 642, 362 },
+    { "encfd_vic_yuv420_padded", NULL, jpegfd_vic, I420, 642, 362 },
+    { "encfd_vic_yuv420_larger", NULL, jpegfd_vic, I420, 704, 400 },
+    { "encfd_odd_nv12", NULL, jpegfd_odd, NV12, 0, 0 },
+    { "encfd_odd_yuv420", NULL, jpegfd_odd, I420, 0, 0 },
+    { "encfd_dec_fd2_nv12", NULL, jpegfd_dec_fd2, NV12, 0, 0 },
+    { "encfd_dec_fd2_yuv420", NULL, jpegfd_dec_fd2, I420, 0, 0 },
+    { "encfd_bad_fd_nv12", NEVER_FIRES, jpegfd_bad_fd, NV12, 0, 0 },
+    { "encfd_bad_fd_yuv420", NEVER_FIRES, jpegfd_bad_fd, I420, 0, 0 },
+    { "encfd_bad_desc_nv12", NEVER_FIRES, jpegfd_bad_desc, NV12, 0, 0 },
+    { "encfd_bad_desc_yuv420", NEVER_FIRES, jpegfd_bad_desc, I420, 0, 0 },
+    { "encfd_eos", NULL, jpegfd_eos, I420, 0, 0 },
+    { "encfd_mixed", NULL, jpegfd_mixed, 0, 0, 0 },
+    { "encfd_fd_stable", NULL, jpegfd_fd_stable, 0, 0, 0 },
 };
 
 static int run_body(void *arg)
