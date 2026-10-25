@@ -351,6 +351,7 @@ release:test:api:hw:
 #
 #   test:api:stub:jp6/jp5  plain Release build, JetPack 6 and 5 builder
 #                          images (header sets differ per JetPack)
+#   test:api:stub:noav1    plain build with AV1 compiled out (jp6)
 #   test:api:asan          ASan + UBSan + LSan build (jp6)
 #   test:api:tsan          TSan build (jp6)
 #
@@ -406,11 +407,13 @@ release:test:api:hw:
     NVMPI_TEST_VERBOSE: "1"
     NVMPI_SANITIZER: ""
     BUILD_TYPE: "Release"
+    # Extra cmake flags (word-split on purpose), e.g. the AV1-off variant.
+    NVMPI_CMAKE_EXTRA: ""
   before_script: []
   script:
     - |
       cmake -S . -B build-mock -DNVMPI_MOCK=ON -DBUILD_TESTING=ON \
-        -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" -DNVMPI_SANITIZER="${NVMPI_SANITIZER}"
+        -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" -DNVMPI_SANITIZER="${NVMPI_SANITIZER}" ${NVMPI_CMAKE_EXTRA}
     - cmake --build build-mock -j"$(nproc)"
     - ls -l build-mock/mock
     # libnvmpi probes the codec device nodes before creating a codec.
@@ -457,6 +460,14 @@ test:api:stub:jp5:
   image:
     name: "${BUILDER_IMAGE_JP5}"
     pull_policy: if-not-present
+
+# AV1 compiled out (-DNVMPI_FORCE_NO_AV1=ON, also disables AV1 encode): the
+# jp6/jp5 builder headers both define V4L2_PIX_FMT_AV1, so no other job
+# builds the no-AV1 test paths (#167).
+test:api:stub:noav1:
+  extends: .test-api-mock
+  variables:
+    NVMPI_CMAKE_EXTRA: "-DNVMPI_FORCE_NO_AV1=ON"
 
 test:api:asan:
   extends: .test-api-mock

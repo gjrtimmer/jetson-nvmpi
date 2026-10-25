@@ -24,7 +24,7 @@ Contents:
 
 | Kind | Trigger | Jobs | Publishes |
 | --- | --- | --- | --- |
-| Branch / merge request | push to a branch, MR event | `build:jp6`, `build:jp5`, `test:api:stub:jp6`, `test:api:stub:jp5`, `test:api:asan`, `test:api:tsan`, `test:api:hw` (docs-only MR: `ci:docs-only`); plus `dist:*` and `test:deb:*` when a packaging path changed | nothing |
+| Branch / merge request | push to a branch, MR event | `build:jp6`, `build:jp5`, `test:api:stub:jp6`, `test:api:stub:jp5`, `test:api:stub:noav1`, `test:api:asan`, `test:api:tsan`, `test:api:hw` (docs-only MR: `ci:docs-only`); plus `dist:*` and `test:deb:*` when a packaging path changed | nothing |
 | Main snapshot | push to the default branch | `build:*`, then `dist:jp6`, `dist:jp5`, `test:deb:jp6`, `test:deb:jp5`, `upload:s3:snapshot` (no `test:api:hw`) | tarballs to S3 `snapshots/<short-sha>/` |
 | Scheduled / web | schedule, manual web run | full set including `test:api:hw` | snapshot when run on main |
 | Release | tag `vX.Y.Z` | the above, then `dist:*`, `test:deb:*`, `release:test:deb:hw`, `upload:s3`, `release:gitlab`, `release:github` | S3 `releases/<ver>/`, package registry, GitLab Release, GitHub Release |
@@ -73,6 +73,7 @@ Stages, in order: `build`, `test`, `release-test`, `dist`, `test-deb`, `publish`
 | build | `build:jp5` | Same in the JetPack 5 builder image. Catches V4L2 headers/symbols that exist on JetPack 6 (kernel 5.15+) but not on JetPack 5 (kernel 5.10); covers all JetPack 5 releases. | any runner |
 | test | `test:api:hw` | Run the `test_api` binary built by `build:jp6` on real Jetson hardware. | Jetson runner |
 | test | `test:api:stub:jp6`, `test:api:stub:jp5` | Build the behavioural Jetson mock (`NVMPI_MOCK=ON`) in the JetPack 6 / 5 builder image and run `ctest` (`mock_selftest`, `api_mock`, `api_mock_dec_0..1`, `api_mock_enc_0..2`; `ctest -j`, the decoder suite is split into 2 shards and the encoder suite into 3 with `NVMPI_TEST_SHARD=k/n`). | any runner, no tags |
+| test | `test:api:stub:noav1` | Same suite in a plain build with AV1 compiled out (`-DNVMPI_FORCE_NO_AV1=ON`); the builder headers define the AV1 fourcc, so no other job covers that path. | any runner, no tags |
 | test | `test:api:asan` | Same suite in an ASan + UBSan + LSan build (`NVMPI_SANITIZER=address`). | any runner, no tags |
 | test | `test:api:tsan` | Same suite in a TSan build (`NVMPI_SANITIZER=thread`), run under `setarch -R`. | any runner, no tags |
 | dist | `dist:jp6` | Build the **real** (non-stub) library against NVIDIA's apt-repository libraries and package it. Needs `test:api:hw`. | any arm64 runner |
